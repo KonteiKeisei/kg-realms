@@ -41,7 +41,7 @@ import { JourneyLight } from "./journey-light.mjs";
 import { LocalMaps } from "./local-maps.mjs";
 import { LocalMapRenderer } from "./local-map-renderer.mjs";
 import { SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
-import { areasGeoJSON, outlinedIds } from "./map-layers.mjs";
+import { areasGeoJSON, outlinedIds, placeLayer } from "./map-layers.mjs";
 import { LayersRail, chosenLayer } from "./ui-layers.mjs";
 import { shoreWater } from "./waterways.mjs";
 const snow = new SnowCover();
@@ -790,7 +790,7 @@ registerKinds(cards, {
   presetFor: (p) => localMaps.presetFor(p.id, current?.region.world ?? defaultWorldId()),
   setupLocal: (entry) => localMaps.applyPreset(entry, { create: true, world: current?.region.world ?? defaultWorldId() }),
   // Show a spot on the realm map, when one is drawn.
-  locate: (lon, lat) => { if (!layer.frame || !regionOf(canvas.scene)) return; const c = latLonToScene(layer.frame, lat, lon); canvas.animatePan({ x: c.x, y: c.y, duration: 400 }); },
+  locate: (lon, lat, place) => { if (!layer.frame || !regionOf(canvas.scene)) return; showLayerOf(place); layer.showSpot(lon, lat, 400); },
   encounters: (world) => encountersOf(world),
   saveEncounters: (world, fn) => saveEncounters(world, fn)
 });
@@ -808,8 +808,11 @@ function localItems({ world = null, scene = null } = {}) {
   }
   return out;
 }
+/** The map shows the layer a place is on; encounters and hazards show on them all. */
+const showLayerOf = (place) => { const name = place && !String(place.id ?? "").startsWith("river-hazard:") && place.kind !== "encounter" ? placeLayer(place) : null; if (name) layersRail.setLayer(name); };
 const search = new RealmSearch({
   getLayer: () => layer,
+  showLayer: showLayerOf,
   getData: () => current
     ? { places: [...current.places,...hazardPlaces(current.region.world)], regions: (current.world.regions ?? []).filter((r) => r.level === current.region.level), locals: localItems({ world: current.region.world }) }
     : { places: [], regions: [], locals: localItems({ scene: canvas.scene }) },

@@ -14,8 +14,8 @@ export class RealmSearch {
    * getLayer(): the RealmLayer; getData(): { places, regions, locals } (locals: places on local maps,
    * { name, map, sceneId, noteId, category }); goToLocal(item): open its map, centred on it.
    */
-  constructor({ getLayer, getData, goToLocal, getStreets = () => [], showStreet = null }) {
-    Object.assign(this, { getLayer, getData, goToLocal, getStreets, showStreet });
+  constructor({ getLayer, getData, goToLocal, getStreets = () => [], showStreet = null, showLayer = null }) {
+    Object.assign(this, { getLayer, getData, goToLocal, getStreets, showStreet, showLayer });
     this.el = null;
     this.results = [];
     this.active = 0;
@@ -116,10 +116,9 @@ export class RealmSearch {
       const scale = Math.min(width / Math.abs(b.x - a.x), height / Math.abs(b.y - a.y)) * 0.85;
       return canvas.animatePan({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, scale: Math.max(canvas.dimensions.scale?.min ?? 0.05, scale), duration: 700 });
     }
-    const at = latLonToScene(layer.frame, it.lat, it.lon);
-    // Close enough that towns are named (map zoom 6.5 or more).
-    const want = (512 * 2 ** 6.5) / layer.frame.k;
-    await canvas.animatePan({ x: at.x, y: at.y, scale: Math.max(canvas.stage.scale.x, want), duration: 700 });
+    // On its own layer, and close enough that its marker shows whatever its rank.
+    this.showLayer?.(it);
+    await layer.showSpot(it.lon, it.lat);
     layer.flash({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [it.lon, it.lat] } }] });
   }
 }

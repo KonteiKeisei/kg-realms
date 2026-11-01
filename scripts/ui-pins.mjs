@@ -387,7 +387,7 @@ export class PinEditor {
   #locate(id) {
     const p = this.getPlace(id), layer = this.getLayer();
     if (!p || !layer?.frame || !Number.isFinite(p.lat)) return;
-    canvas.animatePan?.({ ...latLonToScene(layer.frame, p.lat, p.lon), duration: 400 });
+    layer.showSpot(p.lon, p.lat, 400);
   }
 
   /** Shape, Layer and the border (map-layers.mjs): which layer the place is on, a point or an area. */

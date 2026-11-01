@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.83.3: places show at a useful zoom
+
+- **Fixed:** on a made world, places appeared only when zoomed far in, because the zooms were Toril's. They now follow the map's own size: rank 4 places show at about the whole-map view, and every place from half the picture's full size. Faerûn's are unchanged.
+- **Fixed:** searching for a place could land where its marker was still hidden. Search now switches to the place's layer and zooms close enough to show it, whatever its rank. A closer view stays as it is. On Faerûn this lands one zoom level closer than before, because its rank 5 places need it.
+- The crosshairs on the Places list and on place cards do the same.
+
 ## 0.83.2: code review fixes
 
 Fixes from a full code review.

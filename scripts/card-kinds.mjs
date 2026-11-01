@@ -119,7 +119,7 @@ export function registerKinds(cards, deps) {
       if (!game.user.isGM || !scene) return;
       return all ? scene.activate() : scene.view();
     },
-    async locate(ref) { const p = await realm(ref); if (p) deps.locate(p.lon, p.lat); },
+    async locate(ref) { const p = await realm(ref); if (p) deps.locate(p.lon, p.lat, p); },
     async act(ref, act) {
       if (act !== "setup") return;
       const p = await realm(ref), preset = p ? await deps.presetFor(p) : null;

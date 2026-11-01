@@ -20,6 +20,16 @@ export const ROAD_RED='#b52a1f';
 /** Brighter at night, so roads read on the darkened map. */
 export const ROAD_RED_NIGHT='#e0533a';
 
+/**
+ * The map zooms at which lesser places appear: regional (rank 4) and local (everything). A zoom only
+ * means something against its map's size: nativeZoom shows the picture at full size. Toril, with its
+ * detail tiles and nearly 2,000 places, keeps the zooms it was tuned to; a made world shows every place
+ * from half its picture's full size, and its rank 4 places at the whole-map view.
+ */
+export function placeZooms(sheet = SOURCE_MAP) {
+  if ((sheet.detailZoom ?? sheet.nativeZoom) > sheet.nativeZoom) return { regional: 5.5, local: 7.5 };
+  return { regional: sheet.nativeZoom - 2.5, local: sheet.nativeZoom - 1 };
+}
 export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution='',markerScale=1,labelScale=1,look='day',dim=true,mapLights=false}){
  const night=look==='night';
  // Module settings scale markers and names; zoom stops must stay top level, so each stop scales.
@@ -35,6 +45,7 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
  const color=['match',['get','class'],'Sea','#d9e9e8','Lake','#cce0df','River','#cce0df','Forest','#f2ead5','Marsh','#f2ead5','Swamp','#f2ead5','#332d26'];
  // A place marker in the map key's style beside its name; natural features
  // (forests, rivers, regions) are name only, centred.
+ const zooms=placeZooms(sourceMap);
  const dot=['!=',['get','icon'],''];
  const weight=['match',['get','symbol'],'city',1.15,'town',0.95,'village',0.8,0.85];
  const pic=['==',['slice',['get','icon'],0,3],'mk-'];
@@ -112,9 +123,9 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   // Area names: realms spread wide in capitals, the land and water in italic across the area.
   {id:'area-names',type:'symbol',source:'area-labels',filter:['all',onLayer,seen],layout:{'text-field':['get','name'],'text-font':['case',['==',['get','kind'],'realm'],['literal',['Noto Sans Medium']],['literal',['Noto Sans Italic']]],'text-transform':['match',['get','kind'],'realm','uppercase','none'],'text-letter-spacing':['match',['get','kind'],'realm',0.3,'water',0.2,0.08],'text-size':ls(['interpolate',['linear'],['zoom'],2,['case',['<=',['get','rank'],2],16,13],8,['case',['<=',['get','rank'],2],24,17],12,['case',['<=',['get','rank'],2],30,21]]),'text-max-width':10,'symbol-sort-key':['get','rank'],'text-padding':4},paint:{'text-color':['match',['get','kind'],'water','#cfeeff','land','#e6f4cc','#fff0e0'],'text-halo-color':['match',['get','kind'],'water','#0b2433','land','#14240b','#2a0f08'],'text-halo-width':1.8,'text-opacity':['case',['get','hidden'],0.4,1]}},
   {id:'area-line-names',type:'symbol',source:'areas',filter:['all',['==',['geometry-type'],'LineString'],onLayer,seen],layout:{'symbol-placement':'line','text-field':['get','name'],'text-font':['literal',['Noto Sans Italic']],'text-letter-spacing':0.12,'text-size':ls(['interpolate',['linear'],['zoom'],2,12,8,15,12,19])},paint:{'text-color':['match',['get','kind'],'water','#cfeeff','land','#e6f4cc','#fff0e0'],'text-halo-color':['match',['get','kind'],'water','#0b2433','land','#14240b','#2a0f08'],'text-halo-width':1.8}},
-  poi('poi-labels-overview',0,5.5,['all',...visible.slice(1),['any',['<=',['get','rank'],3],['==',['get','class'],'City']]],15),
-  poi('poi-labels-regional',5.5,7.5,['all',...visible.slice(1),['<=',['get','rank'],4]],15),
-  poi('poi-labels-local',7.5,null,visible,['interpolate',['linear'],['zoom'],7.5,14,9,16,12,19],true),
+  poi('poi-labels-overview',0,zooms.regional,['all',...visible.slice(1),['any',['<=',['get','rank'],3],['==',['get','class'],'City']]],15),
+  poi('poi-labels-regional',zooms.regional,zooms.local,['all',...visible.slice(1),['<=',['get','rank'],4]],15),
+  poi('poi-labels-local',zooms.local,null,visible,['interpolate',['linear'],['zoom'],zooms.local,14,zooms.local+1.5,16,zooms.local+4.5,19],true),
   {id:'settlements',type:'circle',source:'places',filter:['all',visible,['==',['get','kind'],'settlement']],paint:{'circle-radius':8,'circle-opacity':0}},
   {id:'sites',type:'circle',source:'places',filter:['all',visible,['!=',['get','kind'],'settlement']],paint:{'circle-radius':7,'circle-opacity':0}},
   {id:'place-glow',type:'circle',source:'places',filter:['all',['get','gold'],['!', ['get','hidden']],onLayer],paint:{'circle-color':'#ffc94a','circle-opacity':.5,'circle-radius':15,'circle-blur':.7}},

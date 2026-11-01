@@ -1,3 +1,4 @@
+import { placeZooms } from "./source-map.mjs";
 import { installMapSymbols } from './map-symbols.mjs';
 import { worldUrl } from "./worlds.mjs";
 import { createMapRoot, createLabelRoot, screenInScene } from "./canvas-util.mjs";
@@ -195,6 +196,14 @@ export class RealmLayer {
       const handle = name?.at ? [{ type: "Feature", properties: { handle: true, name: name.name ?? "", first: false, selected: false }, geometry: { type: "Point", coordinates: name.at } }] : [];
       map.getSource("area-edit-nodes")?.setData({ type: "FeatureCollection", features: [...p.map((at, i) => ({ type: "Feature", properties: { handle: false, name: "", first: i === 0, selected: i === sel }, geometry: { type: "Point", coordinates: at } })), ...handle] });
     });
+  }
+
+  /** The canvas scale that draws the map at a map zoom: the other way round from update(). */
+  scaleForZoom(zoom) { return (2 ** zoom * TILE_SIZE * 2) / this.frame.k; }
+  /** Centres a spot, close enough that a place there shows whatever its rank; closer views stay as they are. */
+  showSpot(lon, lat, duration = 700) {
+    const at = latLonToScene(this.frame, lat, lon), want = this.scaleForZoom(placeZooms().local + 0.01);
+    return canvas.animatePan({ x: at.x, y: at.y, scale: Math.max(canvas.stage.scale.x, want), duration });
   }
 
   /** The layer the map shows (map-layers.mjs): "places", "realms" or "geo". This viewer's own. */
