@@ -2,6 +2,7 @@ import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
 import { registerHomebrew } from "./homebrew/homebrew.mjs";
 import { setExportData } from "./homebrew/export.mjs";
+import { installBiomeClimates, setSceneClimate, followClimate } from "./biome-weather.mjs";
 // The worlds first (worlds.mjs), before anything that loads one: the GM's homebrew worlds saved in
 // this game world (homebrew/), then each world module's on the kgRealmsRegisterWorlds hook (KG Realms:
 // Faerûn registers Toril). A module registering the same id replaces the homebrew copy.
@@ -162,6 +163,22 @@ cityTravel.partyManager=partyManager;
 const partyPortraits=new PartyPortraits(),partyInterface=new PartyInterface(partyManager);
 Hooks.once('init',()=>{partyPortraits.install();partyInterface.install();});
 Hooks.once("init", () => {localMaps.install();cityTravel.install();});
+// Biome climates (biome-climate.mjs): added to each calendar, and the settlement takes its place's.
+Hooks.once("init", () => game.settings.register(MODULE_ID, "biomeClimatesAdded", { scope: "world", config: false, type: Object, default: {} }));
+Hooks.on("calendaria.calendarSwitched", () => installBiomeClimates().catch((err) => console.warn("kg-realms | biome climates:", err)));
+Hooks.once("calendaria.ready", () => installBiomeClimates().catch((err) => console.warn("kg-realms | biome climates:", err)));
+Hooks.on("updateScene", followClimate);
+Hooks.on("canvasReady", async (cv) => {
+  const scene = cv.scene, map = scene?.getFlag(MODULE_ID, "localMap");
+  if (!map?.placeId || !map.world || game.user !== game.users.activeGM) return;
+  try {
+    const place = (await realmPlaces(map.world)).find((p) => p.id === map.placeId);
+    if (!place || !Number.isFinite(place.lat)) return;
+    await loadShippedBiomes(map.world);
+    const query = biomeLookup(biomesOf(map.world), (await import("./travel.mjs")).terrainLookup(await terrainFor(map.world, await loadWorld(map.world))), lonLatToSource);
+    await setSceneClimate(scene, query(...lonLatToSource(place.lon, place.lat)));
+  } catch (err) { console.warn("kg-realms | settlement weather:", err); }
+});
 Hooks.once("ready", async () => {
   await enableLocalMapFx().catch(error => console.warn('kg-realms | Could not enable FXMaster world effects:', error));
   await installEncounterDefaults();
@@ -492,7 +509,9 @@ async function focusParty(id,scene=canvas.scene){
  if(!isPrimaryGM()||!sceneParties(scene).some(t=>t.actor.id===id))return;
  await syncJourney(scene,{force:true});await scene.setFlag(MODULE_ID,'partyFocus',id);
 }
+const onBiome = (scene, biome) => setSceneClimate(scene, biome).catch((err) => console.warn("kg-realms | biome weather:", err));
 const hud = new TravelHud({
+  onBiome,
   getScene:()=>focusedScene(current?.scene??canvas.scene),
   onPartyFocus:id=>focusParty(id),
   getBiomes:()=>current?biomesOf(current.region.world):{},getWorld:()=>current?.region.world,discoverHazard:id=>current&&discoverHazard(current.region.world,id),
@@ -548,7 +567,7 @@ async function syncJourney(scene, { force = false } = {}) {
         let rect = d.sceneRect ?? { x: d.sceneX, y: d.sceneY, width: d.sceneWidth, height: d.sceneHeight };
         if (world.sourceMap) { const ratio = aspect(bounds), width = Math.min(rect.width, rect.height / ratio), height = width * ratio; rect = { x: rect.x + (rect.width - width) / 2, y: rect.y + (rect.height - height) / 2, width, height }; }
         const frame = makeFrame(bounds, rect);
-        entry.hud = new TravelHud({ headless: true, getScene: () => scene, getLayer: () => ({ frame }),
+        entry.hud = new TravelHud({ headless: true, onBiome, getScene: () => scene, getLayer: () => ({ frame }),
           getBiomes:()=>biomesOf(region.world),getWorld:()=>region.world,discoverHazard:id=>discoverHazard(region.world,id),
           onCampWorkEnded: (scene) => campWorkEnded(scene),
           canSync: () => !(hud.scene===scene&&hud.el),

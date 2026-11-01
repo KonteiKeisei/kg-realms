@@ -444,6 +444,9 @@ export class TravelHud {
     if(!this.progress()&&!this.#partyStop())return;
     const valid=()=>this.scene===scene&&this.lifecycleEpoch===epoch&&this.leader&&this.canSync?.()!==false;
     this.biomeSync=(this.biomeSync??Promise.resolve()).catch(()=>{}).then(()=>valid()?syncPartyBiome(this.members(),this.currentBiome(),valid):undefined);
+    // Its weather follows (biome-weather.mjs): null at sea.
+    const p=this.progress(),stop=!p?this.#partyStop():null,here=p?this.#at(p.hour):stop?lonLatToSource(stop.lon,stop.lat):null;
+    if(here)this.onBiome?.(scene,this.biomeQuery(...here));
     return this.biomeSync.catch(e=>console.warn("kg-realms | biome flags:",e));
   }
 

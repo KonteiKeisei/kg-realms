@@ -4,7 +4,9 @@ const aliases = {
   plains: ["plain", "plains", "grassland", "grasslands"], forest: ["forest", "forests", "woodland", "woodlands"],
   mountains: ["mountain", "mountains"], hills: ["hill", "hills"], desert: ["desert", "deserts"],
   wetlands: ["wetland", "wetlands", "swamp", "swamps", "marsh", "marshes", "bog", "bogs", "mire", "mires"],
-  tundra: ["tundra", "arctic"], glacier: ["glacier", "glaciers", "arctic"], taiga: ["taiga", "boreal forest"]
+  tundra: ["tundra", "arctic"], glacier: ["glacier", "glaciers", "arctic"], taiga: ["taiga", "boreal forest"],
+  arctic: ["arctic", "polar"], jungle: ["jungle", "jungles", "rainforest", "tropical forest"], swamp: ["swamp", "swamps", "bog", "bogs", "mire", "mires"],
+  savanna: ["savanna", "savannah", "grassland", "grasslands"], steppe: ["steppe", "steppes", "grassland", "grasslands"], badlands: ["badlands"], coast: ["coast", "coasts", "coastal", "shore"], volcanic: ["volcanic", "volcano", "volcanoes"]
 };
 const list = value => Array.isArray(value) ? value : value?.contents ?? [...(value?.values?.() ?? [])];
 const feature = /\b(?:favou?red terrains?|natural explorer)\b/i;

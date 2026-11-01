@@ -1,5 +1,15 @@
 # KG Realms changelog
 
+## 0.83.0: biomes set the weather
+
+- **The party's biome sets its weather.** When a party token enters an arctic biome, the realm scene switches to arctic weather in Calendaria, and Calendaria rolls from what that climate allows: blizzards there, sandstorms in a desert, monsoons in a jungle, and never the wrong one. At sea it uses the Open Sea climate. A settlement takes the climate of its place on the realm map.
+- **A climate for every biome, in every world.** Each biome preset has its own Calendaria climate zone, named "Biome: Arctic" and so on: the weather it can have and how often in each season, temperatures for each season, and wind. They are added to the active calendar, in one save, and to each calendar you switch to. Edit them under Calendaria's Zone Climate. One you edit stays edited, and one you delete stays deleted.
+- **More biome presets:** Arctic, Jungle, Swamp, Savanna, Steppe, Badlands, Coast and Volcanic join Plains, Forest, Desert, Tundra, Taiga, Hills, Wetlands, Mountains and Glacier, each with its own speeds, DCs and colour, editable as before.
+- **Weather** in the Biomes tab chooses which Calendaria climate a biome type uses, or one zone of it. Custom biome types start on Plains'.
+- **The GM's own choice stands.** A scene set to "No Zone" in Calendaria, or to a zone KG Realms did not set, is left alone. With Calendaria's auto weather off, the zone still follows the party but nothing is rolled.
+- A ranger's favored terrain knows the new biomes: Arctic, Swamp, Coast, and Grassland for Savanna and Steppe.
+- Area suggestions use them too: a Jungle suggests Jungle, a Swamp suggests Swamp, a Coast suggests Coast.
+
 ## 0.82.0: geography as biomes, and where the party is
 
 - **A geography area can be a biome.** A land area with a closed border (map editor, Places tab) gets a Biome row: choose the type, already suggested from its class (a Forest is forest, a Swamp is wetlands), and press Make biome zone. The zone takes the area's name and follows its border as you reshape it, and goes if the border is opened or removed. Set its speeds and DCs in the Biomes tab.

@@ -5,11 +5,11 @@ import { TERRAIN } from "../scripts/travel.mjs";
 import { readFileSync } from "node:fs";
 
 test("a land area's class gives its biome type; one that says nothing about the going gives none", () => {
-  for (const [c, want] of [["Forest", "forest"], ["Jungle", "forest"], ["Mountains", "mountains"], ["Hills", "hills"], ["Desert", "desert"], ["Swamp", "wetlands"], ["Marsh", "wetlands"], ["Glacier", "glacier"], ["Tundra", "tundra"], ["Plain", "plains"], ["Steppe", "plains"]]) {
+  for (const [c, want] of [["Forest", "forest"], ["Jungle", "jungle"], ["Mountains", "mountains"], ["Hills", "hills"], ["Desert", "desert"], ["Swamp", "swamp"], ["Marsh", "wetlands"], ["Glacier", "glacier"], ["Tundra", "tundra"], ["Plain", "plains"], ["Steppe", "steppe"]]) {
     assert.equal(biomeForClass(c), want, c);
     assert.ok(DEFAULT_BIOMES[want], want);
   }
-  for (const c of ["Coast", "Valley", "Islands", "Bay", "City", "", null]) assert.equal(biomeForClass(c), null, String(c));
+  for (const c of ["Valley", "Islands", "Bay", "City", "", null]) assert.equal(biomeForClass(c), null, String(c));
 });
 
 test("a zone made from an area drives what the biome lookup answers there", () => {

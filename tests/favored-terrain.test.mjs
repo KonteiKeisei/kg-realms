@@ -25,11 +25,12 @@ test("generic choice lists, other classes, enemies, and substring names do not g
  assert.deepEqual(terrains(ranger(feature("Natural Explorer",rules))),[]);
  assert.deepEqual(terrains({items:[feature("Favored Terrain: Forest")]}),[]);
  assert.deepEqual(terrains(ranger(feature("Favored Enemy: Forest creatures"))),[]);
- assert.deepEqual(terrains(ranger(feature("Favored Terrain: Rainforest"))),[]);
+ assert.deepEqual(terrains(ranger(feature("Favored Terrain: Rainforest"))),["jungle"],"a jungle, not a forest");
+ assert.deepEqual(terrains(ranger(feature("Favored Terrain: Foothills"))),[]);
 });
 test("ordinary synonyms and custom biome names work without stacking several rangers",()=>{
  const t=biomeTypes({types:{ash:{name:"Ash wastes",terrain:6}}});
- assert.deepEqual(terrains(ranger(feature("Favored Terrain: Swamp, Grassland, Arctic, Ash Wastes")),t),["ash","glacier","plains","tundra","wetlands"]);
+ assert.deepEqual(terrains(ranger(feature("Favored Terrain: Swamp, Grassland, Arctic, Ash Wastes")),t),["arctic","ash","glacier","plains","savanna","steppe","swamp","tundra","wetlands"]);
  assert.deepEqual(partyFavoredBiomes([ranger(feature("Favored Terrain: Forest")),ranger(feature("Favored Terrain: Forest"))],t),["forest"]);
  const a=ranger(feature("Favored Terrain: Forest"));assert.deepEqual(terrains(a),["forest"]);
  a.items[1].name="Favored Terrain: Desert";assert.deepEqual(terrains(a),["desert"],"item cache follows edits");

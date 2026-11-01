@@ -18,7 +18,15 @@ export const DEFAULT_BIOMES = {
   hills: { ...preset("Hills", 3, 15, "#a48b65"), priority:2, offroad:.5, road:.9, trail:.7, alarm:10 },
   wetlands: { ...preset("Wetlands", 5, 15, "#699489"), priority:3, offroad:.3, road:.8, trail:.5, conceal:15, alarm:15 },
   mountains: { ...preset("Mountains", 4, 20, "#8c8a91"), priority:1, offroad:.2, road:.7, trail:.3, conceal:20 },
-  glacier: { ...preset("Glacier", 7, 25, "#b1d8e5"), priority:4, offroad:.15, road:.6, trail:.25, conceal:20, alarm:15 }
+  glacier: { ...preset("Glacier", 7, 25, "#b1d8e5"), priority:4, offroad:.15, road:.6, trail:.25, conceal:20, alarm:15 },
+  arctic: { ...preset("Arctic", 7, 25, "#d7e6ee"), priority:4, offroad:.25, road:.65, trail:.35, conceal:20, alarm:15 },
+  jungle: { ...preset("Jungle", 2, 10, "#2f7a3e"), priority:5, offroad:.25, road:.8, trail:.45, conceal:10, alarm:15 },
+  swamp: { ...preset("Swamp", 5, 15, "#566f4c"), priority:3, offroad:.25, road:.75, trail:.45, conceal:15, alarm:15 },
+  savanna: { ...preset("Savanna", 9, 15, "#c9b45a"), priority:9, offroad:.8, trail:.9, conceal:12 },
+  steppe: { ...preset("Steppe", 9, 15, "#b5ad6e"), priority:9, offroad:.8, trail:.9, conceal:15 },
+  badlands: { ...preset("Badlands", 6, 20, "#a9744e"), priority:6, offroad:.4, road:.85, trail:.6, conceal:12, alarm:10 },
+  coast: { ...preset("Coast", 1, 10, "#7fb0a8"), priority:11, offroad:.8, trail:.9 },
+  volcanic: { ...preset("Volcanic", 4, 30, "#6e4a42"), priority:2, offroad:.25, road:.7, trail:.35, conceal:15, alarm:15 }
 };
 const FALLBACK = { 1: "plains", 2: "forest", 3: "hills", 4: "mountains", 5: "wetlands", 6: "desert", 7: "glacier", 9: "plains" };
 const TERRAIN_CODES = new Map(Object.entries(TERRAIN).map(([code, value]) => [value.name, code]));
@@ -35,13 +43,15 @@ export function biomeTypes(config = {}) {
     const fields=clean({...base,...own});for(const k of Object.keys(BIOME_FIELDS))fields[k]??=def[k];
     const requested=Number(own.priority??base.priority??def.priority),priority=Number.isFinite(requested)&&requested>=0&&(!DEFAULT_BIOMES[id]||requested>0)?Math.min(1000,requested):def.priority;
     out[id] = { ...fields, priority, name: String(own.name || base.name || def.name || id).slice(0, 100), terrain: TERRAIN[Number(own.terrain ?? base.terrain)] && Number(own.terrain ?? base.terrain) !== 8 ? Number(own.terrain ?? base.terrain) : def.terrain,
-      color: /^#[0-9a-f]{6}$/i.test(own.color ?? base.color) ? own.color ?? base.color : def.color };
+      color: /^#[0-9a-f]{6}$/i.test(own.color ?? base.color) ? own.color ?? base.color : def.color,
+      // The Calendaria climate zone its weather comes from; a custom type starts on Plains' (biome-climate.mjs).
+      climate: own.climate || base.climate || `kgr-${DEFAULT_BIOMES[id] ? id : "plains"}` };
   }
   return out;
 }
 export function biomeZone(zone, types) {
   const type = types[zone?.type] ? zone.type : "plains", base = types[type] ?? DEFAULT_BIOMES.plains;
-  return { ...base, ...clean(zone?.overrides), type, zoneId: zone?.id ?? null, name: String(zone?.name || base.name).slice(0, 200) };
+  return { ...base, ...clean(zone?.overrides), type, zoneId: zone?.id ?? null, name: String(zone?.name || base.name).slice(0, 200), climate: zone?.climate || base.climate };
 }
 export function biomePriority(zone,types){const n=Number(zone.priority),base=types[zone.type]?.priority??10;return zone.priority!=null&&zone.priority!==""&&Number.isFinite(n)&&n>=0&&(!DEFAULT_BIOMES[zone.type]||n>0)?Math.min(1000,n):base;}
 export function mergeBiomeConfig(shipped={},own={}){const out={types:{...shipped.types},zones:{...shipped.zones}};for(const key of ["types","zones"])for(const[id,value]of Object.entries(own[key]??{})){if(value==null)delete out[key][id];else out[key][id]=value;}return out;}
@@ -96,7 +106,7 @@ export function biomeLookup(config = {}, terrainAt = () => TERRAIN[1], project =
 }
 
 /** The biome type a land area's class means: a forest is forest. Null where it says nothing about the going (a coast, a valley). */
-const CLASS_BIOME = { forest: "forest", wood: "forest", woods: "forest", jungle: "forest", mountains: "mountains", range: "mountains", hills: "hills", highlands: "hills", desert: "desert", wastes: "desert", badlands: "desert", marsh: "wetlands", swamp: "wetlands", bog: "wetlands", fen: "wetlands", moor: "wetlands", glacier: "glacier", ice: "glacier", tundra: "tundra", taiga: "taiga", steppe: "plains", plain: "plains", plains: "plains", grassland: "plains" };
+const CLASS_BIOME = { forest: "forest", wood: "forest", woods: "forest", jungle: "jungle", mountains: "mountains", range: "mountains", hills: "hills", highlands: "hills", desert: "desert", wastes: "desert", badlands: "badlands", marsh: "wetlands", swamp: "swamp", bog: "swamp", fen: "wetlands", moor: "wetlands", glacier: "glacier", ice: "arctic", tundra: "tundra", taiga: "taiga", steppe: "steppe", plain: "plains", plains: "plains", grassland: "plains", coast: "coast", savanna: "savanna", volcano: "volcanic" };
 export const biomeForClass = (cls) => CLASS_BIOME[String(cls ?? "").toLowerCase()] ?? null;
 /** A biome zone made from a place's closed border, tied to it by place id. */
 export const zoneForPlace = (place, type, pts) => ({ name: place.name ?? "Biome", type, pts: structuredClone(pts), overrides: {}, place: place.id });

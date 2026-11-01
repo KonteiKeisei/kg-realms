@@ -14,7 +14,7 @@ import { heldEncounterId } from "../scripts/ui-encounter-box.mjs";
 const box=(x0,y0,x1,y1)=>[[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
 
 test("all nine defaults exist and unzoned terrain infers the biome without actor assignment",()=>{
-  assert.deepEqual(Object.keys(DEFAULT_BIOMES),["plains","forest","desert","tundra","taiga","hills","wetlands","mountains","glacier"]);
+  assert.deepEqual(Object.keys(DEFAULT_BIOMES),["plains","forest","desert","tundra","taiga","hills","wetlands","mountains","glacier","arctic","jungle","swamp","savanna","steppe","badlands","coast","volcanic"]);
   for(const [code,type] of [[1,"plains"],[2,"forest"],[4,"mountains"],[5,"wetlands"],[7,"glacier"]])assert.equal(biomeLookup({},()=>TERRAIN[code])(5,5).type,type);
   assert.equal(biomeLookup({},()=>TERRAIN[8])(5,5),null);
 });
