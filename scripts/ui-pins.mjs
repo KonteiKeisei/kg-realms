@@ -185,7 +185,8 @@ export class PinEditor {
     this.selected = id; this.placing = false; this.drawing = null; this.editing = null; this.corner = null; this.cornerDrag = null;
     // The map shows the layer the place is on, so its area and name can be seen (0.77.1).
     const p = id ? this.getPlace(id) : null;
-    if (p) this.showLayer?.(placeLayer(p) ?? "places");
+    this.selectedLayer = p ? placeLayer(p) ?? "places" : null;
+    if (p) this.showLayer?.(this.selectedLayer);
     this.#render(); this.#overlay();
   }
 
@@ -541,7 +542,14 @@ export class PinEditor {
       <div class="row"><button data-act="add-save"><i class="fa-solid fa-check"></i> Add marker</button></div></div>`;
   }
 
-  refresh() { if (this.active) this.#render(); }
+  refresh() {
+    if (!this.active) return;
+    const p = this.selected ? this.getPlace(this.selected) : null;
+    if (this.selected && !p) { this.selected = null; this.drawing = null; this.editing = null; this.corner = null; this.cornerDrag = null; }
+    // A new type can put it on another layer (a new Lake starts as a Region): the map goes with it.
+    if (p && (placeLayer(p) ?? "places") !== this.selectedLayer) { this.selectedLayer = placeLayer(p) ?? "places"; this.showLayer?.(this.selectedLayer); }
+    this.#render(); this.#overlay();
+  }
 
   /** The camera moved: nothing in the panel follows it any more. */
   refreshView() {}

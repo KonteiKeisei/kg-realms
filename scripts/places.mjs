@@ -104,3 +104,26 @@ export function searchWorld(query, { places = [], regions = [], locals = [] }, l
     .filter((r) => r.score >= 30).sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, limit);
   return [...realm, ...inside];
 }
+
+/**
+ * A shipped place left out where a named waterway already carries its name, so it does not show twice.
+ * A place the GM added or changed always stays: they meant it, even if a river or shore has that name.
+ */
+export function dropWaterDuplicates(places, named) {
+  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/^the\s+/, "").replace(/\s+/g, " ").trim();
+  const core = (s) => norm(s).replace(/\b(river|the)\b/g, "").replace(/\s+/g, " ").trim();
+  const exact = new Set(named.map(norm)), cores = [...new Set(named.map(core))];
+  const isWater = (p) => p.kind === "natural" && (/^(river|lake|sea|bay)$/i.test(p.class ?? "") || /\b(river|stream|creek|run|water|flow|lake|brook)\b/i.test(p.name));
+  const close = (c) => cores.some((n) => n === c || (n.length >= 5 && editDistance(c, n) <= (n.length >= 8 ? 2 : 1)));
+  return places.filter((p) => p.kind === "settlement" || p.added || p.edited || !(exact.has(norm(p.name)) || (isWater(p) && close(core(p.name)))));
+}
+/** Letters to change, add or drop to turn a into b. */
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[b.length];
+}

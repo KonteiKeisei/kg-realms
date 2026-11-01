@@ -28,7 +28,7 @@ import {SettlementTravelUI} from './city/ui.mjs';
 import { RealmLayer } from "./realm-layer.mjs";
 import { MapAssets } from './terrain/map-assets.mjs';
 import { MAX_SIDE, SCALE, REGION_SCENE_FLAGS, fittingScale, generateRegion, loadWorld, maxSide, openGenerator, sceneSizeAt } from "./generator.mjs";
-import { applyEdits, placesGeoJSON, moduleMarkers } from "./places.mjs";
+import { applyEdits, placesGeoJSON, moduleMarkers, dropWaterDuplicates } from "./places.mjs";
 import { PlaceCard } from "./ui-card.mjs";
 import { RealmSearch } from "./ui-search.mjs";
 import { StreetNames } from "./city/street-names.mjs";
@@ -235,23 +235,8 @@ async function saveEdits(world, fn) {
  * the Ascore River).
  */
 function placesFor(world, places, level) {
-  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/^the\s+/, "").replace(/\s+/g, " ").trim();
-  const core = (s) => norm(s).replace(/\b(river|the)\b/g, "").replace(/\s+/g, " ").trim();
   const named = Object.values(waterwaysOf(world)).filter((w) => w.kind !== "wind" && w.name).map((w) => w.name);
-  const exact = new Set(named.map(norm)), cores = [...new Set(named.map(core))];
-  const isWater = (p) => p.kind === "natural" && (/^(river|lake|sea|bay)$/i.test(p.class ?? "") || /\b(river|stream|creek|run|water|flow|lake|brook)\b/i.test(p.name));
-  const close = (c) => cores.some((n) => n === c || (n.length >= 5 && editDistance(c, n) <= (n.length >= 8 ? 2 : 1)));
-  return applyEdits(places, editsOf(world), level).filter((p) => p.kind === "settlement" || !(exact.has(norm(p.name)) || (isWater(p) && close(core(p.name)))));
-}
-/** Letters to change, add or drop to turn a into b. */
-function editDistance(a, b) {
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const row = [i];
-    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    prev = row;
-  }
-  return prev[b.length];
+  return dropWaterDuplicates(applyEdits(places, editsOf(world), level), named);
 }
 
 /** The places on the map: their points, and the borders and names of the areas among them (map-layers.mjs). */

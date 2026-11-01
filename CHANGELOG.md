@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.83.4: your places stay
+
+- **Fixed:** a natural place you added or changed vanished on saving if a named river or shore had the same name or nearly so ("Lake Oban" beside a shore called Lake Oban). It was saved but hidden, leaving a gold handle for nothing. A place you added or changed now always shows, and any hidden this way come back. Shipped places a waterway already names are still left out, so they do not show twice.
+- **Fixed:** the map editor kept hold of a place that had gone from the map, showing its gold handle with no place behind it.
+- The handle's name follows a rename. When a new type moves the selected place to another layer (a new Lake starts as a Region), the map switches to that layer with it.
+
 ## 0.83.3: places show at a useful zoom
 
 - **Fixed:** on a made world, places appeared only when zoomed far in, because the zooms were Toril's. They now follow the map's own size: rank 4 places show at about the whole-map view, and every place from half the picture's full size. Faerûn's are unchanged.
