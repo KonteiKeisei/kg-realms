@@ -10,7 +10,7 @@
 import { worldUrl, allWorlds } from "../worlds.mjs";
 import { applyRouteEdits } from "../routes.mjs";
 import { TILE_SUFFIX, moduleIdFrom, moduleScript, ROUTES_FILE, zipEntry, zipParts, crc32, zipFits } from "./plan.mjs";
-import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
+import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -42,7 +42,7 @@ function currentCalendar() {
  * object, aliases: each link -> "Type.id", gone: links to nothing }. Links into this game system's
  * own compendiums stay as they are.
  */
-async function gatherDocuments(seeds, systemId, known = new Map()) {
+async function gatherDocuments(seeds, systemId, known = new Map(), scene = null) {
   const docs = new Map(known), aliases = new Map(), gone = [], queue = [...seeds];
   while (queue.length) {
     const uuid = queue.pop();
@@ -52,7 +52,10 @@ async function gatherDocuments(seeds, systemId, known = new Map()) {
     if (docs.has(key)) continue;
     const doc = await fromUuid(uuid).catch(() => null);
     if (!doc) { aliases.delete(uuid); gone.push(uuid); continue; }
-    const plain = doc.toObject();
+    const raw = doc.toObject();
+    // A scene reached only by a link goes as every other scene does, and brings what it needs.
+    const plain = type === "Scene" && scene ? scene.prepare(raw) : raw;
+    if (type === "Scene" && scene) queue.push(...scene.links(raw));
     docs.set(key, plain);
     queue.push(...uuidsIn(plain, systemId));
   }
@@ -101,15 +104,18 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
   const isPlayers = (token) => { const a = game.actors?.get(token.actorId); return !!a && (a.type === "group" || a.hasPlayerOwner); };
   const { scenes: sceneDocs, missing: scenesMissing } = scenesOfWorld(game.scenes.map((s) => s.toObject()), places, def.id);
   const scenes = sceneDocs.map((s) => sceneForExport(s, def.id, (t) => !isPlayers(t)));
-  const skippedTokens = sceneDocs.reduce((n, s) => n + (s.tokens ?? []).filter(isPlayers).length, 0);
+  let skippedTokens = sceneDocs.reduce((n, s) => n + (s.tokens ?? []).filter(isPlayers).length, 0);
   const markers = markersUsed(data.markers, [places, scenes]);
 
   // Everything those link to, and what that links to.
   onStep("Gathering actors, journals and items", 0.04);
   const seeds = uuidsIn([...files.values(), scenes], systemId);
-  for (const s of scenes) for (const t of s.tokens ?? []) if (t.actorId) seeds.add(`Actor.${t.actorId}`);
-  for (const s of sceneDocs) for (const n of s.notes ?? []) if (n.entryId) seeds.add(`JournalEntry.${n.entryId}`);
-  const { docs, aliases, gone } = await gatherDocuments(seeds, systemId, new Map(scenes.map((s) => [`Scene.${s._id}`, s])));
+  const keepToken = (t) => !isPlayers(t);
+  for (const s of sceneDocs) for (const link of sceneLinks(s, keepToken)) if (!link.startsWith("Scene.") || !scenes.some((x) => `Scene.${x._id}` === link)) seeds.add(link);
+  const { docs, aliases, gone } = await gatherDocuments(seeds, systemId, new Map(scenes.map((s) => [`Scene.${s._id}`, s])), {
+    prepare: (raw) => { skippedTokens += (raw.tokens ?? []).filter(isPlayers).length; return sceneForExport(raw, def.id, keepToken); },
+    links: (raw) => sceneLinks(raw, keepToken)
+  });
   // Which compendium each document goes in, by kind.
   const groups = new Map();
   for (const [key, doc] of docs) {
@@ -136,6 +142,20 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
     const ref = fileRef(raw, where);
     if (!ref || ref.kind === "keep") continue;
     try {
+      if (ref.kind === "local" && ref.path.includes("*")) {
+        const FP = foundry.applications.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
+        const found = (await FP.browse("data", ref.path, { wildcard: true }))?.files ?? [];
+        if (!found.length) throw Error("no files match it");
+        const { dir: into, link } = wildcardPlace(moduleId, folder, ref.path);
+        for (const file of found) {
+          const decoded = decodeURIComponent(file), res = await fetch(local(decoded));
+          if (!res.ok) throw Error(`${decoded}: HTTP ${res.status}`);
+          const bytes = new Uint8Array(await res.arrayBuffer()), placed = claim(into, decoded, bytes.length, crc32(bytes));
+          if (!written.has(placed.rel)) { written.add(placed.rel); await add(`${moduleId}/${placed.rel}`, bytes); }
+        }
+        paths.set(raw, link);
+        continue;
+      }
       const res = await fetch(ref.kind === "external" ? ref.path : local(ref.path));
       if (!res.ok) throw Error(`HTTP ${res.status}`);
       const bytes = new Uint8Array(await res.arrayBuffer());

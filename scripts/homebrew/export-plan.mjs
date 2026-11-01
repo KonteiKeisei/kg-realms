@@ -128,6 +128,29 @@ export function sceneForExport(doc, world, keepToken = () => true) {
   };
 }
 
+/** What a scene links to beyond its text: its tokens' actors, its pins' journals and scenes, its settlement's way back. */
+export function sceneLinks(doc, keepToken = () => true) {
+  const f = doc.flags?.[REALM_FLAG] ?? {}, out = new Set();
+  for (const t of doc.tokens ?? []) if (t.actorId && keepToken(t)) out.add(`Actor.${t.actorId}`);
+  for (const n of doc.notes ?? []) {
+    if (n.entryId) out.add(`JournalEntry.${n.entryId}`);
+    const s = n.flags?.[REALM_FLAG]?.local?.scene;
+    if (s) out.add(`Scene.${s}`);
+  }
+  for (const s of [f.localMap?.parent, f.returnTo?.scene]) if (s) out.add(`Scene.${s}`);
+  return [...out];
+}
+
+/**
+ * Wildcard art (a token with "tokens/wolf/*.webp"): where its files go, and the link that still picks
+ * among them. dir: the module folder, by the source's own folder name; link: its pattern there.
+ */
+export function wildcardPlace(moduleId, folder, path) {
+  const parts = decode(path).split("/"), pattern = parts.pop(), parent = (parts.pop() ?? "").replace(/[\\:*?"<>|]/g, "-");
+  const dir = parent ? `${folder}/${parent}` : folder;
+  return { dir, link: `modules/${moduleId}/${encodePath(dir)}/${encodeURIComponent(pattern).replace(/%2A/g, "*")}` };
+}
+
 /** Each kind of document a module's compendiums hold, and its compendium's name. */
 export const PACK_NAMES = { Actor: "actors", Item: "items", JournalEntry: "journals", RollTable: "tables", Macro: "macros", Playlist: "playlists", Cards: "cards", Scene: "scenes" };
 const PACK_LABELS = { Actor: "Actors", Item: "Items", JournalEntry: "Journals", RollTable: "Tables", Macro: "Macros", Playlist: "Playlists", Cards: "Cards", Scene: "Scenes" };

@@ -8,6 +8,7 @@ import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
 import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars } from "./export.mjs";
+import { startBiomeClimates } from "../biome-weather.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
 
 const ID = "kg-realms";
@@ -26,7 +27,11 @@ export function registerHomebrew() {
   Hooks.on("createScene", sceneFromModule);
   game.settings.register(ID, "calendarsApplied", { scope: "world", config: false, type: Object, default: {} });
   // Calendaria finishes starting after "ready", and says so.
-  Hooks.once("calendaria.ready", () => applyModuleCalendars().catch((err) => console.error(`${ID} | calendars`, err)));
+  // The module's calendar first, so the biome climates go on the calendar the world will use.
+  Hooks.once("calendaria.ready", async () => {
+    await applyModuleCalendars().catch((err) => console.error(`${ID} | calendars`, err));
+    await startBiomeClimates().catch((err) => console.error(`${ID} | biome climates`, err));
+  });
   for (const def of Object.values(game.settings.get(ID, SETTING) ?? {})) {
     try { registerWorld(def); } catch (err) { console.warn(`${ID} | homebrew world ${def?.id}:`, err); }
   }

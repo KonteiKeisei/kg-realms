@@ -2,7 +2,8 @@ import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
 import { registerHomebrew } from "./homebrew/homebrew.mjs";
 import { setExportData } from "./homebrew/export.mjs";
-import { installBiomeClimates, setSceneClimate, followClimate } from "./biome-weather.mjs";
+import { calendarSwitchedClimates, setSceneClimate, followClimate } from "./biome-weather.mjs";
+import { flagsNeedRedraw } from "./biome-climate.mjs";
 // The worlds first (worlds.mjs), before anything that loads one: the GM's homebrew worlds saved in
 // this game world (homebrew/), then each world module's on the kgRealmsRegisterWorlds hook (KG Realms:
 // Faerûn registers Toril). A module registering the same id replaces the homebrew copy.
@@ -126,6 +127,8 @@ const trade = new TradeMarkets({
   }
 });
 const openCard = (ref, options) => cards.open(ref, options);
+/** A world's index, with its map sheet in use unless a realm map of another world is on screen. */
+const worldWithSheet = async (id) => { const data = await loadWorld(id); if (!current || current.region.world === id) applySourceMap(data.sourceMap); return data; };
 const realmPlaces = async (world) => (current?.region.world === world ? current.places : applyEdits((await loadWorld(world)).places, editsOf(world), "surface"));
 // Local maps: a settlement's (or site's) own scene with its places on it (local-maps.mjs).
 const localMaps = new LocalMaps({
@@ -143,6 +146,7 @@ const localMaps = new LocalMaps({
   isWinter: async (world, placeId) => {
     const p = placeId ? (await realmPlaces(world)).find((x) => x.id === placeId) : null;
     if (!p) return false;
+    await worldWithSheet(world);
     const lines = snowToday(world);
     if (!lines) return false;
     const y = lonLatToSource(p.lon, p.lat)[1];
@@ -165,8 +169,7 @@ Hooks.once('init',()=>{partyPortraits.install();partyInterface.install();});
 Hooks.once("init", () => {localMaps.install();cityTravel.install();});
 // Biome climates (biome-climate.mjs): added to each calendar, and the settlement takes its place's.
 Hooks.once("init", () => game.settings.register(MODULE_ID, "biomeClimatesAdded", { scope: "world", config: false, type: Object, default: {} }));
-Hooks.on("calendaria.calendarSwitched", () => installBiomeClimates().catch((err) => console.warn("kg-realms | biome climates:", err)));
-Hooks.once("calendaria.ready", () => installBiomeClimates().catch((err) => console.warn("kg-realms | biome climates:", err)));
+Hooks.on("calendaria.calendarSwitched", calendarSwitchedClimates);
 Hooks.on("updateScene", followClimate);
 Hooks.on("canvasReady", async (cv) => {
   const scene = cv.scene, map = scene?.getFlag(MODULE_ID, "localMap");
@@ -175,7 +178,8 @@ Hooks.on("canvasReady", async (cv) => {
     const place = (await realmPlaces(map.world)).find((p) => p.id === map.placeId);
     if (!place || !Number.isFinite(place.lat)) return;
     await loadShippedBiomes(map.world);
-    const query = biomeLookup(biomesOf(map.world), (await import("./travel.mjs")).terrainLookup(await terrainFor(map.world, await loadWorld(map.world))), lonLatToSource);
+    const data = await worldWithSheet(map.world);
+    const query = biomeLookup(biomesOf(map.world), (await import("./travel.mjs")).terrainLookup(await terrainFor(map.world, data)), lonLatToSource);
     await setSceneClimate(scene, query(...lonLatToSource(place.lon, place.lat)));
   } catch (err) { console.warn("kg-realms | settlement weather:", err); }
 });
@@ -1001,7 +1005,7 @@ Hooks.once("init", () => {
       get party(){return foundry.utils.deepClone(hud.currentBiome());},
       types:(world=current?.region.world??defaultWorldId())=>foundry.utils.deepClone(biomeTypes(biomesOf(world))),
       zones:(world=current?.region.world??defaultWorldId())=>foundry.utils.deepClone(biomesOf(world).zones??{}),
-      async at(lon,lat,{world=current?.region.world??defaultWorldId()}={}){await loadShippedBiomes(world);const data=await loadWorld(world),grid=await terrainFor(world,data),query=biomeLookup(biomesOf(world),(await import("./travel.mjs")).terrainLookup(grid),lonLatToSource);return biomeFlag(query(...lonLatToSource(lon,lat)),{world});},
+      async at(lon,lat,{world=current?.region.world??defaultWorldId()}={}){await loadShippedBiomes(world);const data=await worldWithSheet(world),grid=await terrainFor(world,data),query=biomeLookup(biomesOf(world),(await import("./travel.mjs")).terrainLookup(grid),lonLatToSource);return biomeFlag(query(...lonLatToSource(lon,lat)),{world});},
       sync:()=>hud.syncBiome()
     },
     /** Make a region scene without the dialog: { world, level, bounds, milesPer100, grid, name, view }. */
@@ -1359,7 +1363,7 @@ Hooks.on("updateScene", (scene, changes) => {
     if (needsRouteRefresh(j)) return hud.refresh();
     return Object.keys(j).some((k) => ["encounters", "trip", "rest"].includes(k)) ? hud.refreshProgress() : hud.tick();
   }
-  if (scene === canvas.scene && foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`)) drawRegion();
+  if (scene === canvas.scene && flagsNeedRedraw(own)) drawRegion();
 });
 Hooks.on("updateToken", (doc, changes, options) => {
   if (options?.kgRealmsTravel) travelBounce.start(doc, options.animation?.duration ?? 0);

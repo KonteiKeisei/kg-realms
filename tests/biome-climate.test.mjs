@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { BIOME_CLIMATES, SEA_CLIMATE, climateIdFor, climateZone, seasonKind, shippedClimates, climateOf, zoneChange } from "../scripts/biome-climate.mjs";
+import { BIOME_CLIMATES, SEA_CLIMATE, climateIdFor, climateZone, seasonKind, shippedClimates, climateOf, zoneChange, flagsNeedRedraw } from "../scripts/biome-climate.mjs";
 import { DEFAULT_BIOMES, biomeTypes, biomeZone, biomeLookup } from "../scripts/biomes.mjs";
 import { TERRAIN } from "../scripts/travel.mjs";
 
@@ -87,4 +87,14 @@ test("the zone changes with the party, but a GM's own choice stands", () => {
 test("the Biomes tab offers the climate for a type and for one zone", () => {
   const src = readFileSync(new URL("../scripts/ui-biomes.mjs", import.meta.url), "utf8");
   assert.ok(src.includes('climateRow("type",t.climate)')); assert.ok(src.includes('climateRow("zone",z.climate??""'));
+});
+
+test("crossing a biome does not redraw the map; anything the map draws still does", () => {
+  assert.equal(flagsNeedRedraw({ climateSet: "kgr-arctic" }), false);
+  assert.equal(flagsNeedRedraw({}), false);
+  assert.equal(flagsNeedRedraw({ bounds: {} }), true);
+  assert.equal(flagsNeedRedraw({ climateSet: "kgr-arctic", world: "t" }), true);
+  const main = readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8");
+  assert.ok(main.includes("flagsNeedRedraw(own)) drawRegion()"));
+  assert.ok(!main.includes('hasProperty(changes, `flags.${MODULE_ID}`)) drawRegion()'));
 });

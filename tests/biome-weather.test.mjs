@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { installBiomeClimates, setSceneClimate, followClimate } from "../scripts/biome-weather.mjs";
+import { installBiomeClimates, startBiomeClimates, calendarSwitchedClimates, setSceneClimate, followClimate } from "../scripts/biome-weather.mjs";
 import { shippedClimates } from "../scripts/biome-climate.mjs";
 
 function install({ bundled = true, zones = {}, saved = true, weather = {} } = {}) {
@@ -17,7 +17,7 @@ function install({ bundled = true, zones = {}, saved = true, weather = {} } = {}
       CalendarManager: { getActiveCalendar: () => ({ metadata: data.metadata, toObject: () => structuredClone(data) }),
         saveDefaultOverride: async (id, d) => { calls.push(["override", id]); if (saved) data.weather = d.weather; return saved ? {} : null; },
         updateCustomCalendar: async (id, d) => { calls.push(["update", id]); data.weather = d.weather; return {}; } },
-      WeatherManager: { getCalendarZones: list, getCurrentWeather: (id) => weather[id] ?? null, generateAndSetWeather: async (o) => { calls.push(["roll", o.zoneId]); weather[o.zoneId] = { id: "snow" }; } }
+      WeatherManager: { getCalendarZones: list, getCurrentWeather: (id) => weather[id] ?? null, generateAndSetWeather: async (o) => { calls.push(["roll", o.zoneId]); install.opts = o; weather[o.zoneId] = { id: "snow" }; } }
     }
   };
   return { calls, settings, notes, data, weather };
@@ -66,6 +66,7 @@ test("a party entering an arctic biome: the scene takes arctic weather, rolled i
   const s = scene();
   await setSceneClimate(s, { type: "arctic", climate: "kgr-arctic" });
   assert.deepEqual(calls, [["roll", "kgr-arctic"]]);
+  assert.equal(install.opts._fromPlan, true, "Calendaria's forecast stands");
   assert.deepEqual(s.updates, [{ "flags.calendaria.climateZoneOverride": "kgr-arctic", "flags.kg-realms.climateSet": "kgr-arctic" }]);
   await setSceneClimate(s, { type: "arctic", climate: "kgr-arctic" });
   assert.equal(s.updates.length, 1, "no write while it stays");
@@ -103,4 +104,26 @@ test("every client's view follows, on the scene it is looking at", () => {
   followClimate({}, { flags: { calendaria: { climateZoneOverride: "kgr-arctic" } } });
   followClimate(s, { name: "x" });
   assert.equal(heard.length, 1);
+});
+
+test("climates added at once are added one at a time: no zone twice", async () => {
+  const { data, calls } = install();
+  await Promise.all([installBiomeClimates(), installBiomeClimates(), installBiomeClimates()]);
+  assert.equal(calls.filter(([k]) => k === "override").length, 1);
+  const ids = Object.values(data.weather.zones).map((z) => z.id);
+  assert.equal(new Set(ids).size, ids.length); assert.equal(ids.length, COUNT);
+});
+
+test("a calendar announced while Calendaria starts is ignored; a later switch gets the climates", async () => {
+  const { calls, data } = install();
+  calendarSwitchedClimates();
+  await new Promise((r) => setTimeout(r));
+  assert.deepEqual(calls, [], "not until Calendaria is ready");
+  await startBiomeClimates();
+  assert.equal(calls.length, 1);
+  data.metadata.id = "custom-other";
+  calendarSwitchedClimates();
+  await installBiomeClimates();
+  assert.ok(calls.length >= 1);
+  assert.ok(game.settings.get("kg-realms", "biomeClimatesAdded")["custom-other"]);
 });

@@ -56,11 +56,12 @@ function install({ packs = new Map() } = {}) {
   return { created, errors, infos };
 }
 
-setExportData(async () => ({
+const realData = async () => ({
   places: [{ id: "p1", name: "Arine", edited: true, added: true, original: "x", img: "worlds/game/art/Arine%20Keep.webp", known: `<p><img src="worlds/game/art/inline.png"> gone: <img src="worlds/game/art/lost.png"> @UUID[Actor.${LOST}]{Lost}</p>`, scene: TOWN, marker: "own", actors: [`Actor.${NPC}`] }],
   routeEdits: { edited: {}, added: {}, deleted: [] }, waterways: { w1: { kind: "river", pts: [[0, 0]] } }, biomes: { b: 1 }, encounters: { e1: { name: "Bandits" } }, tradeEdits: { p1: { goods: [] } }, snow: { north: { on: true } },
   markers: { own: { name: "Mine", src: "worlds/game/art/mark.webp" }, unused: { name: "No", src: "worlds/game/art/none.webp" } }
-}));
+});
+setExportData(realData);
 
 /** A stored zip's files, read back by its central directory: name -> text. */
 async function readZip(parts) {
@@ -243,4 +244,37 @@ test("the game world's calendar goes in whole, its own pictures with it, and the
   const manifest = JSON.parse(files.get(`${M}/module.json`));
   assert.equal(manifest.relationships.recommends[0].id, "calendaria");
   assert.ok(built.report.includes("Calendar: Trorune (custom)"));
+});
+
+test("a scene reached only by a link is prepared like any other, wildcard art goes in, and nothing else breaks", async () => {
+  install();
+  const LINKED = "linked0000000000", GUARD = "guard00000000000", VIEW = "view000000000000";
+  const scenes = game.scenes;
+  const add = (d) => { const doc = plain(d); scenes.push(doc); return doc; };
+  add({ _id: LINKED, name: "Crypt", active: true, folder: "f", _stats: {}, tokens: [{ actorId: GUARD }, { actorId: PC }], notes: [{ flags: { "kg-realms": { local: { name: "Door", scene: VIEW } } } }], flags: { "kg-realms": { journey: { a: 1 } } } });
+  add({ _id: VIEW, name: "Vault", tokens: [], notes: [], flags: {} });
+  const realFrom = globalThis.fromUuid;
+  const guard = plain({ _id: GUARD, name: "Guard", type: "npc", img: "worlds/game/tokens/guards/g*.webp", prototypeToken: { texture: { src: "worlds/game/tokens/guards/g*.webp" } } });
+  globalThis.fromUuid = async (u) => (u === `Scene.${LINKED}` ? scenes.get(LINKED) : u === `Scene.${VIEW}` ? scenes.get(VIEW) : u === `Actor.${GUARD}` ? guard : realFrom(u));
+  game.actors.set(GUARD, { type: "npc", hasPlayerOwner: false });
+  served.set("worlds/game/tokens/guards/g1.webp", "G1"); served.set("worlds/game/tokens/guards/g2.webp", "G2");
+  const browsed = [];
+  foundry.applications = { apps: { FilePicker: { implementation: { browse: async (src, path, o) => { browsed.push([src, path, o.wildcard]); return path.includes("guards") ? { files: ["worlds/game/tokens/guards/g1.webp", "worlds/game/tokens/guards/g2.webp"] } : { files: [] }; } } } } };
+  const data = await realData();
+  setExportData(async () => ({ ...data, places: [{ ...data.places[0], known: `${data.places[0].known} @UUID[Scene.${LINKED}]{Crypt}` }] }));
+  const built = await buildExport({ id: "t", title: "T", root: ROOT, assetBase: ROOT }, { moduleId: "kg-realms-t", title: "KG Realms: T", version: "1.0.0" });
+  setExportData(realData);
+  const files = await readZip(built.parts), M = "kg-realms-t", D = `${M}/data/worlds/t`;
+  const list = JSON.parse(files.get(`${D}/packs/scenes.json`)), crypt = list.find((s) => s._id === LINKED);
+  assert.ok(crypt); assert.equal(crypt.active, false); assert.equal(crypt.folder, undefined); assert.equal(crypt._stats, undefined);
+  assert.deepEqual(crypt.tokens, [{ actorId: GUARD }], "the players stay"); assert.equal(crypt.flags["kg-realms"].journey, undefined);
+  assert.deepEqual(crypt.flags["kg-realms"].moduleScene, { world: "t", id: LINKED });
+  assert.ok(list.some((s) => s._id === VIEW), "and the scene its pin leads to");
+  const actor = JSON.parse(files.get(`${D}/packs/actors.json`)).find((a) => a._id === GUARD);
+  assert.ok(actor, "its token's actor comes too");
+  assert.equal(actor.prototypeToken.texture.src, `modules/${M}/assets/actors/guards/g*.webp`);
+  assert.equal(files.get(`${M}/assets/actors/guards/g1.webp`), "G1"); assert.equal(files.get(`${M}/assets/actors/guards/g2.webp`), "G2");
+  assert.deepEqual(browsed[0], ["data", "worlds/game/tokens/guards/g*.webp", true]);
+  assert.ok(built.report.includes("Player tokens left out of the scenes: 2"), built.report);
+  assert.ok(!built.report.includes("g*.webp"), "not reported missing");
 });

@@ -20,7 +20,7 @@ function seasonKeys(calendar) {
  * Adds the biome climates the active calendar has not had yet. Each is added once per calendar, so
  * one the GM edits stays edited and one the GM deletes stays deleted.
  */
-export async function installBiomeClimates() {
+async function addClimates() {
   const C = calendaria();
   if (!C || !isPrimary()) return;
   const M = C.managers.CalendarManager, active = M.getActiveCalendar(), calendarId = active?.metadata?.id;
@@ -51,6 +51,14 @@ export async function installBiomeClimates() {
   }
 }
 
+// One at a time, on whichever calendar is active by then: two at once could add a climate twice.
+let adding = Promise.resolve(), started = false;
+export const installBiomeClimates = () => (adding = adding.catch(() => {}).then(addClimates));
+/** Calendaria has finished starting, and any module's calendar is set: climates can go in from now on. */
+export function startBiomeClimates() { started = true; return installBiomeClimates(); }
+/** Calendaria announces its calendar while it is still starting: only a later switch counts. */
+export function calendarSwitchedClimates() { if (started) installBiomeClimates().catch((err) => console.warn(`${ID} | biome climates:`, err)); }
+
 /** Sets a scene's weather to a biome's climate: the primary GM, once per change. biome: null is open water. */
 export async function setSceneClimate(scene, biome) {
   const C = calendaria();
@@ -58,8 +66,9 @@ export async function setSceneClimate(scene, biome) {
   const W = C.managers.WeatherManager, zones = W.getCalendarZones().map((z) => z.id);
   const want = zoneChange({ current: scene.getFlag(CAL, OVERRIDE) ?? null, lastSet: scene.getFlag(ID, "climateSet") ?? null, want: climateOf(biome), zones });
   if (!want) return;
-  // The weather there, if the day's has not been rolled for it yet, before anyone looks.
-  if (!W.getCurrentWeather(want) && game.settings.get(CAL, "autoGenerateWeather")) await W.generateAndSetWeather({ zoneId: want });
+  // The weather there, if the day's has not been rolled for it yet, before anyone looks. As part of
+  // the day's plan, not a GM's override, so Calendaria keeps its forecast.
+  if (!W.getCurrentWeather(want) && game.settings.get(CAL, "autoGenerateWeather")) await W.generateAndSetWeather({ zoneId: want, _fromPlan: true });
   await scene.update({ [`flags.${CAL}.${OVERRIDE}`]: want, [`flags.${ID}.climateSet`]: want });
 }
 

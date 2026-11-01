@@ -128,6 +128,9 @@ export function areasGeoJSON(places, regions = []) {
   return { areas: { type: "FeatureCollection", features: areas }, labels: { type: "FeatureCollection", features: labels } };
 }
 
+/** Whether a place can be a biome zone: land on the Geography layer, with a closed border drawn for it. */
+export const canBeBiome = (p) => !!p?.area && placeLayer(p) === "geo" && areaKind(p) === "land" && !!placeOutline(p)?.closed;
+
 const ringSize = (ring) => Math.abs(ring.reduce((sum, a, i) => { const b = ring[(i + 1) % ring.length]; return sum + a[0] * b[1] - a[1] * b[0]; }, 0));
 /**
  * What to call a spot, from what the GM has drawn and placed: "In Thay, in Rawlinswood near Arine",

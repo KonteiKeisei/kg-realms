@@ -1,5 +1,17 @@
 # KG Realms changelog
 
+## 0.83.2: code review fixes
+
+Fixes from a full code review.
+
+- **Fixed:** a party crossing into a new biome rebuilt the whole realm map for everyone viewing it.
+- **Fixed:** a settlement opened before any realm map could read the wrong land under it, and so get the wrong weather and winter picture. Biome zones you drew were not affected.
+- **Fixed:** biome climates could be added twice at once, duplicating zones. They now go in one run at a time, after Calendaria has started and any module's calendar is set, so Faerûn's first load no longer adds them to Gregorian first.
+- **Fixed:** a biome zone outlived its place. It now goes when the place is deleted or removed from the map, or stops being a land area with a closed border on Geography, and you are told. Restoring a removed place does not bring the zone back: press Make biome zone again.
+- **Fixed:** a scene reached only through a link in text exported with player tokens and journey data, without its actors or the id its links need. It now exports like every other scene, with what it links to.
+- **Fixed:** wildcard token art (tokens/wolf/*.webp) was reported missing on export. All its files now go into the module and the wildcard still works.
+- **Fixed:** rolling weather on entering a zone could clear that zone's forecast.
+
 ## 0.83.1: one less waterways button
 
 - Removed the "Back to the module's waterways" button from the Waterways tab. Undo and Export stay.

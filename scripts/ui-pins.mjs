@@ -8,7 +8,7 @@
 import { onCanvas } from "./canvas-input.mjs";
 import { markerCatalog, iconFor } from "./map-symbols.mjs";
 import { latLonToScene } from "./geo.mjs";
-import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, canBeBiome, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
 import { biomeTypes, biomeForClass, zoneForPlace } from "./biomes.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
 // Drawing an area's border (0.77): how near (screen px) a click to the first corner closes it, and
@@ -259,6 +259,14 @@ export class PinEditor {
   }
   /** The Biome row: a closed border on land can drive travel and camps, as a biome zone that follows it. */
   #biomeRow(p, o) {
+    // Its shape, layer, type or border changed so it can no longer be one: its zone goes with it.
+    if (p.biomeZone && !canBeBiome(p) && this.droppingZone !== p.id) {
+      this.droppingZone = p.id;
+      queueMicrotask(async () => {
+        try { await this.#dropZone(p.id); ui.notifications.info(`KG Realms: the biome zone of ${p.name} was removed: a biome zone needs a land area with a closed border on the Geography layer.`); }
+        finally { this.droppingZone = null; }
+      });
+    }
     if (placeLayer(p) !== "geo" || areaKind(p) !== "land" || !this.getBiomes) return "";
     const rule = ruleTooltip("<p><strong>Biome zone</strong> Makes this area count as a biome: travel speed off road, on roads and on trails, and the Forage, Conceal and Alarm DCs for camps.</p><p><strong>Border</strong> The zone follows this place's border as you reshape it, and takes its name.</p><p><strong>Biomes tab</strong> Set its speeds and DCs there. Its corners are this border's: reshape them here.</p><p><strong>When</strong> Journeys already under way keep the settings they left with.</p>");
     if (!p.area || !o?.closed) return `<div class="row"><span>Biome ${rule}</span></div><p class="hint">Draw and close a border to make this area a biome zone.</p>`;
@@ -437,9 +445,11 @@ export class PinEditor {
     if (act === "remove-place") {
       const p = this.getPlace(id);
       if (!p) return;
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: p.added ? "Delete place" : "Remove from the map" }, content: p.added ? `<p>Delete <b>${esc(p.name)}</b>, a place you added?</p>` : `<p>Remove <b>${esc(p.name)}</b> from this world? It goes from the map, search and journeys.</p><p class="hint">Restore it any time from the Places tab (Removed from this world), with its edits.</p>`, rejectClose: false });
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: p.added ? "Delete place" : "Remove from the map" }, content: p.added ? `<p>Delete <b>${esc(p.name)}</b>, a place you added?${p.biomeZone ? " Its biome zone is removed too." : ""}</p>` : `<p>Remove <b>${esc(p.name)}</b> from this world? It goes from the map, search and journeys.</p><p class="hint">Restore it any time from the Places tab (Removed from this world), with its edits.</p>${p.biomeZone ? "<p>Its biome zone is removed too.</p>" : ""}`, rejectClose: false });
       if (!ok) return;
       this.selected = null;
+      // A place gone from the map stops being a biome. Make it again after restoring the place.
+      if (p.biomeZone) await this.#dropZone(id);
       await this.saveEdits((w) => {
         if (w.added?.[id]) { delete w.added[id]; delete w.edits?.[id]; return w; }
         w.edits = { ...(w.edits ?? {}), [id]: { ...(w.edits?.[id] ?? {}), removed: true } };

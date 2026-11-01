@@ -167,6 +167,8 @@ export function climateZone(id, climate, seasons, key = (s) => s) {
 /** Every climate this engine ships, by zone id. */
 export const shippedClimates = () => ({ ...Object.fromEntries(Object.entries(BIOME_CLIMATES).map(([k, v]) => [climateIdFor(k), v])), [SEA_CLIMATE]: SEA });
 
+/** Whether a scene's KG Realms flags changed anything the map draws: not the note of which climate we last set. */
+export const flagsNeedRedraw = (own = {}) => Object.keys(own).some((k) => k !== "climateSet");
 /** The zone a spot on the map should use: its biome's chosen climate, or the sea's where no biome reaches. */
 export const climateOf = (biome) => (biome ? biome.climate ?? climateIdFor(biome.type) : SEA_CLIMATE);
 /**

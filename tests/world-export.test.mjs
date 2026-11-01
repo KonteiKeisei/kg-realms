@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, packFolder, modulePacks, markersUsed, exportReport } from "../scripts/homebrew/export-plan.mjs";
+import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, packFolder, modulePacks, markersUsed, exportReport } from "../scripts/homebrew/export-plan.mjs";
 import { zipEntry, zipParts, zipStore, zipFits, moduleScript } from "../scripts/homebrew/plan.mjs";
 
 test("a file named in data is found wherever it is, and links to the engine and Foundry stay", () => {
@@ -142,4 +142,15 @@ test("the module's script registers the world with its markers, lore, snow and c
   assert.deepEqual(world.packs, [{ name: "scenes", type: "Scene", file: "packs/scenes.json" }]);
   assert.deepEqual(world.snow, { north: 1 });
   assert.ok(world.markers.m); assert.ok(world.rules);
+});
+
+test("what a scene links to beyond its text; the players' tokens do not count", () => {
+  const doc = { tokens: [{ actorId: "npc" }, { actorId: "pc" }, {}], notes: [{ entryId: "j1", flags: { "kg-realms": { local: { scene: "inn" } } } }, { flags: {} }], flags: { "kg-realms": { localMap: { parent: "city" }, returnTo: { scene: "realm" } } } };
+  assert.deepEqual(sceneLinks(doc, (t) => t.actorId !== "pc").sort(), ["Actor.npc", "JournalEntry.j1", "Scene.city", "Scene.inn", "Scene.realm"]);
+  assert.deepEqual(sceneLinks({}), []);
+});
+
+test("wildcard art keeps its pattern, in a folder of its own", () => {
+  assert.deepEqual(wildcardPlace("m", "assets/actors", "tokens/Dire%20Wolf/wolf*.webp"), { dir: "assets/actors/Dire Wolf", link: "modules/m/assets/actors/Dire%20Wolf/wolf*.webp" });
+  assert.deepEqual(wildcardPlace("m", "assets/actors", "*.png"), { dir: "assets/actors", link: "modules/m/assets/actors/*.png" });
 });
