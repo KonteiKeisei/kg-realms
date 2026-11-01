@@ -52,3 +52,14 @@ test("a long name stays in two lines, with the rest in its tooltip", () => {
   assert.match(css, /location-title button\.nm \{[^}]*line-clamp: 2/);
   assert.ok(readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8").includes('title="${esc(n.name)}: show on the map"'));
 });
+
+test("the whole chain: nested borders, and what a territory is part of", () => {
+  const empire = { id: "e", name: "Salvae Empire", kind: "territory", class: "Empire", lon: 0, lat: 0 };
+  const empiria = { id: "m", name: "Empiria", kind: "territory", class: "Region", partOf: "e", lon: 0, lat: 0, area: square(0, 0, 10) };
+  assert.equal(at(1, 1, [empire, empiria, forest, town("Arine", 20)]), "In Empiria, Salvae Empire, in Rawlinswood near Arine");
+  assert.equal(at(1, 1, [empire, empiria, town("Arine", 2)]), "In Arine, Empiria, Salvae Empire");
+  assert.equal(at(1, 1, [{ ...empire, hidden: true }, empiria]), "In Empiria", "a hidden domain says nothing");
+  assert.equal(at(50, 50, [empire, empiria]), "Wilderness", "outside its border");
+  const outer = { id: "o", name: "The Heartlands", kind: "territory", class: "Region", lon: 0, lat: 0, area: square(0, 0, 30) };
+  assert.equal(at(1, 1, [outer, realm]), "In Thay, The Heartlands", "borders nest with no link");
+});

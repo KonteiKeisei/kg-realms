@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.87.0: domains, territories and Part of
+
+- **Domains and territories.** Territory/Domain becomes two kinds. A **Domain** is the top level: a country or empire. A **Territory** is anything below one, at any depth and of any type: a state, a county within it, a region. Existing places split by their type: Empire, Kingdom, Country, Republic and the like are domains; Region, State, County, Province and the like are territories. A kingdom under an empire is a territory: set its Kind so.
+- **Part of.** On a selected territory (Places tab), choose the domain or territory it belongs to: Empiria is part of the Salvae Empire. Territories nest as deep as you like. Choices that would go round in a circle are not offered, and a domain has nothing above it.
+- **Everything else works it out.** A settlement or site inside a drawn border knows it is part of that territory and everything above it, with no link of its own. A territory with no link knows from a larger border around it.
+- **Natural features may cross boundaries.** One with an outline is part of whatever holds all of it, and says what else it crosses. One without an outline goes by its point.
+- **Shown** on place cards as Part of and Crosses, on the selected place in the Places tab, and in the location line: "In Empiria, Salvae Empire, in Rawlinswood near Arine". Players never see a hidden domain or territory in any of these.
+
 ## 0.86.0: Territory/Domain
 
 - **A new kind of place: Territory/Domain.** Empires, kingdoms, provinces and regions were natural features, which they are not. They now have their own kind, in the Kind list, in Add place, and in their own group in the Places list. A new one starts as a Region, on the Realms layer.

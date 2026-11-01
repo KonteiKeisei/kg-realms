@@ -155,7 +155,7 @@ export class RoadEditor {
     const layer = this.getLayer();
     let best = null, bd = SNAP_PX;
     for (const p of this.getPlaces()) {
-      if (p.hidden || p.kind === "natural" || p.kind === "territory") continue;
+      if (p.hidden || p.kind === "natural" || p.kind === "territory" || p.kind === "domain") continue;
       const s = layer.toScreen(p.lon, p.lat), d = Math.hypot(s[0] - g[0], s[1] - g[1]);
       if (d < bd) { bd = d; best = { at: [p.lon, p.lat], place: p.id }; }
     }
@@ -374,7 +374,7 @@ export class RoadEditor {
       ends.push({ id, at: lonLatToSource(...c[0]) }, { id, at: lonLatToSource(...c.at(-1)) });
       for (const x of c) { const k = `${x[0].toFixed(7)},${x[1].toFixed(7)}`; if (!shared.has(k)) shared.set(k, new Set()); shared.get(k).add(id); }
     }
-    const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && p.kind !== "territory").map((p) => lonLatToSource(p.lon, p.lat));
+    const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && p.kind !== "territory" && p.kind !== "domain").map((p) => lonLatToSource(p.lon, p.lat));
     return { ends, shared, places };
   }
   async #simplify() {

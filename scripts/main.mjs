@@ -702,7 +702,7 @@ const pins = new PinEditor({
   // the export can be imported again or adopted as the module's default.
   exportPlaces: () => {
     if (!current) return;
-    const keep = ["id", "name", "kind", "kindChosen", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "shore", "follow", "biomeZone", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
+    const keep = ["id", "name", "kind", "kindChosen", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "shore", "follow", "biomeZone", "partOf", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
     const places = current.places.map((p) => Object.fromEntries(keep.filter((k) => p[k] !== undefined && (p[k] !== false || k === "areaClosed")).map((k) => [k, p[k]])));
     const data = { type: "kg-realms-places", world: current.region.world, version: game.modules.get(MODULE_ID).version, edits: editsOf(current.region.world), customMarkers: setting("customMarkers") ?? {}, places };
     foundry.utils.saveDataToFile(JSON.stringify(data, null, 1), "application/json", `${current.region.world}-places.json`);

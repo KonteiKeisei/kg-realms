@@ -1,4 +1,5 @@
 import {partyScene} from './party-groups.mjs';
+import { hierarchyOf } from "./map-layers.mjs";
 import { defaultWorldId } from "./worlds.mjs";
 import {entranceType} from './settlement-entry.mjs';
 // What the place card shows and saves for each kind of place: realm places (the world's place
@@ -73,6 +74,9 @@ export function registerKinds(cards, deps) {
       if (!p) return null;
       const scene = p.scene ? game.scenes.get(p.scene) : null, map = localMapOf(scene);
       const local = map?.placeId === p.id;
+      // Where it sits in the realms, worked out from their borders and links. Hidden ones only for the GM.
+      const places = hierarchyOf(p, await deps.realmPlaces(ref.world), { showHidden: game.user.isGM });
+      const shown = (list) => (list.length ? list.map((t) => t.name).join(", ") : null);
       // A description from the Forgotten Realms Wiki (CC BY-SA) credits and links its article.
       const src = !p.summary && p.descr && p.descrSource?.url ? `<p class="kgr-credit">From the <a href="${esc(p.descrSource.url)}" target="_blank" rel="noopener">${esc(p.descrSource.name ?? "Forgotten Realms Wiki")}</a>, CC BY-SA.</p>` : "";
       const known = p.known ?? `${asHtml(p.summary || p.descr)}${src}${legacyText(p.page)}`;
@@ -85,7 +89,7 @@ export function registerKinds(cards, deps) {
         img: p.img || legacyImage(p.page), known, gmNotes: p.gmNotes ?? "", rumours: p.rumours ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"),
         actor: p.actor ?? null, url: p.url ?? null, locate: true,
         enter: enterFor(p.scene, p.name),
-        rows: [["Factions", p.factions ? p.factions.split(",").slice(0, 5).join(", ") : null]],
+        rows: [["Part of", shown(places.within)], ["Crosses", shown(places.crosses)], ["Factions", p.factions ? p.factions.split(",").slice(0, 5).join(", ") : null]],
         gmActions: preset ? [{ act: "setup", label: `Set up the local map (${preset.places} places)`, icon: "fa-map-location-dot" }] : [],
         // Any place can go: one the GM added is deleted, one the module ships is removed from this
         // world (restored from the map editor's Places tab).

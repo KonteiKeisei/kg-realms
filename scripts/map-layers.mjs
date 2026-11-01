@@ -24,18 +24,26 @@ const LINES = words(["River", "Strait", "Channel", "Canyon", "Range"]);
 
 const cls = (p) => String(p?.class ?? "").toLowerCase();
 
+/** The top level: a country or empire. Everything below one, at any depth, is a territory, whatever its type: a state, a county, a region. */
+const DOMAIN = words(["Domain", "Empire", "Kingdom", "Country", "Nation", "Realm", "Republic", "Dominion", "Theocracy", "Confederation", "Khanate", "Principality", "City-state"]);
 /**
  * What sort of thing a place is. Realms were once natural features: one of a realm's types still is
- * unless the GM has said otherwise (kindChosen), and reads as a territory, wherever it was saved.
+ * unless the GM has said otherwise (kindChosen), and reads as a domain or a territory by its type,
+ * wherever it was saved. So does the single kind of 0.86, once GM-chosen or not.
  */
-export const placeKind = (p) => (!p?.kindChosen && p?.kind === "natural" && REALM.has(cls(p)) ? "territory" : p?.kind);
+export const placeKind = (p) => {
+  if (p?.kindChosen) return p.kind;
+  if (p?.kind === "natural" && REALM.has(cls(p))) return DOMAIN.has(cls(p)) ? "domain" : "territory";
+  if (p?.kind === "territory" && DOMAIN.has(cls(p))) return "domain";
+  return p?.kind;
+};
 
 /** The layer a place is drawn on: its own choice, else its kind's or type's; null for none (road names). */
 export function placeLayer(p) {
   if (MAP_LAYERS.includes(p?.layer)) return p.layer;
   const c = cls(p);
   if (NONE.has(c)) return null;
-  if (p?.kind === "territory") return "realms";
+  if (p?.kind === "territory" || p?.kind === "domain") return "realms";
   // Told it is a natural feature, whatever its type's word usually means (The Steppes, a Region).
   if (p?.kindChosen && p?.kind === "natural" && REALM.has(c)) return "geo";
   if (REALM.has(c)) return "realms";
@@ -178,6 +186,55 @@ export function inlandWaters(places = [], waterways = {}) {
 /** Whether a place can be a biome zone: land on the Geography layer, with a closed border drawn for it. */
 export const canBeBiome = (p) => !!p?.area && placeLayer(p) === "geo" && areaKind(p) === "land" && !!placeOutline(p)?.closed;
 
+/** A territory's chain upward by its links: itself, then what it is part of, and so on. A domain is the top; a circle stops. */
+function upward(t, byId) {
+  const out = [], seen = new Set();
+  for (let at = t; at && !seen.has(at.id); at = at.partOf && at.kind !== "domain" ? byId.get(at.partOf) : null) { seen.add(at.id); out.push(at); }
+  return out;
+}
+const territoriesOf = (places) => (places ?? []).filter((p) => placeLayer(p) === "realms");
+/** Territories whose drawn border holds a spot, smallest first. */
+function territoriesAt(lon, lat, places) {
+  return territoriesOf(places).map((p) => [p, placeOutline(p)]).filter(([, o]) => o?.closed && insideRing(o.pts, [lon, lat])).sort((a, b) => ringSize(a[1].pts) - ringSize(b[1].pts)).map(([p]) => p);
+}
+/** Territories in order, each followed by what it is part of; each once. */
+function withParents(list, byId) {
+  const out = new Map();
+  for (const t of list) for (const up of upward(t, byId)) if (!out.has(up.id)) out.set(up.id, up);
+  return [...out.values()];
+}
+/**
+ * Where a place sits in the realms: { within, crosses }, innermost first. A settlement or site knows by
+ * its point: every drawn border around it, and what those are part of. A territory knows by its link,
+ * or failing that by the larger borders around it. A natural feature with an outline may cross
+ * boundaries: within is what holds all of it, crosses is what holds only some of it.
+ */
+export function hierarchyOf(place, places, { showHidden = false } = {}) {
+  const byId = new Map(territoriesOf(places).map((t) => [t.id, t])), seen = (t) => showHidden || !t.hidden;
+  const result = (within, crosses = []) => ({ within: within.filter(seen), crosses: crosses.filter(seen) });
+  if (!place) return result([]);
+  if (place.kind === "domain") return result([]);
+  if (placeLayer(place) === "realms") {
+    if (place.partOf && byId.has(place.partOf)) return result(upward(byId.get(place.partOf), byId).filter((t) => t.id !== place.id));
+    const own = placeOutline(place), mine = own?.closed ? ringSize(own.pts) : 0;
+    const below = new Set([...byId.values()].filter((t) => upward(t, byId).some((u) => u.id === place.id)).map((t) => t.id));
+    const around = territoriesAt(place.lon, place.lat, places).filter((t) => !below.has(t.id) && ringSize(placeOutline(t).pts) > mine);
+    return result(withParents(around, byId));
+  }
+  const outline = placeLayer(place) === "geo" ? placeOutline(place) : null;
+  if (!outline) return result(withParents(territoriesAt(place.lon, place.lat, places), byId));
+  const step = Math.max(1, Math.floor(outline.pts.length / 64)), samples = outline.pts.filter((_, i) => i % step === 0);
+  const sets = samples.map(([lon, lat]) => withParents(territoriesAt(lon, lat, places), byId));
+  const every = (sets[0] ?? []).filter((t) => sets.every((s) => s.some((u) => u.id === t.id)));
+  const some = new Map(sets.flat().filter((t) => !every.some((u) => u.id === t.id)).map((t) => [t.id, t]));
+  return result(every, [...some.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))));
+}
+/** What a territory can be part of, a domain or another territory: not itself, nothing already part of it. */
+export function partOfChoices(place, places) {
+  const list = territoriesOf(places), byId = new Map(list.map((t) => [t.id, t]));
+  return list.filter((t) => !upward(t, byId).some((u) => u.id === place.id)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 const ringSize = (ring) => Math.abs(ring.reduce((sum, a, i) => { const b = ring[(i + 1) % ring.length]; return sum + a[0] * b[1] - a[1] * b[0]; }, 0));
 /**
  * What to call a spot, from what the GM has drawn and placed: "In Thay, in Rawlinswood near Arine",
@@ -187,16 +244,17 @@ const ringSize = (ring) => Math.abs(ring.reduce((sum, a, i) => { const b = ring[
  * takes "near" before any other place. milesTo(place) gives its distance from the spot.
  */
 export function spotName(lon, lat, places, milesTo) {
-  let town = null, td = 5, settlement = null, sd = 60, poi = null, pd = 60, realm = null, geo = null;
+  let town = null, td = 5, settlement = null, sd = 60, poi = null, pd = 60, geo = null;
   for (const p of places ?? []) {
     if (p.hidden || (p.unnamed && !p.edited)) continue;
     const layer = placeLayer(p);
     if (!layer) continue;
+    if (layer === "realms") continue;
     if (layer !== "places") {
       const o = placeOutline(p);
       if (!o?.closed || !insideRing(o.pts, [lon, lat])) continue;
-      const size = ringSize(o.pts), best = layer === "realms" ? realm : geo, found = { p, size };
-      if (!best || size < best.size) { if (layer === "realms") realm = found; else geo = found; }
+      const size = ringSize(o.pts);
+      if (!geo || size < geo.size) geo = { p, size };
       continue;
     }
     const d = milesTo(p);
@@ -205,8 +263,11 @@ export function spotName(lon, lat, places, milesTo) {
       if (d < sd) { sd = d; settlement = p; }
     } else if (d < pd) { pd = d; poi = p; }
   }
-  if (town) return realm ? `In ${town.name}, ${realm.p.name}` : `In ${town.name}`;
-  const where = [realm && `in ${realm.p.name}`, geo && `${areaKind(geo.p) === "water" ? "on" : "in"} ${geo.p.name}`].filter(Boolean).join(", ");
+  // Every territory around it, innermost first, with what those are part of. Hidden ones say nothing.
+  const byId = new Map(territoriesOf(places).map((t) => [t.id, t]));
+  const realms = withParents(territoriesAt(lon, lat, places), byId).filter((t) => !t.hidden && !(t.unnamed && !t.edited)).map((t) => t.name).join(", ");
+  if (town) return realms ? `In ${town.name}, ${realms}` : `In ${town.name}`;
+  const where = [realms && `in ${realms}`, geo && `${areaKind(geo.p) === "water" ? "on" : "in"} ${geo.p.name}`].filter(Boolean).join(", ");
   const near = (settlement ?? poi)?.name;
   const text = where && near ? `${where} near ${near}` : where || (near ? `near ${near}` : "Wilderness");
   return text[0].toUpperCase() + text.slice(1);
