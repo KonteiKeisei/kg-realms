@@ -470,6 +470,24 @@ export function nearSea(sea, p, px = 12) {
 }
 
 /** Shared settlement port rule, used by travel and by local-map entrance setup. */
+/** How near a port a stop can be and still sail from it: as near as counts as being in that town. */
+export const PORT_STOP_MI = 5;
+/** How far a port the GM has marked can be from the water: a marked port always works. */
+export const MARKED_PORT_REACH_MI = 100;
+/**
+ * The port a stop is at: the one of its name wherever it stands (a stop keeps the spot it was made at,
+ * and a place can move since), else the nearest within PORT_STOP_MI. spot: { lon, lat, name? }.
+ */
+export function portForStop(spot, ports, toSheet, milesPerPixel) {
+  if (!spot) return null;
+  const named = spot.name && ports.find((p) => p.name === spot.name);
+  if (named) return named;
+  const at = toSheet(spot.lon, spot.lat);
+  let best = null, bd = PORT_STOP_MI / milesPerPixel;
+  for (const p of ports) { const q = toSheet(p.lon, p.lat), d = Math.hypot(q[0] - at[0], q[1] - at[1]); if (d < bd) { bd = d; best = p; } }
+  return best;
+}
+
 export function automaticPort(place, sea, toSheet, milesPerPixel) {
   if (!place || place.kind !== 'settlement' || !sea) return false;
   const at = toSheet(place.lon, place.lat);

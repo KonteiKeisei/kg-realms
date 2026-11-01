@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.88.3: ports work
+
+- **Fixed:** a settlement marked as a port now works as one. A ship finds the nearest water even if the port was placed well inland (up to 100 miles).
+- **Fixed:** a party in town couldn't sail from its port unless within a mile of the marker. A stop now counts as at a port within 5 miles, the same distance that counts as being in that town. A stop named for a port counts wherever it stands, so moving the place later doesn't break it.
+
 ## 0.88.2: stops say where they are; the party stays visible
 
 - **Route stops show their domain and territory**, under the stop's name: "In Empiria, Salvae Empire". It comes from drawn borders and Part of links, so a stop outside every drawn border shows nothing.

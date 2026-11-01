@@ -9,7 +9,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
 import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
-import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours } from "./waterways.mjs";
+import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, MARKED_PORT_REACH_MI } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
 import { CampPanel, showDC } from "./ui-camp.mjs";
 import { onCanvas, RightClick } from "./canvas-input.mjs";
@@ -407,7 +407,7 @@ export class TravelHud {
     // Port availability is independent of whether sailing would beat the road. Cache it with
     // the route sheet, so clock updates and camp redraws do not rescan the world's ports.
     const nodes = this.sheet?.nodes ?? this.stops().slice(0, 1).map((w) => ({ at: lonLatToSource(w.lon, w.lat) }));
-    this.seaNodes = new Set(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at); return this.portAt({ lon, lat }) ? [i] : []; }));
+    this.seaNodes = new Set(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at); return this.portAt({ lon, lat, name: n.name }) ? [i] : []; }));
     // The GM is told when a change to the route leaves encounters placed for it behind.
     if (game.user.isGM) {
       const met = new Set((this.plan?.encounters ?? []).map((e) => e.id));
@@ -480,7 +480,12 @@ export class TravelHud {
   seaPlan(from, to, vessel) {
     if (!this.sea) return null;
     const season = this.getSeason?.() ?? "summer", key = `${from.map(Math.round)}|${to.map(Math.round)}|${vessel.mph}|${season}`;
-    if (!this.seaCache.has(key)) this.seaCache.set(key, planSea(this.sea, from, to, { mph: vessel.mph, season, reach: HARBOUR_MI / SOURCE_MAP.milesPerPixel }));
+    if (!this.seaCache.has(key)) {
+      // A port the GM marked works, however far inland it was placed: a ship finds the nearest water.
+      const mpp = SOURCE_MAP.milesPerPixel, marked = (q) => { const [lon, lat] = sourceToLonLat(q[0], q[1]), p = this.portAt({ lon, lat }); return p?.port === true; };
+      const reach = (marked(from) || marked(to) ? MARKED_PORT_REACH_MI : HARBOUR_MI) / mpp;
+      this.seaCache.set(key, planSea(this.sea, from, to, { mph: vessel.mph, season, reach }));
+    }
     return this.seaCache.get(key);
   }
 
@@ -530,17 +535,9 @@ export class TravelHud {
     return auto;
   }
 
-  /** The port at a stop (snapped to a place, or within a mile of one), or null. */
+  /** The port at a stop (waterways.mjs portForStop), or null. Hidden ones only for the GM. */
   portAt(w) {
-    if (!w) return null;
-    const at = lonLatToSource(w.lon, w.lat), mpp = SOURCE_MAP.milesPerPixel;
-    let best = null, bd = 1 / mpp;
-    for (const p of this.getPlaces()) {
-      if (p.hidden || !this.isPort(p)) continue;
-      const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - at[0], q[1] - at[1]);
-      if (d < bd || (Math.abs(p.lon - w.lon) < 1e-9 && Math.abs(p.lat - w.lat) < 1e-9)) { bd = d; best = p; }
-    }
-    return best;
+    return portForStop(w, this.getPlaces().filter((p) => (!p.hidden || game.user?.isGM) && this.isPort(p)), lonLatToSource, SOURCE_MAP.milesPerPixel);
   }
   /** Whether leg i (from stop i to stop i + 1) runs port to port. */
   legByWater(i) { const sts = this.stops(); return !!(this.portAt(sts[i]) && this.portAt(sts[i + 1])); }
@@ -577,8 +574,8 @@ export class TravelHud {
     if (!r || !sh || !this.sea || !game.user.isGM) return [];
     const mpp = SOURCE_MAP.milesPerPixel, now = this.progress()?.hour ?? -1;
     const ports = this.getPlaces().filter((p) => !p.hidden && this.isPort(p)).map((p) => ({ p, at: lonLatToSource(p.lon, p.lat) }));
-    const near = (at) => { let b = null, bd = 2 / mpp; for (const q of ports) { const d = Math.hypot(q.at[0] - at[0], q.at[1] - at[1]); if (d < bd) { bd = d; b = q; } } return b; };
-    const pts = sh.nodes.map((n, i) => ({ n, i, q: near(n.at) }));
+    const near = (n) => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), p = portForStop({ lon, lat, name: n.name }, ports.map((q) => q.p), lonLatToSource, mpp); return p ? ports.find((q) => q.p === p) : null; };
+    const pts = sh.nodes.map((n, i) => ({ n, i, q: near(n) }));
     const anchors = pts.filter((x) => x.n.stop != null);
     const stayOf = (x) => (x.n.stop > 0 ? Number(s.stays?.[x.n.stop - 1]) || 0 : 0);
     const vessel = this.vessel("sailing"), opts = { hoursPerDay: s.hours, rest: s.rest };
