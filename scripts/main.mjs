@@ -41,7 +41,8 @@ import { JourneyLight } from "./journey-light.mjs";
 import { LocalMaps } from "./local-maps.mjs";
 import { LocalMapRenderer } from "./local-map-renderer.mjs";
 import { SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
-import { areasGeoJSON, outlinedIds, placeLayer, withShoreBorders, placeFromShore, inlandWaters, canBeBiome } from "./map-layers.mjs";
+import { areasGeoJSON, outlinedIds, placeLayer, withFollowedBorders, placeFromShore, placeFromZone, inlandWaters, canBeBiome } from "./map-layers.mjs";
+import { borderChoices, followOf, waterwaysWithBorders, zonesWithBorders } from "./borders.mjs";
 import { LayersRail, chosenLayer } from "./ui-layers.mjs";
 import { shoreWater } from "./waterways.mjs";
 const snow = new SnowCover();
@@ -237,7 +238,7 @@ async function saveEdits(world, fn) {
  */
 function placesFor(world, places, level) {
   const named = Object.values(waterwaysOf(world)).filter((w) => w.kind !== "wind" && w.name).map((w) => w.name);
-  return dropWaterDuplicates(withShoreBorders(applyEdits(places, editsOf(world), level), waterwaysOf(world)), named);
+  return dropWaterDuplicates(withFollowedBorders(applyEdits(places, editsOf(world), level), borderIndex(world)), named);
 }
 
 /** The places on the map: their points, and the borders and names of the areas among them (map-layers.mjs). */
@@ -329,8 +330,9 @@ async function installEncounterDefaults() {
   hud.refreshProgress();
 }
 const shippedBiomes=new Map();
-async function loadShippedBiomes(world){if(!shippedBiomes.has(world)){const work=(async()=>{const r=await fetch(worldUrl(world, "biomes.json"));if(r.status===404)return{};if(!r.ok)throw Error(`Biome defaults: HTTP ${r.status}`);return r.json();})().catch(error=>{console.warn("kg-realms | biome defaults:",error);return{unavailable:true};});shippedBiomes.set(world,work);work.then(data=>shippedBiomes.set(world,data)).catch(()=>shippedBiomes.delete(world));}return shippedBiomes.get(world);}
-const biomesOf = world => mergeBiomeConfig(shippedBiomes.get(world) instanceof Promise?{}:shippedBiomes.get(world),(setting("biomes")??{})[world]??{});
+async function loadShippedBiomes(world){if(!borderPlaces.has(world)){borderPlaces.set(world,{});loadWorld(world).then(data=>borderPlaces.set(world,Object.fromEntries((data.places??[]).filter(p=>p.area||p.follow||p.shore).map(p=>[p.id,p])))).catch(()=>borderPlaces.delete(world));}if(!shippedBiomes.has(world)){const work=(async()=>{const r=await fetch(worldUrl(world, "biomes.json"));if(r.status===404)return{};if(!r.ok)throw Error(`Biome defaults: HTTP ${r.status}`);return r.json();})().catch(error=>{console.warn("kg-realms | biome defaults:",error);return{unavailable:true};});shippedBiomes.set(world,work);work.then(data=>shippedBiomes.set(world,data)).catch(()=>shippedBiomes.delete(world));}return shippedBiomes.get(world);}
+const storedBiomes = world => mergeBiomeConfig(shippedBiomes.get(world) instanceof Promise?{}:shippedBiomes.get(world),(setting("biomes")??{})[world]??{});
+const biomesOf = world => zonesWithBorders(storedBiomes(world),borderIndex(world));
 let biomeWrites=Promise.resolve();
 function saveBiomes(world,fn){
   biomeWrites=biomeWrites.catch(()=>{}).then(async()=>{if(!game.user.isGM)return;const shipped=await loadShippedBiomes(world);if(shipped.unavailable)throw Error("Biome defaults could not load. Reload before saving biome edits.");const all=foundry.utils.deepClone(setting("biomes")??{}),next=fn(foundry.utils.deepClone(mergeBiomeConfig(shipped,all[world])));all[world]=biomeEdits(shipped,next);await game.settings.set(MODULE_ID,"biomes",all);});return biomeWrites;
@@ -356,11 +358,21 @@ async function loadShippedWaterways(world) {
   } catch { /* none shipped */ }
   return shippedWaterways.get(world);
 }
-function waterwaysOf(world) {
+function storedWaterways(world) {
   const out = { ...(shippedWaterways.get(world) ?? {}) };
   for (const [id, w] of Object.entries((setting("waterways") ?? {})[world] ?? {})) { if (w) out[id] = w; else delete out[id]; }
   return out;
 }
+/** Everything with an outline, as stored, for shared borders (borders.mjs). The world's own places with their edits on top. */
+const borderPlaces = new Map();
+function borderIndex(world) {
+  const edits = editsOf(world), places = { ...(borderPlaces.get(world) ?? {}) };
+  for (const [id, e] of Object.entries(edits.edits ?? {})) places[id] = e.removed ? null : { ...(places[id] ?? {}), ...e };
+  for (const [id, p] of Object.entries(edits.added ?? {})) places[id] = { ...p, ...(edits.edits?.[id] ?? {}) };
+  for (const id of Object.keys(places)) if (!places[id]) delete places[id];
+  return { shores: storedWaterways(world), zones: storedBiomes(world).zones ?? {}, places };
+}
+function waterwaysOf(world) { return waterwaysWithBorders(storedWaterways(world), borderIndex(world)); }
 /** fn(the waterways as they are) gives them as they should be; only what differs from the module's is kept. */
 async function saveWaterways(world, fn) {
   const shipped = await loadShippedWaterways(world), next = fn(foundry.utils.deepClone(waterwaysOf(world))) ?? {};
@@ -514,7 +526,7 @@ const onBiome = async (scene, biome, here, query) => {
 /** A biome zone on a place that follows a shoreline goes where the shoreline goes, and goes if it stops being able to be one. */
 async function syncShoreZones() {
   if (!current || !isPrimaryGM()) return;
-  const world = current.region.world, zones = biomesOf(world).zones ?? {}, linked = current.places.filter((p) => p.shore && p.biomeZone);
+  const world = current.region.world, zones = storedBiomes(world).zones ?? {}, linked = current.places.filter((p) => p.shoreLine && p.biomeZone);
   const change = linked.filter((p) => zones[p.biomeZone] && (!canBeBiome(p) || JSON.stringify(zones[p.biomeZone].pts) !== JSON.stringify(p.area)));
   if (!change.length) return;
   await saveBiomes(world, (c) => {
@@ -673,8 +685,8 @@ const pins = new PinEditor({
   getRegions: () => current?.world?.regions ?? [],
   // A place selected in the editor: the map shows its layer.
   showLayer: (name) => layersRail.setLayer(name),
-  // Shorelines a place can follow.
-  getShores: () => (current ? waterwaysOf(current.region.world) : {}),
+  // The outlines a place can follow.
+  getBorderChoices: (self, name) => (current ? borderChoices(borderIndex(current.region.world), self, name) : []),
   // A geography area can be a biome zone (0.82).
   getBiomes: () => (current ? biomesOf(current.region.world) : null),
   saveBiomes: (fn) => current && saveBiomes(current.region.world, fn),
@@ -690,7 +702,7 @@ const pins = new PinEditor({
   // the export can be imported again or adopted as the module's default.
   exportPlaces: () => {
     if (!current) return;
-    const keep = ["id", "name", "kind", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "shore", "biomeZone", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
+    const keep = ["id", "name", "kind", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "shore", "follow", "biomeZone", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
     const places = current.places.map((p) => Object.fromEntries(keep.filter((k) => p[k] !== undefined && (p[k] !== false || k === "areaClosed")).map((k) => [k, p[k]])));
     const data = { type: "kg-realms-places", world: current.region.world, version: game.modules.get(MODULE_ID).version, edits: editsOf(current.region.world), customMarkers: setting("customMarkers") ?? {}, places };
     foundry.utils.saveDataToFile(JSON.stringify(data, null, 1), "application/json", `${current.region.world}-places.json`);
@@ -746,14 +758,15 @@ const roads = new RoadEditor({
 const water = new WaterwayEditor({
   getLayer: () => layer,
   // The place that follows a shoreline; making one, or linking one of its name (the GM's choice).
-  shorePlace: (id) => current?.places.find((p) => p.shore === id) ?? null,
+  shorePlace: (id) => current?.places.find((p) => followOf(p) === `shore:${id}`) ?? null,
+  getBorderChoices: (self, name) => (current ? borderChoices(borderIndex(current.region.world), self, name) : []),
   makeShorePlace: async (id) => {
     if (!current) return;
     const world = current.region.world, w = waterwaysOf(world)[id], name = String(w?.name ?? "").trim();
     if (!name) return ui.notifications.warn("KG Realms: name the shoreline first: the place takes its name.");
-    const same = current.places.find((p) => !p.shore && String(p.name).trim().toLowerCase() === name.toLowerCase());
+    const same = current.places.find((p) => !followOf(p) && String(p.name).trim().toLowerCase() === name.toLowerCase());
     if (same && await foundry.applications.api.DialogV2.confirm({ window: { title: `${name}: link a place` }, content: `<p>A place called <b>${foundry.utils.escapeHTML(same.name)}</b> (${foundry.utils.escapeHTML(same.class ?? "")}) already exists. Link it to this shoreline? Its border will follow the shoreline. Choose No to make a new place instead.</p>`, rejectClose: false })) {
-      await savePlaceEdit(world, same.id, { shore: id, area: null, areaClosed: null, shape: null });
+      await savePlaceEdit(world, same.id, { follow: `shore:${id}`, area: null, areaClosed: null, shape: null });
       return ui.notifications.info(`KG Realms: ${same.name} now follows this shoreline.`);
     }
     const placeId = `added-${foundry.utils.randomID()}`;
@@ -769,7 +782,17 @@ const water = new WaterwayEditor({
   // The map's water as the travel panel's route finder has it, for Show the map's water.
   getSea: () => hud.sea
 });
-const biomes = new BiomeEditor({getLayer:()=>layer,getBiomes:()=>current?biomesOf(current.region.world):{},getTerrain:loadTerrain,saveBiomes:fn=>current&&saveBiomes(current.region.world,fn)});
+const biomes = new BiomeEditor({
+  // Outlines a zone can follow, and the place made from or following it.
+  getBorderChoices:(self,name)=>current?borderChoices(borderIndex(current.region.world),self,name,{closedOnly:true}):[],
+  zonePlace:id=>current?.places.find(p=>p.biomeZone===id||followOf(p)===`biome:${id}`)??null,
+  makeZonePlace:async id=>{
+    if(!current)return;const world=current.region.world,z=biomesOf(world).zones?.[id];if(!z)return;
+    const placeId=`added-${foundry.utils.randomID()}`;
+    await saveEdits(world,e=>{e.added={...(e.added??{}),[placeId]:{id:placeId,...placeFromZone(id,z)}};return e;});
+    ui.notifications.info(`KG Realms: made the place ${z.name}, on the Geography layer. Its border follows this zone.`);
+  },
+  getLayer:()=>layer,getBiomes:()=>current?biomesOf(current.region.world):{},getTerrain:loadTerrain,saveBiomes:fn=>current&&saveBiomes(current.region.world,fn)});
 // The Snow tab: this world's snow (snowOf), shown on the map as it changes.
 const snowTab = new SnowTab({
   snow, getWorld: () => current?.region.world, getSnow: () => snowOf(current?.region.world),
@@ -921,7 +944,7 @@ Hooks.once("init", () => {
   // region's water filter ripples the sea but not its name. Off: one map, as before (a little lighter).
   register("namesAbove", { name: "Names above effects", hint: "Draws the realm map's names, markers and the journey above the scene's effects (FXMaster region filters, weather), so they stay readable while the land and water under them ripple. Off: everything is drawn as one picture, under the effects, which is a little lighter on the computer.", scope: "client", config: true, type: Boolean, default: true, onChange: redraw });
   register("highDpi", { name: "Sharp map on high-DPI screens", hint: "Draws the map at your screen's full resolution when its scaling is 150% or more.", scope: "client", config: true, type: Boolean, default: true, onChange: redraw });
-  register("placeEdits", { scope: "world", config: false, type: Object, default: {}, onChange: () => { card.hide(); refreshPlaces(); cards.refresh(); } });
+  register("placeEdits", { scope: "world", config: false, type: Object, default: {}, onChange: () => { card.hide(); refreshPlaces(); cards.refresh(); water.refresh(); biomes.refresh(); syncShoreZones().catch((err) => console.warn("kg-realms | shared biome zones:", err)); } });
   register("journalsImported", { scope: "world", config: false, type: Boolean, default: false });
   register("cardRepeatsRemoved", { scope: "world", config: false, type: Boolean, default: false });
   // Travel panel placement, per user (client): -1 until first placed.
@@ -953,7 +976,7 @@ Hooks.once("init", () => {
   register("encounterDefaultsApplied", {scope:"world", config:false, type:Object, default:{}});
   register("localMapFxEnabled", {scope:"world", config:false, type:Boolean, default:false});
   register("localMapWaterRegions", {name:"Water regions (FXMaster+)",hint:"Performance intensive. Disable if maps load slowly or water effects cause lag.",scope:"world",config:true,type:Boolean,default:true,onChange:async()=>{await enableLocalMapFx().catch(error=>console.warn('kg-realms | Could not enable FXMaster world effects:',error));for(const w of allWorlds())await localMaps.applySceneEffects(w.id);}});
-  register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{biomes.refresh();hud.refresh();syncViewedJourneys();}});
+  register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{refreshPlaces();water.refresh();biomes.refresh();hud.refresh();syncViewedJourneys();syncShoreZones().catch(err=>console.warn("kg-realms | shared biome zones:",err));}});
   register("waterways", { scope: "world", config: false, type: Object, default: {}, onChange: async () => { refreshPlaces(); if(current)layer.setRiverNames(waterwaysOf(current.region.world)); await hud.refresh(); if (current) await terrainFor(current.region.world, current.world).catch(() => null); water.refresh(); refreshSnowGrid(); syncShoreZones().catch((err) => console.warn("kg-realms | shoreline biome zones:", err)); } });
   // Each world's snow (the Snow tab, snow.mjs): { [world]: { north, south, reversed, midwinter, mountains, hills } }.
   register("snow", { scope: "world", config: false, type: Object, default: {}, onChange: () => { if (current) snow.setConfig(snowOf(current.region.world)); snowTab.refresh(); localMaps.applySeasons(); } });

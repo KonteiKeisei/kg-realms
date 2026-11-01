@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { withShoreBorders, shoreChoices, placeFromShore, inlandWaters, canBeBiome, placeLayer, areasGeoJSON } from "../scripts/map-layers.mjs";
+import { withShoreBorders, placeFromShore, inlandWaters, canBeBiome, placeLayer, areasGeoJSON } from "../scripts/map-layers.mjs";
 import { lakeBiome, climateOf } from "../scripts/biome-climate.mjs";
 
 const loop = [[0, 0], [10, 0], [10, 10], [0, 10]];
@@ -28,12 +28,6 @@ test("a name outside the outline moves in; ends apart makes a line; a deleted sh
   const [gone] = withShoreBorders([{ id: "p", class: "Lake", lon: 1, lat: 1, shore: "nope" }], shores);
   assert.equal(gone.shoreGone, true); assert.equal(gone.area, undefined);
   assert.equal(withShoreBorders([{ id: "p", shore: "r1", lon: 1, lat: 1 }], shores)[0].shoreGone, true, "a river is not a shoreline");
-});
-
-test("the shorelines offered: its own name first, rivers not at all", () => {
-  const list = shoreChoices(shores, "lake oban");
-  assert.deepEqual(list.map((c) => [c.id, c.same]), [["s1", true], ["s2", false]]);
-  assert.equal(shoreChoices({ a: { kind: "shore", pts: loop } })[0].name, "Unnamed shoreline");
 });
 
 test("making a place from a shoreline: water inside a lake, outside islands, ends apart a coast", () => {
@@ -70,7 +64,7 @@ test("inland waters: closed shorelines with water inside, and lakes with their o
 
 test("the editor offers it, never forces it, and hands the reshaping to the shoreline", () => {
   const pins = readFileSync(new URL("../scripts/ui-pins.mjs", import.meta.url), "utf8");
-  assert.ok(pins.includes('<option value="">Its own border</option>')); assert.ok(pins.includes("Reshape it in the Waterways tab"));
+  assert.ok(readFileSync(new URL("../scripts/borders.mjs", import.meta.url), "utf8").includes('<option value="">Its own border</option>')); assert.ok(pins.includes("Reshape it in ${borderHome(p.followRef)}"));
   assert.ok(pins.includes("#editable(p) { return p?.shoreLine ? null : this.#outline(p); }"));
   const water = readFileSync(new URL("../scripts/ui-waterways.mjs", import.meta.url), "utf8");
   assert.ok(water.includes('data-act="make-place"'));

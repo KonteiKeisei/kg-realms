@@ -1,3 +1,4 @@
+import { borderSelect, borderHome } from "./borders.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
 // The map editor's Waterways tab: shorelines, rivers, trade winds and currents, and sea routes, which the travel
 // panel's ships use (waterways.mjs). The map's own sea is water already; a shoreline walls off
@@ -117,6 +118,9 @@ export class WaterwayEditor {
     return bi;
   }
 
+  /** A shoreline sharing another's outline: its corners are reshaped there. */
+  #following() { return !!(this.selected && this.all()[this.selected]?.follow); }
+
   /* ------------------------------------------------------------------ events */
 
   #stop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
@@ -128,7 +132,7 @@ export class WaterwayEditor {
     // drawing, so a long river is drawn in one go across the map.
     if (e.button === 2) {
       if (this.draft) return this.right.down(e, () => this.#finish());
-      const i = this.#nodeAt(g);
+      const i = this.#following() ? -1 : this.#nodeAt(g);
       if (i >= 0) this.right.down(e, () => this.#removeNode(i));
       return;
     }
@@ -159,7 +163,7 @@ export class WaterwayEditor {
       if (!other || other.id === this.selected || this.all()[other.id]?.kind !== me?.kind) return ui.notifications.info(`KG Realms: click another ${WATERWAY_KINDS[me?.kind]?.label.toLowerCase() ?? "waterway"} to join it to this one. Esc cancels.`);
       return this.#join(other.id);
     }
-    if (this.selected) {
+    if (this.selected && !this.#following()) {
       const i = this.#nodeAt(g);
       if (i >= 0) { this.#stop(e); this.drag = i; this.dragChanged = false; this.node = i; this.#draw(); return this.#render(); }
       const hit = nearestOnLine(this.#screen(this.coords), g);
@@ -390,7 +394,7 @@ export class WaterwayEditor {
     const list = Object.entries(this.all()).map(([id, w]) => ({ id, ...w, pts: id === this.selected && this.coords ? this.coords : w.pts }));
     if (this.draft && this.coords?.length) list.push({ id: "draft", kind: this.draft.kind, name: "", pts: this.hover ? [...this.coords, this.hover] : this.coords });
     layer.setWaterways(list, this.selected ?? (this.draft ? "draft" : null), this.showWater ? this.#coast() : null);
-    layer.setRouteEdit(null, this.coords ?? null, this.node);
+    layer.setRouteEdit(null, this.#following() ? null : this.coords ?? null, this.node);
   }
 
   /** The group names in use for a kind of waterway (a river and its tributaries, say), sorted. */
@@ -464,7 +468,7 @@ export class WaterwayEditor {
       this.panel.addEventListener("toggle", (e) => { const d = e.target; if (d.matches?.("details[data-key]")) this.#setOpen(d.dataset.key, d.open); }, true);
     }
     const all = this.all(), w = this.selected ? all[this.selected] : null, season = this.getSeason?.() ?? "";
-    const tools = `<div class="kgr-water-tools">${Object.entries(WATERWAY_KINDS).map(([k, v]) => `<button data-act="new" data-kind="${k}" class="${this.draft?.kind === k ? "on" : ""}" title="Draw a ${v.label.toLowerCase()}"><i class="fa-solid ${v.icon}"></i> ${v.label}</button>`).join("")}</div>`;
+    const tools = `<div class="kgr-water-tools">${Object.entries(WATERWAY_KINDS).map(([k, v]) => `<button data-act="new" data-kind="${k}" class="${this.draft?.kind === k ? "on" : ""}" title="Draw a ${v.label.toLowerCase()}"><i class="fa-solid ${v.icon}"></i> ${v.label}</button>`).join("")}</div>${(() => { const from = this.getBorderChoices?.("", "") ?? []; const usable = from.filter((c) => !c.ref.startsWith("shore:")); return usable.length && !this.draft ? `<div class="row"><label>New shoreline from ${borderSelect('name="new-shore-from"', usable, "", esc).replace('<option value="">Its own border</option>', '<option value="">Choose an outline</option>')}</label></div>` : ""; })()}`;
     let body;
     if (this.draft) {
       body = `<p class="hint">Click to add points${["river", "wind"].includes(this.draft.kind) ? " in the direction it flows" : ""}. Double-click, right-click or Enter finishes; Esc cancels.</p>
@@ -506,8 +510,10 @@ export class WaterwayEditor {
   #shoreRows(w) {
     const rule = ruleTooltip("<p><strong>Water side</strong> The side of the shoreline that is sea or lake. The water runs out from it until it meets another shoreline or the map's edge, so a shoreline should end off the map's edge, join another, or close into a loop (an island or a lake).</p><p><strong>Uses</strong> Ships sail only on water; snow lies only on land.</p><p><strong>Not set</strong> The shoreline is only a wall no boat crosses; the map's own water stays as it is.</p>");
     const sides = w.closed ? ["inside", "outside"] : ["left", "right"];
+    const choices = this.getBorderChoices?.(`shore:${this.selected}`, w.name) ?? [];
+    const share = choices.length || w.follow ? `<div class="row"><label>Border ${borderSelect('name="shore-border"', choices, w.follow ?? "", esc)}</label>${ruleTooltip("<p><strong>Follow</strong> This shoreline's line is a biome zone's or a place's border: one outline, drawn once, whichever came first. Reshape that one and this moves.</p><p><strong>Its own border</strong> Leaving a shared border keeps a copy to change here.</p>")}</div>${w.follow ? `<p class="hint">${w.followGone ? "The outline it followed has been deleted." : `Reshape it in ${borderHome(w.follow)}.`}</p>` : ""}` : "";
     const leak = this.selected && this.#leaks(this.selected) ? `<p class="warn kgr-leak-warn"><i class="fa-solid fa-triangle-exclamation"></i> Its water leaks: the sea runs round an open end (or through a gap) into the land on its other side, and that land counts as water for ships, roads and snow. Run its ends off the map's edge, join them to another shoreline, close it into a loop, or set its water side to Not set.</p>` : "";
-    return `${leak}<span class="hint">No boat crosses it.${w.closed ? " A loop: an island or a lake." : ""}</span>
+    return `${share}${leak}<span class="hint">No boat crosses it.${w.closed ? " A loop: an island or a lake." : ""}</span>
       <div class="row"><label>Water side <select name="water"><option value="">Not set</option>${sides.map((s) => `<option value="${s}" ${w.water === s ? "selected" : ""}>${SIDES[s]}</option>`).join("")}</select></label>${rule}</div>
       ${this.pickingSide ? `<p class="kgr-sel node"><i class="fa-solid fa-hand-pointer"></i> Click the map on the water side of this shoreline. Esc cancels.</p>` : ""}
       ${(() => { const place = this.shorePlace?.(this.selected); return place ? `<p class="hint">The place ${esc(place.name)} follows this shoreline.</p>` : this.makeShorePlace ? `<div class="row"><button data-act="make-place" data-tooltip="Make a place from this shoreline, or link a place of its name. Its border follows the shoreline, so there is one outline to draw."><i class="fa-solid fa-location-dot"></i> Make a place</button></div>` : ""; })()}<div class="row">${w.water && !this.pickingSide ? `<button data-act="pick-side" class="kgr-water-set" data-tooltip="Click again to change the water side"><i class="fa-solid fa-check"></i> Water side set</button>` : `<button data-act="pick-side" class="${this.pickingSide ? "on" : ""}"><i class="fa-solid fa-hand-pointer"></i> Click the water side</button>`}${w.closed ? `<button data-act="unloop" title="Take out the join between its last point and its first"><i class="fa-solid fa-link-slash"></i> Open the loop</button>` : (this.coords ?? w.pts).length > 2 ? `<button data-act="loop" title="Join its last point to its first: an island or a lake"><i class="fa-solid fa-circle-notch"></i> Close into a loop</button>` : ""}</div>`;
@@ -533,6 +539,17 @@ export class WaterwayEditor {
 
   #change(e) {
     const t = e.target, w = this.selected ? this.all()[this.selected] : null;
+    if (t.name === "new-shore-from") {
+      const ref = t.value;
+      if (!ref) return;
+      const from = (this.getBorderChoices?.("", "") ?? []).find((c) => c.ref === ref), id = `wat-${foundry.utils.randomID()}`;
+      return this.#commit((all) => ({ ...all, [id]: { kind: "shore", name: from?.label ?? "", pts: [[0, 0], [0, 0]], follow: ref } })).then(() => this.select(id));
+    }
+    if (t.name === "shore-border") {
+      if (!w) return;
+      // Leaving a shared outline keeps it as this shoreline's own. A new outline needs its water side set again.
+      return this.#save(t.value ? { follow: t.value, water: undefined } : { follow: undefined, pts: w.pts.map((c) => [...c]), closed: w.closed }).then(() => this.#render());
+    }
     if (t.name === "show-water") { this.showWater = t.checked; if (t.checked && !this.getSea?.()) ui.notifications.info("KG Realms: the map's water is still loading; try again in a moment."); return this.#draw(); }
     if (!w) return;
     if (t.name === "name") this.#save({ name: t.value.trim() });

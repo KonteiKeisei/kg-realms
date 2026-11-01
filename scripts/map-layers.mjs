@@ -5,6 +5,8 @@
 // place itself. An area is drawn as a border (closed) or a line with two ends (a strait, a range's
 // spine). Pure: no Foundry.
 
+import { borderOf, followOf } from "./borders.mjs";
+
 export const MAP_LAYERS = ["places", "realms", "geo"];
 export const LAYER_NAMES = { places: "Places", realms: "Realms", geo: "Geography" };
 export const SHAPES = { point: "Point", area: "Area", line: "Line" };
@@ -130,26 +132,26 @@ export function areasGeoJSON(places, regions = []) {
 
 const isShore = (w) => w?.kind === "shore" && Array.isArray(w.pts) && w.pts.length > 1;
 /**
- * Places that follow a shoreline (their own choice: place.shore is its id) take its outline as their
- * border, so there is one outline to draw and it stays in step. A name outside a closed outline moves
- * inside it. A shoreline since deleted leaves the place as it was, marked shoreGone.
+ * Places that follow a shared outline (their own choice: borders.mjs) take it as their border, so there
+ * is one outline to draw and it stays in step. A name outside a closed outline moves inside it. An
+ * outline since deleted leaves the place as it was, marked shoreGone.
  */
-export function withShoreBorders(places, waterways = {}) {
+export function withFollowedBorders(places, index) {
   return places.map((p) => {
-    if (!p.shore) return p;
-    const w = waterways[p.shore];
-    if (!isShore(w)) return { ...p, shoreGone: true };
-    const closed = !!w.closed && w.pts.length > 2;
-    const at = closed && !insideRing(w.pts, [p.lon, p.lat]) ? interiorPoint(w.pts) : [p.lon, p.lat];
-    return { ...p, area: w.pts, areaClosed: closed, shape: closed ? "area" : "line", lon: at[0], lat: at[1], shoreLine: true };
+    const ref = followOf(p);
+    if (!ref) return p;
+    const b = borderOf(ref, index);
+    if (!b) return { ...p, shoreGone: true };
+    const at = b.closed && !insideRing(b.pts, [p.lon, p.lat]) ? interiorPoint(b.pts) : [p.lon, p.lat];
+    return { ...p, area: b.pts, areaClosed: b.closed, shape: b.closed ? "area" : "line", lon: at[0], lat: at[1], shoreLine: true, followRef: ref };
   });
 }
-/** The shorelines a place may follow: those of its name first, then by name. */
-export function shoreChoices(waterways = {}, name = "") {
-  const fold = (s) => String(s ?? "").trim().toLowerCase(), want = fold(name);
-  return Object.entries(waterways).filter(([, w]) => isShore(w))
-    .map(([id, w]) => ({ id, name: String(w.name ?? "").trim() || "Unnamed shoreline", closed: !!w.closed, same: !!want && fold(w.name) === want }))
-    .sort((a, b) => b.same - a.same || a.name.localeCompare(b.name));
+export const withShoreBorders = (places, waterways = {}) => withFollowedBorders(places, { shores: waterways });
+/** A new place for a biome zone: named as it is, of the type its biome means. */
+const BIOME_CLASS = { forest: "Forest", jungle: "Jungle", taiga: "Forest", mountains: "Mountains", hills: "Hills", desert: "Desert", badlands: "Badlands", wetlands: "Marsh", swamp: "Swamp", glacier: "Glacier", arctic: "Ice", tundra: "Tundra", plains: "Plain", savanna: "Grassland", steppe: "Steppe", coast: "Coast", volcanic: "Mountains" };
+export function placeFromZone(id, zone) {
+  const at = interiorPoint(zone.pts);
+  return { name: String(zone.name ?? "").trim() || "New place", kind: "natural", class: BIOME_CLASS[zone.type] ?? "Region", rank: 4, level: "surface", layer: "geo", follow: `biome:${id}`, lon: +at[0].toFixed(6), lat: +at[1].toFixed(6) };
 }
 /** A new place for a shoreline: a lake if its water is inside, islands if outside, a coast if its ends are apart. */
 export function placeFromShore(id, w) {

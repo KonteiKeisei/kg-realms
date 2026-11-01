@@ -1,5 +1,15 @@
 # KG Realms changelog
 
+## 0.85.0: shared borders
+
+- **Borders are shared, whichever came first.** An outline defined on a shoreline, a biome zone or a place can be used by the other two. They keep a link, not a copy, so reshaping the one moves all that follow it.
+  - **Places** (Places tab, Border): follow a shoreline, a biome zone or another place, with those of its name first.
+  - **Biome zones** (Biomes tab, on a selected zone, Border): follow a shoreline or a place. Make a place makes a place from the zone.
+  - **Shorelines** (Waterways tab, on a selected shoreline, Border): follow a biome zone or a place. New shoreline from makes a new one from either.
+- It is always your choice: nothing links by itself. Its own border stays the default, and leaving a shared border keeps a copy to change on its own.
+- A shared outline's corners are edited only where it is defined, and the panel says which tab that is. Links that would go round in a circle are not offered.
+- If an outline is deleted, or stops closing, what follows it says so. A place keeps its point, a shoreline keeps its last line, and a biome zone turns off until it has a closed outline again.
+
 ## 0.84.0: places follow shorelines; lakes take their land's weather
 
 - **One outline, drawn once.** A place can follow a shoreline, so there is no need to draw the same contour again for a place and a biome.
