@@ -732,7 +732,6 @@ const water = new WaterwayEditor({
   // Shorelines whose water leaks round an open end (shoreWater), by id.
   getLeaks: () => (current ? shoreGrids.get(current.region.world)?.grid?.leaks ?? [] : []),
   prepare: () => current && terrainFor(current.region.world, current.world),
-  getShipped: () => (current ? loadShippedWaterways(current.region.world) : {}),
   getSeason: () => currentSeason(),
   // The map's water as the travel panel's route finder has it, for Show the map's water.
   getSea: () => hud.sea

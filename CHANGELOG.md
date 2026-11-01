@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.83.1: one less waterways button
+
+- Removed the "Back to the module's waterways" button from the Waterways tab. Undo and Export stay.
+
 ## 0.83.0: biomes set the weather
 
 - **The party's biome sets its weather.** When a party token enters an arctic biome, the realm scene switches to arctic weather in Calendaria, and Calendaria rolls from what that climate allows: blizzards there, sandstorms in a desert, monsoons in a jungle, and never the wrong one. At sea it uses the Open Sea climate. A settlement takes the climate of its place on the realm map.

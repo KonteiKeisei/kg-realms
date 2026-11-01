@@ -20,7 +20,7 @@ const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 export class WaterwayEditor {
-  /** getShipped(): the module's waterways for this world (async); getSea(): the travel panel's sea (the map's water, for Show the map's water); getLayer(); getWaterways(): { [id]: { kind, name, pts: [[lon, lat]], current, factor, seasons } }; saveWaterways(fn); getSeason(). */
+  /** getSea(): the travel panel's sea (the map's water, for Show the map's water); getLayer(); getWaterways(): { [id]: { kind, name, pts: [[lon, lat]], current, factor, seasons } }; saveWaterways(fn); getSeason(). */
   constructor(options) {
     Object.assign(this, options);
     this.active = false;
@@ -355,25 +355,6 @@ export class WaterwayEditor {
     ui.notifications.info(`KG Realms: joined into one ${WATERWAY_KINDS[me.kind].label.toLowerCase()}.`);
   }
 
-  /**
-   * The module's waterways are always in use, with this world's changes on top. This takes the
-   * changes off: the module's lines as they come, and none of the world's own (after asking;
-   * Ctrl+Z puts them back).
-   */
-  async #useShipped() {
-    const shipped = await this.getShipped?.();
-    const n = Object.keys(shipped ?? {}).length;
-    if (!n) return ui.notifications.info("KG Realms: the module has no waterways for this world.");
-    const all = this.all(), own = Object.keys(all).filter((id) => !shipped[id]).length;
-    const changed = Object.keys(shipped).filter((id) => JSON.stringify(all[id]) !== JSON.stringify(shipped[id])).length;
-    if (!own && !changed) return ui.notifications.info("KG Realms: this world's waterways are already the module's.");
-    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Back to the module's waterways" }, content: `<p>Go back to the module's ${n} waterways? ${[own ? `${own} line${own === 1 ? "" : "s"} of this world's own will be removed` : "", changed ? `${changed} of the module's, changed or deleted here, will be as the module has them` : ""].filter(Boolean).join(", and ")}. Ctrl+Z puts them back.</p>`, rejectClose: false });
-    if (!ok) return;
-    this.select(null);
-    await this.#commit(() => foundry.utils.deepClone(shipped));
-    ui.notifications.info(`KG Realms: the module's ${n} waterways.`);
-  }
-
   /** The edge of the water boats can use, as [lon, lat] segments (worked out once per change of the water). */
   #coast() {
     const sea = this.getSea?.();
@@ -516,7 +497,7 @@ export class WaterwayEditor {
     const leakNote = leaking && !w ? `<p class="warn kgr-leak-warn"><i class="fa-solid fa-triangle-exclamation"></i> ${leaking} shoreline${leaking === 1 ? "'s water leaks" : "s' water leaks"} into the land (marked in the list). Select one to see how to fix it.</p>` : "";
     const water = `<label class="kgr-water-show"><input type="checkbox" name="show-water" ${this.showWater ? "checked" : ""}> Show the map's water <small>(the edge boats can reach)</small></label>`;
     const list = Object.keys(all).length ? this.#list(all) : "";
-    const files = `<div class="kgr-file-row"><button data-act="undo" title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo</button><button data-act="shipped" title="Undo every change this world made to the module's waterways, and remove its own lines"><i class="fa-solid fa-water"></i> Back to the module's waterways</button><button data-act="export" title="Save every waterway to a file"><i class="fa-solid fa-file-export"></i> Export</button><button data-act="import" title="Load waterways from a file"><i class="fa-solid fa-file-import"></i> Import</button></div>`;
+    const files = `<div class="kgr-file-row"><button data-act="undo" title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo</button><button data-act="export" title="Save every waterway to a file"><i class="fa-solid fa-file-export"></i> Export</button><button data-act="import" title="Load waterways from a file"><i class="fa-solid fa-file-import"></i> Import</button></div>`;
     this.panel.innerHTML = `${tools}${leakNote}${water}${body}${this.draft ? "" : list}${files}`;
     this.onStatus?.();
   }
@@ -542,7 +523,7 @@ export class WaterwayEditor {
     if (act === "pick") return this.select(b.dataset.id);
     ({
       finish: () => this.#finish(), cancel: () => this.#cancelDraft(), undo: () => this.#undo(), export: () => this.export(), import: () => this.import(),
-      delete: () => this.#delete(), deselect: () => this.select(null), shipped: () => this.#useShipped(),
+      delete: () => this.#delete(), deselect: () => this.select(null),
       join: () => { this.joining = true; this.node = null; this.#draw(); this.#render(); }, "join-cancel": () => { this.joining = false; this.#render(); },
       "pick-side": () => { this.pickingSide = !this.pickingSide; this.#render(); }, loop: () => this.#loop(true), unloop: () => this.#loop(false),
       reverse: () => { this.coords = [...(this.coords ?? this.all()[this.selected].pts)].reverse(); this.#draw(); this.#save({ pts: this.coords }); }
