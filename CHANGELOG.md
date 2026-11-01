@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.81.0: exported modules carry their calendar
+
+- **Exported modules carry their Calendaria calendar.** The export captures the calendar the game world uses, complete, with its date display formats, whether it is built in, a built-in one you edited, or your own. The export window names it, and so does the report. Pictures it uses, such as custom moon phases, go to assets/calendar. Calendaria's own stay linked.
+- **Set when the module is first loaded.** The first GM to load it gets the calendar added if need be and set as active, then Foundry offers to reload. It is set once: change calendar afterwards and your choice stays, unless a new version of the module brings a different calendar.
+- A built-in calendar missing from the other game world's copy of Calendaria is added from the captured copy.
+- Without Calendaria, the GM is told once, and the calendar is set when Calendaria is enabled. Exported modules list Calendaria as recommended. A calendar that cannot be set says why and tries again next load.
+- A world module can also name a built-in calendar in its registration: calendar: { id: "harptos", name: "Harptos" }.
+- The in-game date is not part of the export.
+
 ## 0.80.0: exported modules ship compendiums
 
 - **Exported modules ship compendiums.** Scenes, actors, journals, items, tables, macros, playlists and card decks each get a compendium, in a folder of the world's name, GM only.

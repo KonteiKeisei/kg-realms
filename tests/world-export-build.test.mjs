@@ -222,3 +222,25 @@ test("a scene dragged in takes the id its links know; a realm map brings its set
   await sceneFromModule({ id: "x", tokens: [{ actorId: newActor }], flags: { "kg-realms": { moduleScene: { world: "drag", id: "y" } } } }, {}, "someone else");
   assert.equal(created.length, 0);
 });
+
+test("the game world's calendar goes in whole, its own pictures with it, and the module sets it", async () => {
+  install();
+  served.set("worlds/game/art/my-moon.webp", "MOON");
+  game.modules.get = (id) => ({ version: "0.81.0", active: id === "calendaria" });
+  game.settings = { get: (m, k) => (k === "displayFormats" ? { hud: { gm: "a", player: "b" } } : undefined) };
+  const data = { name: "Trorune", metadata: { id: "custom-trorune" }, moons: { m1: { phases: { a: { icon: "worlds/game/art/my-moon.webp" }, b: { icon: "modules/calendaria/assets/moon-phases/01_newmoon.svg" } } } } };
+  globalThis.CALENDARIA = { api: { getActiveCalendar: () => ({ toObject: () => data }) }, managers: { CalendarManager: { isCustomCalendar: () => true, hasDefaultOverride: () => false } } };
+  const built = await buildExport({ id: "t", title: "T", root: ROOT, assetBase: ROOT }, { moduleId: "kg-realms-t", title: "KG Realms: T", version: "1.0.0" });
+  delete globalThis.CALENDARIA;
+  const files = await readZip(built.parts), M = "kg-realms-t", D = `${M}/data/worlds/t`;
+  const calendar = JSON.parse(files.get(`${D}/calendar.json`));
+  assert.equal(calendar.id, "custom-trorune"); assert.equal(calendar.kind, "custom"); assert.ok(calendar.displayFormats.hud);
+  assert.equal(calendar.data.moons.m1.phases.a.icon, `modules/${M}/assets/calendar/my-moon.webp`);
+  assert.equal(calendar.data.moons.m1.phases.b.icon, "modules/calendaria/assets/moon-phases/01_newmoon.svg");
+  assert.equal(files.get(`${M}/assets/calendar/my-moon.webp`), "MOON");
+  const world = JSON.parse(files.get(`${M}/scripts/main.mjs`).match(/registerWorld\((.*)\)\);/)[1]);
+  assert.equal(world.calendar.file, "calendar.json"); assert.equal(world.calendar.name, "Trorune"); assert.ok(Number.isFinite(world.calendar.signature));
+  const manifest = JSON.parse(files.get(`${M}/module.json`));
+  assert.equal(manifest.relationships.recommends[0].id, "calendaria");
+  assert.ok(built.report.includes("Calendar: Trorune (custom)"));
+});

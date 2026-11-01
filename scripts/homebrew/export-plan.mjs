@@ -30,7 +30,7 @@ export function fileRef(raw, { origin = "", prefix = "" } = {}) {
   s = s.replace(/[?#].*$/, "").replace(/^\/+/, "");
   if (prefix && s.startsWith(`${prefix}/`)) s = s.slice(prefix.length + 1);
   const path = decode(s);
-  if (/^(icons|ui|systems|canvas|sounds)\//.test(path) || path.startsWith("modules/kg-realms/")) return { kind: "keep", path };
+  if (/^(icons|ui|systems|canvas|sounds)\//.test(path) || path.startsWith("modules/kg-realms/") || path.startsWith("modules/calendaria/")) return { kind: "keep", path };
   return { kind: "local", path };
 }
 
@@ -172,10 +172,34 @@ export function markersUsed(markers, value) {
   return Object.fromEntries(Object.entries(markers ?? {}).filter(([id]) => used.has(id)));
 }
 
+/**
+ * The game world's Calendaria calendar as a module ships it: always the whole calendar, whichever
+ * kind it is, so it can be set anywhere. kind: "built-in", "edited" (built in, changed by the GM) or "custom".
+ */
+export function calendarForExport(active, manager, displayFormats) {
+  const data = active?.toObject?.(), id = data?.metadata?.id;
+  if (!id) return null;
+  const kind = manager.isCustomCalendar(id) ? "custom" : manager.hasDefaultOverride(id) ? "edited" : "built-in";
+  return { id, name: data.name ?? id, kind, data, ...(displayFormats ? { displayFormats } : {}) };
+}
+export const calendarLabel = (c) => `${c.name} (${c.kind})`;
+/**
+ * What setting a calendar takes in a game world, given what is there: "switch" (it is there as it
+ * should be), "override" (a built-in one, edited), "create" or "update" (a custom one).
+ * A built-in calendar this copy of Calendaria does not have is created from the whole calendar.
+ */
+export function calendarAction(calendar, { known, custom, override }) {
+  const data = !!calendar.data;
+  if (calendar.kind === "custom") return !data ? "switch" : custom ? "update" : "create";
+  if (!known) return data ? "create" : "unknown";
+  return data && (calendar.kind === "edited" || override) ? "override" : "switch";
+}
+
 /** The export's report: what went in, and everything that did not, in plain words. */
-export function exportReport({ title, version, moduleId, counts, missing, external, scenesMissing, gone, skippedTokens }) {
+export function exportReport({ title, version, moduleId, counts, calendar, missing, external, scenesMissing, gone, skippedTokens }) {
   const lines = [`${title} ${version} (${moduleId})`, "", "In the module:"];
   for (const [what, n] of Object.entries(counts)) if (n) lines.push(`  ${n} ${what}`);
+  lines.push(calendar ? `  Calendar: ${calendarLabel(calendar)}` : "  No calendar: Calendaria is not active in this game world.");
   const list = (head, items) => { if (items?.length) lines.push("", `${head} (${items.length}):`, ...items.map((i) => `  ${i}`)); };
   list("Files that could not be read, still linked to their old path", missing);
   list("Files on the web that could not be fetched, still linked to the web", external);

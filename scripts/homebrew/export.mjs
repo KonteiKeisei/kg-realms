@@ -10,7 +10,7 @@
 import { worldUrl, allWorlds } from "../worlds.mjs";
 import { applyRouteEdits } from "../routes.mjs";
 import { TILE_SUFFIX, moduleIdFrom, moduleScript, ROUTES_FILE, zipEntry, zipParts, crc32, zipFits } from "./plan.mjs";
-import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport } from "./export-plan.mjs";
+import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction } from "./export-plan.mjs";
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -27,6 +27,15 @@ async function sha256(bytes) {
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
 }
 const local = (path) => foundry.utils.getRoute(path.split("/").map(encodeURIComponent).join("/"));
+
+/** The game world's calendar now, or null without Calendaria. */
+function currentCalendar() {
+  const C = globalThis.CALENDARIA;
+  if (!game.modules.get("calendaria")?.active || !C?.api?.getActiveCalendar) return null;
+  let formats = null;
+  try { formats = game.settings.get("calendaria", "displayFormats"); } catch { /* an older Calendaria */ }
+  return calendarForExport(C.api.getActiveCalendar(), C.managers.CalendarManager, formats);
+}
 
 /**
  * The documents reached from `seeds`, and those they link to in turn: { docs: "Type.id" -> plain
@@ -84,6 +93,8 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
     ["local/index.json", presets]
   ]);
   for (const entry of presets) for (const rel of [entry.file, entry.effects?.file]) if (rel) files.set(`local/${rel}`, await getJson(`local/${rel}`));
+  const calendar = currentCalendar();
+  if (calendar) files.set("calendar.json", calendar);
 
   // The scenes. The players' own tokens stay at this table.
   onStep("Gathering the scenes", 0.02);
@@ -112,6 +123,7 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
 
   // Every file those name, and where it goes.
   const named = new Map();
+  if (calendar) scanFiles(calendar, () => "assets/calendar", named);
   scanFiles([...files.values()], cardFolder, named);
   scanFiles(markers, cardFolder, named);
   for (const [type, list] of groups) scanFiles(list, type === "Scene" ? sceneFolder : packFolder(type), named);
@@ -168,11 +180,11 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
 
   // The module.
   const kg = game.modules.get(ID);
-  await add(`${moduleId}/module.json`, encoder.encode(JSON.stringify({ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: "14" }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum: kg?.version ?? "0.80.0" } }] }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) }, null, 2)));
-  await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, { snow: data.snow, markers: finalMarkers, rules: def.rules, packs: packList })));
+  await add(`${moduleId}/module.json`, encoder.encode(JSON.stringify({ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: "14" }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum: kg?.version ?? "0.81.0" } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) }, null, 2)));
+  await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, { snow: data.snow, markers: finalMarkers, rules: def.rules, packs: packList, calendar: calendar ? { file: "calendar.json", name: calendar.name, signature: crc32(json(calendar.data)) } : null })));
 
   const report = exportReport({
-    title, version, moduleId, skippedTokens, scenesMissing, gone, missing, external,
+    title, version, moduleId, calendar, skippedTokens, scenesMissing, gone, missing, external,
     counts: { "places": places.length, "roads": routes.features.length, "rivers and shores": Object.keys(data.waterways).length, "encounters": Object.keys(data.encounters).length, "scenes": counts.scenes, "actors": counts.actors, "journals": counts.journals, "items": counts.items, "tables": counts.tables, "macros": counts.macros, "playlists": counts.playlists, "card decks": counts.cards, "pictures and sounds": written.size, "custom markers": Object.keys(markers).length, "map tiles": tiles.length }
   });
   await add(`${moduleId}/export-report.txt`, encoder.encode(report));
@@ -183,12 +195,14 @@ export async function buildExport(def, { moduleId, title, version }, onStep = ()
 
 export async function exportModule(def) {
   if (!def) return;
+  const here = currentCalendar();
   const values = await foundry.applications.api.DialogV2.wait({
     window: { title: "Export as module", icon: "fa-solid fa-file-export" }, position: { width: 460 }, rejectClose: false,
     content: `<div class="form-group"><label>Module title</label><input name="title" type="text" value="KG Realms: ${esc(def.title)}"></div>
       <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
       <div class="form-group"><label>Version</label><input name="version" type="text" value="1.0.0"></div>
       <p class="notes">The zip holds the whole world: its map, places, roads, rivers, biomes, encounters, trade and snow with every edit, each scene it links to, every actor, journal and item those link to, and all their pictures, moved into the module and linked up. ${q("Pictures on cards and markers go to assets/poi-img, scene maps to assets/maps, and actor, journal and item art to their own folders. Links into your game system's own compendiums stay as they are. Your players' tokens stay out of the scenes.")}</p>
+      <p class="notes">Calendar: ${esc(here ? calendarLabel(here) : "none, Calendaria is not active")}. ${q("The calendar this game world uses now, complete, whether built in, edited or your own. When a GM first loads the module, it is added if need be and set as the active calendar. Your in-game date is not part of it.")}</p>
       <p class="notes">Afterwards you get a report of anything that could not be carried. It is also in the zip, as export-report.txt.</p>
       <p class="notes">When a GM first loads the module, KG Realms fills its compendiums. ${q("Compendiums are GM only, because scenes and journals hold secrets. Updating a module replaces its compendiums, so they are filled again and any edits made inside them are lost: import a document to your game world to change it.")} Drag the realm map in from them and its settlements come with it.</p>`,
     buttons: [{ action: "go", label: "Download zip", icon: "fa-solid fa-download", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
@@ -246,6 +260,52 @@ export async function fillModulePacks() {
     }
     if (added) ui.notifications.info(`KG Realms: ${world.title}'s compendiums are ready (${added} documents). Drag its realm map in from them, and its settlements come with it.`, { permanent: true });
   }
+}
+
+/**
+ * Each world module's calendar, set by the first GM to load it, and again only if a new version of
+ * the module brings a different one, so a GM who changes calendar afterwards keeps their choice.
+ * Runs once Calendaria is ready. Foundry reloads to finish, as Calendaria's own switch asks.
+ */
+export async function applyModuleCalendars() {
+  if (game.user !== game.users.activeGM) return;
+  const applied = foundry.utils.deepClone(game.settings.get(ID, "calendarsApplied") ?? {});
+  const C = globalThis.CALENDARIA, ready = !!game.modules.get("calendaria")?.active && !!C?.managers?.CalendarManager;
+  let changed = false, needReload = false;
+  for (const world of allWorlds().filter((w) => w.calendar)) {
+    const want = world.calendar, signature = String(want.signature ?? want.id);
+    if (applied[world.id] === signature) continue;
+    if (!ready) {
+      if (applied[world.id] === `missing:${signature}`) continue;
+      ui.notifications.warn(`KG Realms: ${world.title} uses the calendar ${want.name ?? want.id}. Enable Calendaria and it will be set.`, { permanent: true });
+      applied[world.id] = `missing:${signature}`; changed = true;
+      continue;
+    }
+    try {
+      let calendar = { kind: "built-in", ...want };
+      if (want.file) {
+        const res = await fetch(worldUrl(world.id, want.file), { cache: "no-store" });
+        if (!res.ok) throw Error(`${want.file}: HTTP ${res.status}`);
+        calendar = await res.json();
+      }
+      const M = C.managers.CalendarManager, id = calendar.id;
+      const action = calendarAction(calendar, { known: !!M.getCalendar(id), custom: M.isCustomCalendar(id), override: M.hasDefaultOverride(id) });
+      let target = id;
+      if (action === "unknown") throw Error(`this copy of Calendaria has no calendar "${id}"`);
+      if (action === "create") { const made = await M.createCustomCalendar(id, foundry.utils.deepClone(calendar.data)); if (!made) throw Error("Calendaria could not add it"); target = made.metadata?.id ?? (id.startsWith("custom-") ? id : `custom-${id}`); }
+      if (action === "update" && !await M.updateCustomCalendar(id, foundry.utils.deepClone(calendar.data))) throw Error("Calendaria could not update it");
+      if (action === "override" && !await M.saveDefaultOverride(id, foundry.utils.deepClone(calendar.data))) throw Error("Calendaria could not save it");
+      if (!await C.api.switchCalendar(target)) throw Error("Calendaria could not switch to it");
+      if (calendar.displayFormats) await game.settings.set("calendaria", "displayFormats", calendar.displayFormats);
+      applied[world.id] = signature; changed = true; needReload = true;
+      ui.notifications.info(`KG Realms: the calendar is now ${calendar.name ?? id}, for ${world.title}. You can change it in Calendaria's settings; this will not set it again.`, { permanent: true });
+    } catch (err) {
+      console.error(`${ID} | calendar of ${world.id}`, err);
+      ui.notifications.error(`KG Realms: could not set the calendar of ${world.title}: ${err?.message ?? err}. It will try again next load.`, { permanent: true });
+    }
+  }
+  if (changed) await game.settings.set(ID, "calendarsApplied", applied);
+  if (needReload) await foundry.applications.settings?.SettingsConfig?.reloadConfirm?.({ world: true });
 }
 
 /** A document from a module's compendium, into this game world under its own id, unless it is here. */
