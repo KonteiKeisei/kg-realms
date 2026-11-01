@@ -113,28 +113,56 @@ export function scenesOfWorld(all, places, world) {
 
 /** This table's own use of a scene, which is not the world's: its party, its journey, its backup. */
 const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "cityAsk", "homebrewOriginal"];
-/** A scene as a module ships it: no tokens (their actors stay in this game world), no thumbnail or journey. */
-export function sceneForExport(doc) {
-  const { _stats, folder, thumb, active, ownership, tokens, ...rest } = doc;
-  const own = { ...(doc.flags?.[REALM_FLAG] ?? {}) };
+/**
+ * A scene as a module ships it, marked with the id it must keep so places and pins still find it.
+ * keepToken(token) says which tokens go: the players' party stays at this table.
+ */
+export function sceneForExport(doc, world, keepToken = () => true) {
+  const { _stats, folder, thumb, active, ownership, ...rest } = doc;
+  const own = { ...(doc.flags?.[REALM_FLAG] ?? {}), moduleScene: { world, id: doc._id } };
   for (const k of PLAY_FLAGS) delete own[k];
   return {
-    ...rest, tokens: [], active: false, journal: null, playlist: null, playlistSound: null,
+    ...rest, tokens: (doc.tokens ?? []).filter(keepToken), active: false, journal: null, playlist: null, playlistSound: null,
     notes: (doc.notes ?? []).map((n) => ({ ...n, entryId: null, pageId: null })),
     flags: { ...doc.flags, [REALM_FLAG]: own }
   };
 }
 
-/** What the export leaves behind because it lives elsewhere in the game world: actors and journals named on cards and pins. */
-export function linkedDocuments(value) {
-  const actors = new Set(), journals = new Set();
-  walk(value, (s, path) => {
-    const key = path.findLast((k) => typeof k === "string");
-    if ((key === "actor" || key === "actors") && s) actors.add(s);
-    if ((key === "journal" || key === "page" || key === "entryId") && s) journals.add(s);
-    for (const m of s.matchAll(/@UUID\[([^\]]+)\]/g)) (/Actor\./.test(m[1]) ? actors : journals).add(m[1]);
-  });
-  return { actors: [...actors], journals: [...journals] };
+/** Each kind of document a module's compendiums hold, and its compendium's name. */
+export const PACK_NAMES = { Actor: "actors", Item: "items", JournalEntry: "journals", RollTable: "tables", Macro: "macros", Playlist: "playlists", Cards: "cards", Scene: "scenes" };
+const PACK_LABELS = { Actor: "Actors", Item: "Items", JournalEntry: "Journals", RollTable: "Tables", Macro: "Macros", Playlist: "Playlists", Cards: "Cards", Scene: "Scenes" };
+const TYPES = Object.keys(PACK_NAMES).join("|");
+/** A document's own link: from a compendium, or in this game world. Anything after it (a page, an embedded item) is left on. */
+const UUID = new RegExp(`Compendium\\.[\\w-]+\\.[\\w-]+\\.(?:${TYPES})\\.[A-Za-z0-9]{16}|\\b(?:${TYPES})\\.[A-Za-z0-9]{16}`, "g");
+/** What a link's document is: { type, id }. */
+export function uuidParts(uuid) { const p = uuid.split("."); return { type: p.at(-2), id: p.at(-1) }; }
+/** A link to something every copy of this game system has, which stays as it is. */
+export const inSystem = (uuid, systemId) => uuid.startsWith(`Compendium.${systemId}.`);
+
+/** Every document a value links to, on cards, in card text, or in any other field. */
+export function uuidsIn(value, systemId = "", found = new Set()) {
+  walk(value, (s) => { for (const m of s.matchAll(UUID)) if (!inSystem(m[0], systemId)) found.add(m[0]); });
+  return found;
+}
+/** The value with each link in `map` (old -> new) changed, wherever it stands. */
+export function rewriteUuids(value, map) {
+  return walk(value, (s) => s.replace(UUID, (m) => map.get(m) ?? m));
+}
+/** A document as a compendium holds it: not this table's folder, owners or history. */
+export function docForPack(doc) {
+  const { _stats, folder, ownership, ...rest } = doc;
+  return rest;
+}
+/** Where a document's art goes in the module. Scenes are sorted by sceneFolder; sound always to assets/audio. */
+export const packFolder = (type) => (path, raw) => (IS_AUDIO.test(raw) ? "assets/audio" : `assets/${PACK_NAMES[type] ?? "poi-img"}`);
+/**
+ * module.json's compendiums. GMs only, because scenes and journals hold secrets; Foundry's Actor and
+ * Item compendiums must name a game system. Each path's folder is in the zip, empty, for Foundry to fill.
+ */
+export function modulePacks(title, types, systemId) {
+  const short = String(title).replace(/^kg\s*realms\s*:\s*/i, "");
+  const packs = types.map((type) => ({ name: PACK_NAMES[type], label: `${short}: ${PACK_LABELS[type]}`, path: `packs/${PACK_NAMES[type]}`, type, ...(type === "Actor" || type === "Item" ? { system: systemId } : {}), ownership: { PLAYER: "NONE", TRUSTED: "NONE", ASSISTANT: "OWNER" } }));
+  return { packs, packFolders: packs.length ? [{ name: short, sorting: "m", packs: packs.map((p) => p.name) }] : [] };
 }
 
 /** Keeps only the custom markers a world's places or pins use. */
@@ -145,15 +173,14 @@ export function markersUsed(markers, value) {
 }
 
 /** The export's report: what went in, and everything that did not, in plain words. */
-export function exportReport({ title, version, moduleId, counts, missing, external, scenesMissing, linked, skippedTokens }) {
+export function exportReport({ title, version, moduleId, counts, missing, external, scenesMissing, gone, skippedTokens }) {
   const lines = [`${title} ${version} (${moduleId})`, "", "In the module:"];
-  for (const [what, n] of Object.entries(counts)) lines.push(`  ${n} ${what}`);
+  for (const [what, n] of Object.entries(counts)) if (n) lines.push(`  ${n} ${what}`);
   const list = (head, items) => { if (items?.length) lines.push("", `${head} (${items.length}):`, ...items.map((i) => `  ${i}`)); };
   list("Files that could not be read, still linked to their old path", missing);
   list("Files on the web that could not be fetched, still linked to the web", external);
   list("Linked scenes that no longer exist", scenesMissing);
-  list("Actors linked on cards, not in the module", linked?.actors);
-  list("Journals linked on cards and pins, not in the module", linked?.journals);
-  if (skippedTokens) lines.push("", `Tokens left out of the scenes: ${skippedTokens} (their actors stay in this game world).`);
+  list("Links to documents that could not be found, left as they were", gone);
+  if (skippedTokens) lines.push("", `Player tokens left out of the scenes: ${skippedTokens}.`);
   return lines.join("\n") + "\n";
 }

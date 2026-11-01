@@ -7,7 +7,7 @@ import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
-import { exportModule, importModuleScenes } from "./export.mjs";
+import { exportModule, fillModulePacks, sceneFromModule } from "./export.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
 
 const ID = "kg-realms";
@@ -23,7 +23,7 @@ const isVideo = (src) => /\.(webm|mp4|m4v|ogv)(\?|$)/i.test(src ?? "");
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
-  game.settings.register(ID, "moduleScenesDone", { scope: "world", config: false, type: Array, default: [] });
+  Hooks.on("createScene", sceneFromModule);
   for (const def of Object.values(game.settings.get(ID, SETTING) ?? {})) {
     try { registerWorld(def); } catch (err) { console.warn(`${ID} | homebrew world ${def?.id}:`, err); }
   }
@@ -31,7 +31,7 @@ export function registerHomebrew() {
   Hooks.once("ready", async () => {
     if (game.user !== game.users.activeGM) return;
     await moveWorlds();
-    await importModuleScenes();
+    await fillModulePacks();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
   });

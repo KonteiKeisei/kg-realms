@@ -1,5 +1,16 @@
 # KG Realms changelog
 
+## 0.80.0: exported modules ship compendiums
+
+- **Exported modules ship compendiums.** Scenes, actors, journals, items, tables, macros, playlists and card decks each get a compendium, in a folder of the world's name, GM only.
+  - **Everything linked comes along:** whatever a place, pin, encounter or scene links to, in any field or in card text, and whatever those link to in turn. Links into your game system's own compendiums stay as they are.
+  - **Links follow:** they change to the module's compendiums, including @UUID links in text and links to journal pages. A link to something that no longer exists stays as it was and is listed in the report.
+  - **Art follows:** actor, item and journal pictures are copied to assets/actors, assets/items and assets/journals, and relinked.
+- **Filled on first load.** A browser cannot write Foundry's compendium databases, so the zip holds their contents as JSON, and the first GM to load the module fills them. Updating a module replaces its compendiums, so they fill again, and edits made inside them are lost: import a document to change it. A compendium that cannot be filled says why and tries again next load.
+- **Scenes come from the compendium, not by themselves.** Drag the realm map in and its settlements come with it. Any scene brings its tokens' actors. A scene keeps the id its places and pins know it by.
+- **Scenes keep their tokens,** except your players' own and party tokens.
+- Modules exported with 0.79.0 need exporting again.
+
 ## 0.79.0: the whole world in a module export
 
 - **Export as module now holds the whole world.** The zip works in any game world, with nothing left in this one:

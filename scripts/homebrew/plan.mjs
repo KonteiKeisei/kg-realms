@@ -190,13 +190,13 @@ export function zipStore(files) {
 export const moduleIdFrom = (title) => `kg-realms-${worldIdFrom(String(title ?? "").replace(/^kg\s*realms\s*:?\s*/i, ""))}`;
 
 /** The script an exported world module runs: it registers the world with KG Realms. */
-export function moduleScript(moduleId, def, { snow, markers, rules, scenes } = {}) {
+export function moduleScript(moduleId, def, { snow, markers, rules, packs } = {}) {
   const world = { id: def.id, title: def.title, module: moduleId, mapName: def.mapName ?? def.title, terrainPack: "terrain-pack.json" };
   // Its snow as the GM set it (the Snow tab, 0.75) becomes the module's own.
   if (snow && Object.keys(snow).length) world.snow = snow;
-  // Its custom markers and sea lore; and that it ships scenes for KG Realms to bring in (0.79).
+  // Its custom markers and sea lore; and what KG Realms fills its compendiums with (0.80).
   if (markers && Object.keys(markers).length) world.markers = markers;
   if (rules) world.rules = rules;
-  if (scenes) world.scenes = true;
+  if (packs?.length) world.packs = packs;
   return `// ${def.title} for KG Realms: registers the world as KG Realms starts.\nHooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld(${JSON.stringify(world)}));\n`;
 }
