@@ -73,13 +73,14 @@ export class PartyPortraits {
   });
   // Lines a steady width on screen at any zoom or display scale (redrawn on zoom: fitStrokes).
   token.kgrPartyStrokes=()=>{
-   if(root.destroyed)return;const zoom=canvas.stage?.scale?.x||1,line=Math.min(d*.03,Math.max(d*.004,1.4/zoom));
+   if(root.destroyed)return;const zoom=(canvas.stage?.scale?.x||1)*(token.kgrFitFactor||1),line=Math.min(d*.03,Math.max(d*.004,1.4/zoom));
    track.clear();
    if(ringR){track.lineStyle({width:band*2,color:0x15110d,alpha:.82,alignment:.5}).drawCircle(w/2,h/2,ringR);
     track.lineStyle({width:line,color:0xd9a441,alpha:.9,alignment:.5}).drawCircle(w/2,h/2,ringR+band).drawCircle(w/2,h/2,ringR-band);}
    for(const {g,p}of strokes){g.clear().lineStyle({width:line,color:0xe8d6b5,alpha:.9,alignment:.5}).drawCircle(p.x,p.y,p.r);}
   };
   token.kgrPartyStrokes();
+  token.kgrFitNow?.();
  }
  /** On zoom: the portrait rings' lines, kept a steady width on screen. */
  fitStrokes(){if(this.frame)return;this.frame=requestAnimationFrame(()=>{this.frame=0;for(const t of canvas.tokens?.placeables??[])t.kgrPartyStrokes?.();});}

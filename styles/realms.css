@@ -1909,3 +1909,6 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-travel ol.stops .stop-tools > button[data-act="extend"].on { border-color: var(--kgr-accent); background: var(--kgr-accent-soft); color: var(--kgr-text); }
 .kgr-travel ol.stops .order { flex: 0 0 auto; }
 .kgr-travel ol.stops .order button { white-space: nowrap; }
+
+/* The domain and territory a stop is in (0.88.2). */
+.kgr-travel ol.stops .stop-where { font-size: 11px; line-height: 1.35; color: var(--kgr-muted); font-weight: 400; overflow-wrap: anywhere; }

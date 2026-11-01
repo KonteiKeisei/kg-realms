@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.88.2: stops say where they are; the party stays visible
+
+- **Route stops show their domain and territory**, under the stop's name: "In Empiria, Salvae Empire". It comes from drawn borders and Part of links, so a stop outside every drawn border shows nothing.
+- **The party token stays visible when zoomed out.** On a realm map it never draws smaller than about 40 pixels on screen. Its picture and portraits grow from its middle, and it can be clicked at that size. Its position and its size in the scene don't change.
+
 ## 0.88.1: wagon and coach deals
 
 - **Wagon and coach deals.** In the journey setup, each one can be Party pays, Free ride, or paid: Paid to guard for a wagon, Paid as escort for a coach. Rates are copper per mile per party member. Wagons start as a free ride, and coaches at the book's 3 cp. Pay is shown on each leg and in the journey's totals, the same way fares are.

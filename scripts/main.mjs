@@ -1,3 +1,4 @@
+import { PartyTokenFit } from "./party-token-fit.mjs";
 import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
 import { registerHomebrew } from "./homebrew/homebrew.mjs";
@@ -166,7 +167,8 @@ const partyManager=new PartyManager({before:scene=>syncJourney(scene,{force:true
  isRealm:s=>!!regionOf(s),changed:async scene=>{if(scene===canvas.scene){if(hud.el)hud.mount();await syncJourney(scene,{force:true});}}});
 cityTravel.partyManager=partyManager;
 const partyPortraits=new PartyPortraits(),partyInterface=new PartyInterface(partyManager);
-Hooks.once('init',()=>{partyPortraits.install();partyInterface.install();});
+const partyTokenFit=new PartyTokenFit({isParty:t=>sceneParties(canvas.scene).some(p=>p.id===t.document?.id||p===t.document||p===t)});
+Hooks.once('init',()=>{partyPortraits.install();partyInterface.install();partyTokenFit.install();});
 Hooks.once("init", () => {localMaps.install();cityTravel.install();});
 // Biome climates (biome-climate.mjs): added to each calendar, and the settlement takes its place's.
 Hooks.once("init", () => game.settings.register(MODULE_ID, "biomeClimatesAdded", { scope: "world", config: false, type: Object, default: {} }));

@@ -310,6 +310,11 @@ function spotParts(lon, lat, places, milesTo) {
   const realms = withParents(territoriesAt(lon, lat, places), byId).filter((t) => !t.hidden && !(t.unnamed && !t.edited)).map((t) => t.name).join(", ");
   return { town, geo, realms, near: (settlement ?? poi)?.name ?? null };
 }
+/** The domains and territories around a spot, innermost first, for showing on a stop: "Empiria, Salvae Empire". */
+export function spotRealms(lon, lat, places) {
+  const byId = new Map(territoriesOf(places).map((t) => [t.id, t]));
+  return withParents(territoriesAt(lon, lat, places), byId).filter((t) => !t.hidden && !(t.unnamed && !t.edited)).map((t) => t.name).join(", ");
+}
 export function spotName(lon, lat, places, milesTo) {
   const { town, geo, realms, near } = spotParts(lon, lat, places, milesTo);
   if (town) return realms ? `In ${town.name}, ${realms}` : `In ${town.name}`;
