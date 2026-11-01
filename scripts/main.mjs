@@ -3,7 +3,7 @@ import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worl
 import { registerHomebrew } from "./homebrew/homebrew.mjs";
 import { setExportData } from "./homebrew/export.mjs";
 import { calendarSwitchedClimates, setSceneClimate, followClimate } from "./biome-weather.mjs";
-import { flagsNeedRedraw } from "./biome-climate.mjs";
+import { flagsNeedRedraw, lakeBiome } from "./biome-climate.mjs";
 // The worlds first (worlds.mjs), before anything that loads one: the GM's homebrew worlds saved in
 // this game world (homebrew/), then each world module's on the kgRealmsRegisterWorlds hook (KG Realms:
 // Faerûn registers Toril). A module registering the same id replaces the homebrew copy.
@@ -41,7 +41,7 @@ import { JourneyLight } from "./journey-light.mjs";
 import { LocalMaps } from "./local-maps.mjs";
 import { LocalMapRenderer } from "./local-map-renderer.mjs";
 import { SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
-import { areasGeoJSON, outlinedIds, placeLayer } from "./map-layers.mjs";
+import { areasGeoJSON, outlinedIds, placeLayer, withShoreBorders, placeFromShore, inlandWaters, canBeBiome } from "./map-layers.mjs";
 import { LayersRail, chosenLayer } from "./ui-layers.mjs";
 import { shoreWater } from "./waterways.mjs";
 const snow = new SnowCover();
@@ -180,7 +180,8 @@ Hooks.on("canvasReady", async (cv) => {
     await loadShippedBiomes(map.world);
     const data = await worldWithSheet(map.world);
     const query = biomeLookup(biomesOf(map.world), (await import("./travel.mjs")).terrainLookup(await terrainFor(map.world, data)), lonLatToSource);
-    await setSceneClimate(scene, query(...lonLatToSource(place.lon, place.lat)));
+    const [x, y] = lonLatToSource(place.lon, place.lat);
+    await setSceneClimate(scene, await biomeOrLake(map.world, query(x, y), x, y, query));
   } catch (err) { console.warn("kg-realms | settlement weather:", err); }
 });
 Hooks.once("ready", async () => {
@@ -236,7 +237,7 @@ async function saveEdits(world, fn) {
  */
 function placesFor(world, places, level) {
   const named = Object.values(waterwaysOf(world)).filter((w) => w.kind !== "wind" && w.name).map((w) => w.name);
-  return dropWaterDuplicates(applyEdits(places, editsOf(world), level), named);
+  return dropWaterDuplicates(withShoreBorders(applyEdits(places, editsOf(world), level), waterwaysOf(world)), named);
 }
 
 /** The places on the map: their points, and the borders and names of the areas among them (map-layers.mjs). */
@@ -498,7 +499,33 @@ async function focusParty(id,scene=canvas.scene){
  if(!isPrimaryGM()||!sceneParties(scene).some(t=>t.actor.id===id))return;
  await syncJourney(scene,{force:true});await scene.setFlag(MODULE_ID,'partyFocus',id);
 }
-const onBiome = (scene, biome) => setSceneClimate(scene, biome).catch((err) => console.warn("kg-realms | biome weather:", err));
+/** A lake has the weather of the land around it. Its outlines are worked out once per change to them. */
+let inlandMemo = null;
+async function biomeOrLake(world, biome, x, y, query) {
+  if (biome || !query) return biome;
+  const places = await realmPlaces(world), own = setting("waterways");
+  if (inlandMemo?.places !== places || inlandMemo?.own !== own || inlandMemo?.world !== world) inlandMemo = { places, own, world, rings: inlandWaters(places, waterwaysOf(world)).map((r) => r.map((c) => lonLatToSource(c[0], c[1]))) };
+  return lakeBiome(x, y, inlandMemo.rings, query);
+}
+const onBiome = async (scene, biome, here, query) => {
+  try { await setSceneClimate(scene, here ? await biomeOrLake(regionOf(scene)?.world, biome, here[0], here[1], query) : biome); }
+  catch (err) { console.warn("kg-realms | biome weather:", err); }
+};
+/** A biome zone on a place that follows a shoreline goes where the shoreline goes, and goes if it stops being able to be one. */
+async function syncShoreZones() {
+  if (!current || !isPrimaryGM()) return;
+  const world = current.region.world, zones = biomesOf(world).zones ?? {}, linked = current.places.filter((p) => p.shore && p.biomeZone);
+  const change = linked.filter((p) => zones[p.biomeZone] && (!canBeBiome(p) || JSON.stringify(zones[p.biomeZone].pts) !== JSON.stringify(p.area)));
+  if (!change.length) return;
+  await saveBiomes(world, (c) => {
+    const next = { ...c.zones };
+    for (const p of change) { if (canBeBiome(p)) next[p.biomeZone] = { ...next[p.biomeZone], pts: structuredClone(p.area) }; else delete next[p.biomeZone]; }
+    return { ...c, zones: next };
+  });
+  const gone = change.filter((p) => !canBeBiome(p));
+  for (const p of gone) await savePlaceEdit(world, p.id, { biomeZone: null });
+  if (gone.length) ui.notifications.info(`KG Realms: removed the biome zone of ${gone.map((p) => p.name).join(", ")}: its shoreline no longer closes.`);
+}
 const hud = new TravelHud({
   onBiome,
   getScene:()=>focusedScene(current?.scene??canvas.scene),
@@ -646,6 +673,8 @@ const pins = new PinEditor({
   getRegions: () => current?.world?.regions ?? [],
   // A place selected in the editor: the map shows its layer.
   showLayer: (name) => layersRail.setLayer(name),
+  // Shorelines a place can follow.
+  getShores: () => (current ? waterwaysOf(current.region.world) : {}),
   // A geography area can be a biome zone (0.82).
   getBiomes: () => (current ? biomesOf(current.region.world) : null),
   saveBiomes: (fn) => current && saveBiomes(current.region.world, fn),
@@ -661,7 +690,7 @@ const pins = new PinEditor({
   // the export can be imported again or adopted as the module's default.
   exportPlaces: () => {
     if (!current) return;
-    const keep = ["id", "name", "kind", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
+    const keep = ["id", "name", "kind", "class", "rank", "lon", "lat", "shape", "layer", "area", "areaClosed", "shore", "biomeZone", "color", "summary", "img", "scene", "gold", "hidden", "visibility", "known", "rumours", "gmNotes", "actor", "marker", "added"];
     const places = current.places.map((p) => Object.fromEntries(keep.filter((k) => p[k] !== undefined && (p[k] !== false || k === "areaClosed")).map((k) => [k, p[k]])));
     const data = { type: "kg-realms-places", world: current.region.world, version: game.modules.get(MODULE_ID).version, edits: editsOf(current.region.world), customMarkers: setting("customMarkers") ?? {}, places };
     foundry.utils.saveDataToFile(JSON.stringify(data, null, 1), "application/json", `${current.region.world}-places.json`);
@@ -716,6 +745,21 @@ const roads = new RoadEditor({
 
 const water = new WaterwayEditor({
   getLayer: () => layer,
+  // The place that follows a shoreline; making one, or linking one of its name (the GM's choice).
+  shorePlace: (id) => current?.places.find((p) => p.shore === id) ?? null,
+  makeShorePlace: async (id) => {
+    if (!current) return;
+    const world = current.region.world, w = waterwaysOf(world)[id], name = String(w?.name ?? "").trim();
+    if (!name) return ui.notifications.warn("KG Realms: name the shoreline first: the place takes its name.");
+    const same = current.places.find((p) => !p.shore && String(p.name).trim().toLowerCase() === name.toLowerCase());
+    if (same && await foundry.applications.api.DialogV2.confirm({ window: { title: `${name}: link a place` }, content: `<p>A place called <b>${foundry.utils.escapeHTML(same.name)}</b> (${foundry.utils.escapeHTML(same.class ?? "")}) already exists. Link it to this shoreline? Its border will follow the shoreline. Choose No to make a new place instead.</p>`, rejectClose: false })) {
+      await savePlaceEdit(world, same.id, { shore: id, area: null, areaClosed: null, shape: null });
+      return ui.notifications.info(`KG Realms: ${same.name} now follows this shoreline.`);
+    }
+    const placeId = `added-${foundry.utils.randomID()}`;
+    await saveEdits(world, (e) => { e.added = { ...(e.added ?? {}), [placeId]: { id: placeId, ...placeFromShore(id, w) } }; return e; });
+    ui.notifications.info(`KG Realms: made the place ${name}, on the Geography layer. Set its card and type in the Places tab.`);
+  },
   getWaterways: () => (current ? waterwaysOf(current.region.world) : {}),
   saveWaterways: (fn) => saveWaterways(current.region.world, fn),
   // Shorelines whose water leaks round an open end (shoreWater), by id.
@@ -910,7 +954,7 @@ Hooks.once("init", () => {
   register("localMapFxEnabled", {scope:"world", config:false, type:Boolean, default:false});
   register("localMapWaterRegions", {name:"Water regions (FXMaster+)",hint:"Performance intensive. Disable if maps load slowly or water effects cause lag.",scope:"world",config:true,type:Boolean,default:true,onChange:async()=>{await enableLocalMapFx().catch(error=>console.warn('kg-realms | Could not enable FXMaster world effects:',error));for(const w of allWorlds())await localMaps.applySceneEffects(w.id);}});
   register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{biomes.refresh();hud.refresh();syncViewedJourneys();}});
-  register("waterways", { scope: "world", config: false, type: Object, default: {}, onChange: async () => { refreshPlaces(); if(current)layer.setRiverNames(waterwaysOf(current.region.world)); await hud.refresh(); if (current) await terrainFor(current.region.world, current.world).catch(() => null); water.refresh(); refreshSnowGrid(); } });
+  register("waterways", { scope: "world", config: false, type: Object, default: {}, onChange: async () => { refreshPlaces(); if(current)layer.setRiverNames(waterwaysOf(current.region.world)); await hud.refresh(); if (current) await terrainFor(current.region.world, current.world).catch(() => null); water.refresh(); refreshSnowGrid(); syncShoreZones().catch((err) => console.warn("kg-realms | shoreline biome zones:", err)); } });
   // Each world's snow (the Snow tab, snow.mjs): { [world]: { north, south, reversed, midwinter, mountains, hills } }.
   register("snow", { scope: "world", config: false, type: Object, default: {}, onChange: () => { if (current) snow.setConfig(snowOf(current.region.world)); snowTab.refresh(); localMaps.applySeasons(); } });
   register("waterwaysOnTop", { scope: "world", config: false, type: Boolean, default: false });

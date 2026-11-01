@@ -5,6 +5,8 @@
 //
 // Temperatures are degrees Celsius, as Calendaria stores them. Weights are relative within a season.
 
+import { insideRing } from "./map-layers.mjs";
+
 export const SEA_CLIMATE = "kgr-sea";
 /** Calendaria's untouched zone id for a biome preset. */
 export const climateIdFor = (biomeType) => `kgr-${biomeType}`;
@@ -166,6 +168,30 @@ export function climateZone(id, climate, seasons, key = (s) => s) {
 
 /** Every climate this engine ships, by zone id. */
 export const shippedClimates = () => ({ ...Object.fromEntries(Object.entries(BIOME_CLIMATES).map(([k, v]) => [climateIdFor(k), v])), [SEA_CLIMATE]: SEA });
+
+/**
+ * The main biome around an inland water, for its weather: a lake has the weather of the land it lies
+ * in. rings: outlines in the same units as query (x, y) -> biome, null on water. Looks just outside the
+ * outline all the way round and takes the commonest; the smallest water holding the spot counts.
+ * Null where the spot is on no inland water, or nothing around it is land: the open sea's weather.
+ */
+export function lakeBiome(x, y, rings, query) {
+  const size = (r) => { const xs = r.map((p) => p[0]), ys = r.map((p) => p[1]); return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)); };
+  const holding = rings.filter((r) => insideRing(r, [x, y])).map((r) => [r, size(r)]).sort((a, b) => a[1] - b[1])[0];
+  if (!holding) return null;
+  const [ring, extent] = holding, count = Math.min(48, ring.length), tally = new Map();
+  for (let k = 0; k < count; k++) {
+    const i = Math.floor((k * ring.length) / count), a = ring[i], b = ring[(i + 1) % ring.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const nx = (b[1] - a[1]) / len, ny = -(b[0] - a[0]) / len;
+    search: for (const step of [0.02, 0.05, 0.1]) for (const side of [1, -1]) {
+      const px = a[0] + nx * side * step * extent, py = a[1] + ny * side * step * extent;
+      if (insideRing(ring, [px, py])) continue;
+      const biome = query(px, py);
+      if (biome) { const key = climateOf(biome), seen = tally.get(key); tally.set(key, { biome, n: (seen?.n ?? 0) + 1 }); break search; }
+    }
+  }
+  return [...tally.values()].sort((m, n) => n.n - m.n)[0]?.biome ?? null;
+}
 
 /** Whether a scene's KG Realms flags changed anything the map draws: not the note of which climate we last set. */
 export const flagsNeedRedraw = (own = {}) => Object.keys(own).some((k) => k !== "climateSet");

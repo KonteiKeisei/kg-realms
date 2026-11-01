@@ -128,6 +128,42 @@ export function areasGeoJSON(places, regions = []) {
   return { areas: { type: "FeatureCollection", features: areas }, labels: { type: "FeatureCollection", features: labels } };
 }
 
+const isShore = (w) => w?.kind === "shore" && Array.isArray(w.pts) && w.pts.length > 1;
+/**
+ * Places that follow a shoreline (their own choice: place.shore is its id) take its outline as their
+ * border, so there is one outline to draw and it stays in step. A name outside a closed outline moves
+ * inside it. A shoreline since deleted leaves the place as it was, marked shoreGone.
+ */
+export function withShoreBorders(places, waterways = {}) {
+  return places.map((p) => {
+    if (!p.shore) return p;
+    const w = waterways[p.shore];
+    if (!isShore(w)) return { ...p, shoreGone: true };
+    const closed = !!w.closed && w.pts.length > 2;
+    const at = closed && !insideRing(w.pts, [p.lon, p.lat]) ? interiorPoint(w.pts) : [p.lon, p.lat];
+    return { ...p, area: w.pts, areaClosed: closed, shape: closed ? "area" : "line", lon: at[0], lat: at[1], shoreLine: true };
+  });
+}
+/** The shorelines a place may follow: those of its name first, then by name. */
+export function shoreChoices(waterways = {}, name = "") {
+  const fold = (s) => String(s ?? "").trim().toLowerCase(), want = fold(name);
+  return Object.entries(waterways).filter(([, w]) => isShore(w))
+    .map(([id, w]) => ({ id, name: String(w.name ?? "").trim() || "Unnamed shoreline", closed: !!w.closed, same: !!want && fold(w.name) === want }))
+    .sort((a, b) => b.same - a.same || a.name.localeCompare(b.name));
+}
+/** A new place for a shoreline: a lake if its water is inside, islands if outside, a coast if its ends are apart. */
+export function placeFromShore(id, w) {
+  const closed = !!w.closed && w.pts.length > 2, at = closed ? interiorPoint(w.pts) : w.pts[Math.floor(w.pts.length / 2)];
+  const cls = !closed ? "Coast" : w.water === "outside" ? "Islands" : "Lake";
+  return { name: String(w.name ?? "").trim() || "New place", kind: "natural", class: cls, rank: 4, level: "surface", layer: "geo", shore: id, lon: +at[0].toFixed(6), lat: +at[1].toFixed(6) };
+}
+/** The inland waters on a map, as outlines: closed shorelines with their water inside, and lakes with a closed border. */
+export function inlandWaters(places = [], waterways = {}) {
+  const shores = Object.values(waterways).filter((w) => isShore(w) && w.closed && w.water === "inside" && w.pts.length > 2).map((w) => w.pts);
+  const lakes = places.filter((p) => !p.shoreLine && /^(lake|lagoon|pond|mere|tarn|loch)$/i.test(p.class ?? "") && placeOutline(p)?.closed && !placeOutline(p).fromRecord).map((p) => p.area);
+  return [...shores, ...lakes];
+}
+
 /** Whether a place can be a biome zone: land on the Geography layer, with a closed border drawn for it. */
 export const canBeBiome = (p) => !!p?.area && placeLayer(p) === "geo" && areaKind(p) === "land" && !!placeOutline(p)?.closed;
 

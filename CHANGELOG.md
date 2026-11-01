@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.84.0: places follow shorelines; lakes take their land's weather
+
+- **One outline, drawn once.** A place can follow a shoreline, so there is no need to draw the same contour again for a place and a biome.
+  - **Make a place** on a shoreline's panel makes a place of its name: a Lake if its water is inside, Islands if outside, a Coast if its ends are apart. If a place of that name already exists, you are asked whether to link it instead.
+  - **Border** on a selected place (Places tab) offers "Its own border" or any shoreline, with those of its name first. It is your choice and nothing links by itself.
+  - Reshape the shoreline and the place's border and any biome zone follow. Its corners are edited on the shoreline. Choosing "Its own border" keeps a copy to change separately. A shoreline that stops closing takes the biome zone with it, and you are told.
+- **A lake has the weather of the land around it.** A party on inland water gets the climate of the commonest biome just outside it, not the Open Sea's. Inland water is a closed shoreline with its water inside, or a Lake with a closed border. Biome zones stay land only, so an island can be one and a lake cannot. Open water still gets Open Sea.
+
 ## 0.83.4: your places stay
 
 - **Fixed:** a natural place you added or changed vanished on saving if a named river or shore had the same name or nearly so ("Lake Oban" beside a shore called Lake Oban). It was saved but hidden, leaving a gold handle for nothing. A place you added or changed now always shows, and any hidden this way come back. Shipped places a waterway already names are still left out, so they do not show twice.

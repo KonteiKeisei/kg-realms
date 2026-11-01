@@ -8,7 +8,7 @@
 import { onCanvas } from "./canvas-input.mjs";
 import { markerCatalog, iconFor } from "./map-symbols.mjs";
 import { latLonToScene } from "./geo.mjs";
-import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, canBeBiome, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, canBeBiome, shoreChoices, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
 import { biomeTypes, biomeForClass, zoneForPlace } from "./biomes.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
 // Drawing an area's border (0.77): how near (screen px) a click to the first corner closes it, and
@@ -54,7 +54,7 @@ export class PinEditor {
     const p = this.selected ? this.getPlace(this.selected) : null;
     if (this.placing) return { hint: "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
     if (this.drawing) return { hint: `Drawing ${p?.name ?? "the"} border · click to add corners · click the first corner to close it · Enter or double-click leaves the ends apart`, esc: "cancels drawing", tip: this.drawing.pts.length > 2 ? "Click the first corner to close the border" : "Click to add a corner", crosshair: true };
-    if (p && this.#outline(p)) return { hint: `${p.name} · drag a corner to move it · click an edge to add one · right-click a corner to remove it`, esc: "lets go of it", tip: "" };
+    if (p && this.#editable(p)) return { hint: `${p.name} · drag a corner to move it · click an edge to add one · right-click a corner to remove it`, esc: "lets go of it", tip: "" };
     if (p) return { hint: `${p.name} · drag to move it · double-click for its card`, esc: "lets go of it", tip: "" };
     return { hint: "Drag a place to move it · click to select · double-click for its card", esc: "leaves editing", tip: "" };
   }
@@ -121,7 +121,7 @@ export class PinEditor {
       const p = this.getPlace(this.selected), s = this.getLayer().toScreen(p.lon, p.lat);
       if (s && Math.hypot(s[0] - g[0], s[1] - g[1]) < 13) { this.#stop(e); this.press = { id: p.id, start: g, moved: false }; return; }
     }
-    if (this.selected && this.#outline(this.getPlace(this.selected))) {
+    if (this.selected && this.#editable(this.getPlace(this.selected))) {
       const i = this.#cornerAt(g);
       if (i >= 0) { this.#stop(e); this.corner = i; this.cornerDrag = { i, moved: false }; this.#overlay(); return this.onStatus?.(); }
       const at = this.#edgeAt(g);
@@ -194,17 +194,19 @@ export class PinEditor {
 
   /** The selected place's outline as the map draws it ({ pts, closed, fromRecord }), or null. */
   #outline(p) { return p ? placeOutline(p, recordIndex(this.getRegions?.() ?? [])) : null; }
+  /** An outline to edit here: one following a shoreline is reshaped on the shoreline. */
+  #editable(p) { return p?.shoreLine ? null : this.#outline(p); }
   /** A copy of the selected outline to change (the edit in progress, if any). */
-  #editPts() { const o = this.editing ?? this.#outline(this.getPlace(this.selected)); return o ? { pts: o.pts.map((c) => [...c]), closed: !!o.closed } : { pts: [], closed: false }; }
+  #editPts() { const o = this.editing ?? this.#editable(this.getPlace(this.selected)); return o ? { pts: o.pts.map((c) => [...c]), closed: !!o.closed } : { pts: [], closed: false }; }
   #cornerAt(g) {
-    const o = this.editing ?? this.#outline(this.selected ? this.getPlace(this.selected) : null), layer = this.getLayer();
+    const o = this.editing ?? this.#editable(this.selected ? this.getPlace(this.selected) : null), layer = this.getLayer();
     if (!o) return -1;
     let best = -1, bd = NODE_PX;
     o.pts.forEach((c, i) => { const s = layer.toScreen(c[0], c[1]), d = Math.hypot(s[0] - g[0], s[1] - g[1]); if (d < bd) { bd = d; best = i; } });
     return best;
   }
   #edgeAt(g) {
-    const o = this.editing ?? this.#outline(this.getPlace(this.selected)), layer = this.getLayer();
+    const o = this.editing ?? this.#editable(this.getPlace(this.selected)), layer = this.getLayer();
     if (!o || o.pts.length < 2) return -1;
     const s = o.pts.map((c) => layer.toScreen(c[0], c[1])), n = o.closed ? s.length : s.length - 1;
     let best = -1, bd = EDGE_PX;
@@ -258,6 +260,15 @@ export class PinEditor {
     if (zoneId) await this.saveBiomes((c) => { const zones = { ...c.zones }; delete zones[zoneId]; return { ...c, zones }; });
     await this.#save(id, { biomeZone: null });
   }
+  /** The choice to follow a shoreline instead of drawing a border: for natural features and areas, never forced. */
+  #shoreRow(p) {
+    const choices = shoreChoices(this.getShores?.() ?? {}, p.name);
+    if ((p.kind !== "natural" && placeLayer(p) === "places") || (!choices.length && !p.shore)) return "";
+    const rule = ruleTooltip("<p><strong>Follow a shoreline</strong> The place's border is the shoreline's: one outline, drawn once. Reshape the shoreline and the place and any biome zone follow.</p><p><strong>Its own border</strong> Draw one here, or keep a copy of the shoreline's to change on its own.</p>");
+    const gone = p.shoreGone ? `<p class="hint">The shoreline it followed has been deleted.</p>` : "";
+    return `<div class="row"><span>Border ${rule}</span></div><div class="row"><select name="area-shore" aria-label="Border"><option value="">Its own border</option>${choices.map((c) => `<option value="${esc(c.id)}" ${c.id === p.shore ? "selected" : ""}>Follow: ${esc(c.name)}${c.closed ? "" : " (ends apart)"}</option>`).join("")}</select></div>${gone}`;
+  }
+
   /** The Biome row: a closed border on land can drive travel and camps, as a biome zone that follows it. */
   #biomeRow(p, o) {
     // Its shape, layer, type or border changed so it can no longer be one: its zone goes with it.
@@ -268,6 +279,7 @@ export class PinEditor {
         finally { this.droppingZone = null; }
       });
     }
+    if (placeLayer(p) === "geo" && areaKind(p) === "water" && o?.closed && /^(lake|lagoon|pond|mere|tarn|loch)$/i.test(p.class ?? "")) return `<p class="hint">Weather here is that of the biome around this water.</p>`;
     if (placeLayer(p) !== "geo" || areaKind(p) !== "land" || !this.getBiomes) return "";
     const rule = ruleTooltip("<p><strong>Biome zone</strong> Makes this area count as a biome: travel speed off road, on roads and on trails, and the Forage, Conceal and Alarm DCs for camps.</p><p><strong>Border</strong> The zone follows this place's border as you reshape it, and takes its name.</p><p><strong>Biomes tab</strong> Set its speeds and DCs there. Its corners are this border's: reshape them here.</p><p><strong>When</strong> Journeys already under way keep the settings they left with.</p>");
     if (!p.area || !o?.closed) return `<div class="row"><span>Biome ${rule}</span></div><p class="hint">Draw and close a border to make this area a biome zone.</p>`;
@@ -285,7 +297,7 @@ export class PinEditor {
     if (this.drawing) return layer.setAreaEdit(this.hover ? [...this.drawing.pts, this.hover] : this.drawing.pts, false, null);
     if (!this.selected) return layer.setAreaEdit(null);
     const p = this.selected ? this.getPlace(this.selected) : null;
-    const o = this.editing ?? (p ? this.#outline(p) : null);
+    const o = this.editing ?? (p ? this.#editable(p) : null);
     const label = p && placeShape(p) !== "point" ? { at: [p.lon, p.lat], name: p.name } : null;
     layer.setAreaEdit(o?.pts ?? null, !!o?.closed, this.corner, label);
   }
@@ -397,12 +409,13 @@ export class PinEditor {
     const seg = (act, list, on) => `<div class="kgr-seg-row">${list.map(([v, l]) => `<button type="button" data-act="${act}" data-v="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</div>`;
     const shapeRule = ruleTooltip("<p><strong>Point</strong> A single place on the map: a marker and its name.</p><p><strong>Area</strong> A border that closes, with a light wash of colour inside: a kingdom, a forest, a sea.</p><p><strong>Line</strong> A line with two ends, named along it: a river, a strait, a mountain spine, a border line.</p><p><strong>Default</strong> Its type decides; this changes it for this place only.</p>");
     const layerRule = ruleTooltip("<p><strong>Places</strong> Settlements, sites, peaks: where a party can stand.</p><p><strong>Realms</strong> Kingdoms, empires and regions: who holds the land.</p><p><strong>Geography</strong> Forests, ranges, deserts, seas, lakes and rivers: what the land and water are.</p><p><strong>Showing</strong> The map shows one layer at a time (the layers rail on the travel panel). A place shows only on its own layer.</p>");
-    const border = shape === "point" ? "" : this.drawing
+    const follow = this.#shoreRow(p);
+    const border = p.shoreLine ? `<p class="hint">Its border follows the shoreline: ${o?.pts.length ?? 0} corners, ${o?.closed ? "closed" : "ends apart"}. Reshape it in the Waterways tab.</p>` : shape === "point" ? "" : this.drawing
       ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. Click the first corner to close the border; Enter or double-click leaves its ends apart. Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> Finish as a line</button><button data-act="border-cancel">Cancel</button></div>`
       : `<p class="hint">${o ? `${o.pts.length} corners, ${o.closed ? "closed" : "ends apart"}${o.fromRecord ? " (the world's rectangle: draw or reshape it)" : ""}.` : "No border yet: its name shows at its point on its layer."}</p>
         <div class="row"><button data-act="border-draw"><i class="fa-solid fa-draw-polygon"></i> ${o && !o.fromRecord ? "Redraw border" : "Draw border"}</button>${o && !o.fromRecord && shape === "area" ? `<button data-act="border-toggle">${o.closed ? "Open the shape" : "Close the shape"}</button>` : ""}${p.area ? `<button data-act="border-remove" class="danger">Remove border</button>` : ""}</div>`;
-    return `<div class="kgr-area-rows"><div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}
-      <div class="row"><span>Layer ${layerRule}</span></div>${seg("layer", MAP_LAYERS.map((k) => [k, LAYER_NAMES[k]]), layer ?? "places")}${border}${this.drawing ? "" : this.#biomeRow(p, o)}</div>`;
+    return `<div class="kgr-area-rows">${p.shoreLine ? "" : `<div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}`}
+      <div class="row"><span>Layer ${layerRule}</span></div>${seg("layer", MAP_LAYERS.map((k) => [k, LAYER_NAMES[k]]), layer ?? "places")}${this.drawing ? "" : follow}${border}${this.drawing ? "" : this.#biomeRow(p, o)}</div>`;
   }
 
   /** The places removed from this world (the world has moved on), to bring one back. */
@@ -509,6 +522,19 @@ export class PinEditor {
     if (t.name === "new-kind") { this.newKind = t.value; return; }
     if (!id || !t.name) return;
     if (t.name === "kind") await this.#save(id, { kind: t.value });
+    if (t.name === "area-shore") {
+      const p = this.getPlace(id);
+      if (!p) return;
+      if (t.value && p.area && !p.shoreLine) {
+        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Follow a shoreline" }, content: `<p>Replace the border of <b>${esc(p.name)}</b> with the shoreline's? Ctrl+Z undoes this.</p>`, rejectClose: false });
+        if (!ok) { t.value = ""; return; }
+      }
+      // Leaving a shoreline keeps a copy of its outline as the place's own.
+      await this.#save(id, t.value ? { shore: t.value, area: null, areaClosed: null, shape: null } : { shore: null, ...(p.shoreLine ? { area: p.area.map((c) => [...c]), areaClosed: !!p.areaClosed, shape: p.shape } : {}) });
+      const now = this.getPlace(id);
+      await this.#followBorder(id, canBeBiome(now) ? now.area : null);
+      this.#render(); return this.#overlay();
+    }
     if (t.name === "area-biome") {
       const zoneId = this.getPlace(id)?.biomeZone;
       this.biomeChoice = { id, type: t.value };

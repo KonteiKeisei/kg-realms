@@ -510,7 +510,7 @@ export class WaterwayEditor {
     return `${leak}<span class="hint">No boat crosses it.${w.closed ? " A loop: an island or a lake." : ""}</span>
       <div class="row"><label>Water side <select name="water"><option value="">Not set</option>${sides.map((s) => `<option value="${s}" ${w.water === s ? "selected" : ""}>${SIDES[s]}</option>`).join("")}</select></label>${rule}</div>
       ${this.pickingSide ? `<p class="kgr-sel node"><i class="fa-solid fa-hand-pointer"></i> Click the map on the water side of this shoreline. Esc cancels.</p>` : ""}
-      <div class="row">${w.water && !this.pickingSide ? `<button data-act="pick-side" class="kgr-water-set" data-tooltip="Click again to change the water side"><i class="fa-solid fa-check"></i> Water side set</button>` : `<button data-act="pick-side" class="${this.pickingSide ? "on" : ""}"><i class="fa-solid fa-hand-pointer"></i> Click the water side</button>`}${w.closed ? `<button data-act="unloop" title="Take out the join between its last point and its first"><i class="fa-solid fa-link-slash"></i> Open the loop</button>` : (this.coords ?? w.pts).length > 2 ? `<button data-act="loop" title="Join its last point to its first: an island or a lake"><i class="fa-solid fa-circle-notch"></i> Close into a loop</button>` : ""}</div>`;
+      ${(() => { const place = this.shorePlace?.(this.selected); return place ? `<p class="hint">The place ${esc(place.name)} follows this shoreline.</p>` : this.makeShorePlace ? `<div class="row"><button data-act="make-place" data-tooltip="Make a place from this shoreline, or link a place of its name. Its border follows the shoreline, so there is one outline to draw."><i class="fa-solid fa-location-dot"></i> Make a place</button></div>` : ""; })()}<div class="row">${w.water && !this.pickingSide ? `<button data-act="pick-side" class="kgr-water-set" data-tooltip="Click again to change the water side"><i class="fa-solid fa-check"></i> Water side set</button>` : `<button data-act="pick-side" class="${this.pickingSide ? "on" : ""}"><i class="fa-solid fa-hand-pointer"></i> Click the water side</button>`}${w.closed ? `<button data-act="unloop" title="Take out the join between its last point and its first"><i class="fa-solid fa-link-slash"></i> Open the loop</button>` : (this.coords ?? w.pts).length > 2 ? `<button data-act="loop" title="Join its last point to its first: an island or a lake"><i class="fa-solid fa-circle-notch"></i> Close into a loop</button>` : ""}</div>`;
   }
 
   #click(e) {
@@ -525,6 +525,7 @@ export class WaterwayEditor {
       finish: () => this.#finish(), cancel: () => this.#cancelDraft(), undo: () => this.#undo(), export: () => this.export(), import: () => this.import(),
       delete: () => this.#delete(), deselect: () => this.select(null),
       join: () => { this.joining = true; this.node = null; this.#draw(); this.#render(); }, "join-cancel": () => { this.joining = false; this.#render(); },
+      "make-place": async () => { await this.makeShorePlace?.(this.selected); this.#render(); },
       "pick-side": () => { this.pickingSide = !this.pickingSide; this.#render(); }, loop: () => this.#loop(true), unloop: () => this.#loop(false),
       reverse: () => { this.coords = [...(this.coords ?? this.all()[this.selected].pts)].reverse(); this.#draw(); this.#save({ pts: this.coords }); }
     })[act]?.();
