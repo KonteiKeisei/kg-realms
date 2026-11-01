@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.86.0: Territory/Domain
+
+- **A new kind of place: Territory/Domain.** Empires, kingdoms, provinces and regions were natural features, which they are not. They now have their own kind, in the Kind list, in Add place, and in their own group in the Places list. A new one starts as a Region, on the Realms layer.
+- **Existing places move by themselves:** a natural feature whose type is a realm's (Region, Macroregion, Kingdom, Empire and the like) now reads as a Territory/Domain. It shows on the same layer as before, with no marker, and is still no travel stop or road target.
+- **You can say otherwise:** set Kind back to Natural feature (The Steppes, say) and it stays one, on the Geography layer.
+- A new natural feature now starts on the Geography layer, not Realms.
+
 ## 0.85.0: shared borders
 
 - **Borders are shared, whichever came first.** An outline defined on a shoreline, a biome zone or a place can be used by the other two. They keep a link, not a copy, so reshaping the one moves all that follow it.

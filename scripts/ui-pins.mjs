@@ -20,7 +20,7 @@ const DRAG_PX = 4;
 const KEY = [["faerun-city", "City"], ["faerun-town", "Town"], ["faerun-village", "Village"], ["faerun-keep", "Castle"], ["faerun-ruin", "Ruin"], ["faerun-peak", "Peak"], ["faerun-dungeon", "Dungeon"], ["faerun-tower", "Tower"], ["faerun-site", "Site"]];
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 // The list of places (0.75): a section for each kind, a group for each class inside it.
-const KINDS = [["settlement", "Settlements"], ["site", "Sites"], ["natural", "Natural features"]];
+const KINDS = [["settlement", "Settlements"], ["site", "Sites"], ["territory", "Territories/Domains"], ["natural", "Natural features"]];
 const OPEN_KEY = "kgr-places-open";
 
 export class PinEditor {
@@ -264,7 +264,7 @@ export class PinEditor {
   /** The choice to share an outline instead of drawing a border: for natural features and areas, never forced. */
   #shoreRow(p) {
     const choices = this.getBorderChoices?.(`place:${p.id}`, p.name) ?? [];
-    if ((p.kind !== "natural" && placeLayer(p) === "places") || (!choices.length && !followOf(p))) return "";
+    if ((p.kind !== "natural" && p.kind !== "territory" && placeLayer(p) === "places") || (!choices.length && !followOf(p))) return "";
     const rule = ruleTooltip("<p><strong>Follow</strong> The place's border is another's: a shoreline, a biome zone or another place. One outline, drawn once, whichever came first. Reshape that one and everything following it moves.</p><p><strong>Its own border</strong> Draw one here. Leaving a shared border keeps a copy to change on its own.</p>");
     const gone = p.shoreGone ? `<p class="hint">The outline it followed has been deleted.</p>` : "";
     return `<div class="row"><span>Border ${rule}</span></div><div class="row">${borderSelect('name="area-shore"', choices, followOf(p) ?? "", esc)}</div>${gone}`;
@@ -310,7 +310,7 @@ export class PinEditor {
     const [lon, lat] = this.getLayer().fromScreen(...g);
     const id = `added-${foundry.utils.randomID()}`;
     const kind = this.newKind ?? "settlement";
-    const CLASS = { settlement: "Town", site: "Site", natural: "Region" };
+    const CLASS = { settlement: "Town", site: "Site", territory: "Region", natural: "Feature" };
     this.#remember();
     await this.saveEdits((w) => {
       w.added ??= {};
@@ -355,13 +355,13 @@ export class PinEditor {
       <p class="kgr-sel node"><i class="fa-solid fa-location-dot"></i> <b>${esc(p.name)}</b> (${esc(p.class ?? "place")}). Drag its marker to move it.</p>
       <div class="row"><button data-act="card"><i class="fa-solid fa-id-card"></i> Open its card</button></div>
       ${this.#areaRows(p)}
-      <div class="row"><label>Kind <select name="kind">${[["settlement", "Settlement"], ["site", "Site"], ["natural", "Natural feature"]].map(([v, l]) => `<option value="${v}" ${p.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+      <div class="row"><label>Kind <select name="kind">${[["settlement", "Settlement"], ["site", "Site"], ["territory", "Territory/Domain"], ["natural", "Natural feature"]].map(([v, l]) => `<option value="${v}" ${p.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
       <div class="row"><label>Marker</label><button data-act="markers" class="marker-current" title="Choose a marker">${this.#thumb(p.marker ? (p.marker.startsWith("faerun-") ? p.marker : "mk-" + p.marker) : iconFor(p))} Change</button>${p.marker ? `<button data-act="marker-default">Default</button>` : ""}</div>
       ${this.picking ? this.#markerGrid(p) : ""}
       <div class="row">${p.edited && !p.added ? `<button data-act="reset-pos"><i class="fa-solid fa-location-crosshairs"></i> Reset position</button><button data-act="reset" class="danger"><i class="fa-solid fa-rotate-left"></i> Reset all edits</button>` : ""}<button data-act="done">Done</button></div>
       <div class="row"><button data-act="remove-place" class="danger" title="${p.added ? "Delete this place you added" : "Gone from this world: off the map, out of search and journeys. It can be restored below the list of places, with its edits."}"><i class="fa-solid fa-eraser"></i> ${p.added ? "Delete place" : "Remove from the map"}</button></div>`
       : `<p class="hint">Click a place to select it (its kind and map marker show here). Double-click it for its card: name, art, what is known, scene, who sees it.</p>${Object.keys(this.getMarkers()).length ? `<h4 class="kgr-own">Your markers</h4><div class="kgr-own-list">${Object.entries(this.getMarkers()).map(([k, m]) => `<span title="${esc(m.name)}"><img src="${esc(foundry.utils.getRoute(m.src))}" alt=""> ${esc(m.name)}</span>`).join("")}</div><p class="hint">Click a place, then Change, to give it one of these.</p>` : ""}${this.#removedRow()}`;
-    const tools = `<div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${this.newKind !== "site" && this.newKind !== "natural" ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
+    const tools = `<div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${!["site", "territory", "natural"].includes(this.newKind) ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="territory" ${this.newKind === "territory" ? "selected" : ""}>Territory/Domain</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
     const files = `<div class="kgr-file-row"><button data-act="export" title="Save every place edit and your markers to a file"><i class="fa-solid fa-file-export"></i> Export places</button><button data-act="import" title="Load place edits from a file"><i class="fa-solid fa-file-import"></i> Import places</button></div>`;
     this.panel.innerHTML = `${tools}${body}${this.placing || this.adding ? "" : `<div class="kgr-enc-list kgr-place-list"><span class="cap">On this map (${this.getPlaces().length})</span><input type="search" name="place-filter" placeholder="Find a place" value="${esc(this.filter ?? "")}" aria-label="Find a place"><div class="kgr-place-groups">${this.#list()}</div></div>`}${files}`;
     this.onStatus?.();
@@ -523,7 +523,7 @@ export class PinEditor {
     const t = e.target, id = this.selected;
     if (t.name === "new-kind") { this.newKind = t.value; return; }
     if (!id || !t.name) return;
-    if (t.name === "kind") await this.#save(id, { kind: t.value });
+    if (t.name === "kind") await this.#save(id, { kind: t.value, kindChosen: true });
     if (t.name === "area-shore") {
       const p = this.getPlace(id);
       if (!p) return;

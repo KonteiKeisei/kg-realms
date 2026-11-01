@@ -395,7 +395,7 @@ export class TravelHud {
       this.#projectProgress();
       // The route sheet: places passed, roads joined and left, and stops kept (places or stays).
       const sts = this.stops();
-      const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && !(p.unnamed && !p.edited) && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class))
+      const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && p.kind !== "territory" && !(p.unnamed && !p.edited) && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class))
         .map((p) => ({ name: p.name, at: lonLatToSource(p.lon, p.lat), settlement: p.kind === "settlement" }));
       const nums = this.#numbers();
       this.sheet = routeSheet(r, { stops: sts.map((w, i) => ({ name: w.name ?? "Stop", keep: i === 0 || nums[i - 1] != null })), places, milesPerPixel: SOURCE_MAP.milesPerPixel });
@@ -1341,7 +1341,7 @@ export class TravelHud {
     if (!at) return "";
     let best = null, bd = Infinity;
     for (const p of this.getPlaces()) {
-      if (p.hidden || p.kind === "natural") continue;
+      if (p.hidden || p.kind === "natural" || p.kind === "territory") continue;
       const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - at[0], q[1] - at[1]);
       if (d < bd) { bd = d; best = p; }
     }

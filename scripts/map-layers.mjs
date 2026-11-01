@@ -15,7 +15,7 @@ const words = (list) => new Set(list.map((s) => s.toLowerCase()));
 /** Who holds the land. */
 const REALM = words(["Region", "Macroregion", "Kingdom", "Empire", "Country", "Nation", "Realm", "Province", "Duchy", "Barony", "County", "March", "Principality", "Republic", "Dominion", "Domain", "Territory", "State", "Lands", "City-state", "Confederation", "Theocracy", "Satrapy", "Khanate", "Tribe Lands"]);
 /** What the land and water are. */
-const LAND = words(["Forest", "Wood", "Woods", "Jungle", "Mountains", "Range", "Hills", "Highlands", "Desert", "Wastes", "Badlands", "Marsh", "Swamp", "Bog", "Fen", "Glacier", "Ice", "Tundra", "Steppe", "Moor", "Plain", "Plains", "Grassland", "Valley", "Canyon", "Islands", "Archipelago", "Coast", "Peninsula", "Cape"]);
+const LAND = words(["Feature", "Forest", "Wood", "Woods", "Jungle", "Mountains", "Range", "Hills", "Highlands", "Desert", "Wastes", "Badlands", "Marsh", "Swamp", "Bog", "Fen", "Glacier", "Ice", "Tundra", "Steppe", "Moor", "Plain", "Plains", "Grassland", "Valley", "Canyon", "Islands", "Archipelago", "Coast", "Peninsula", "Cape"]);
 const WATER = words(["Sea", "Ocean", "Coastal Sea", "Water/Coastal sea", "Water/Oceanic expanse", "Bay", "Gulf", "Strait", "Sound", "Channel", "Fjord", "Lagoon", "Lake", "Reef", "Shoal", "River"]);
 /** Names roads already carry along their line: on no layer. */
 const NONE = words(["Road", "Trail"]);
@@ -24,11 +24,20 @@ const LINES = words(["River", "Strait", "Channel", "Canyon", "Range"]);
 
 const cls = (p) => String(p?.class ?? "").toLowerCase();
 
-/** The layer a place is drawn on: its own choice, else its type's; null for none (road names). */
+/**
+ * What sort of thing a place is. Realms were once natural features: one of a realm's types still is
+ * unless the GM has said otherwise (kindChosen), and reads as a territory, wherever it was saved.
+ */
+export const placeKind = (p) => (!p?.kindChosen && p?.kind === "natural" && REALM.has(cls(p)) ? "territory" : p?.kind);
+
+/** The layer a place is drawn on: its own choice, else its kind's or type's; null for none (road names). */
 export function placeLayer(p) {
   if (MAP_LAYERS.includes(p?.layer)) return p.layer;
   const c = cls(p);
   if (NONE.has(c)) return null;
+  if (p?.kind === "territory") return "realms";
+  // Told it is a natural feature, whatever its type's word usually means (The Steppes, a Region).
+  if (p?.kindChosen && p?.kind === "natural" && REALM.has(c)) return "geo";
   if (REALM.has(c)) return "realms";
   if (LAND.has(c) || WATER.has(c)) return "geo";
   return "places";

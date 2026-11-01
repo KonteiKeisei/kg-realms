@@ -1,3 +1,4 @@
+import { placeKind } from "./map-layers.mjs";
 import { symbolFor, iconFor } from './map-symbols.mjs';
 import { placeLayer } from './map-layers.mjs';
 // Preserve bundled marker art when a world still carries its original server path.
@@ -38,6 +39,7 @@ export function applyEdits(places, { edits = {}, added = {} } = {}, level = "sur
     out.push({
       ...p,
       ...e,
+      kind: placeKind({ ...p, ...e }),
       // A server-side image migration changes the shipped path. A world edit still carrying
       // the same old path should follow it; a newly selected world image keeps precedence.
       ...(p.originalImg && e.img === p.originalImg ? { img: p.img } : {}),
