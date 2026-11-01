@@ -34,6 +34,20 @@ export const METHODS = {
   flying: { label: "Flying mount", short: "Flying", flying: true },
   custom: { label: "Custom speed", short: "Custom" }
 };
+/**
+ * What a wagon or coach ride is worth: the party pays, rides free, or is paid to guard it. Rates are in
+ * copper a mile for each party member. A ride is a deal, so the GM sets it. Pay is about a skilled
+ * hireling's 2 gp a day at each one's daily distance.
+ */
+export const RIDE_DEALS = { terms: { wagon: "free", coach: "fare" }, fares: { wagon: 2, coach: 3 }, pays: { wagon: 8, coach: 4 } };
+/** The price of a leg for one party member, in gp: { gp, paid } (paid: they are paid it). Null: no money changes hands. */
+export function ridePrice(miles, method, { terms, fares, pays } = {}, scale = 1) {
+  const term = { ...RIDE_DEALS.terms, ...terms }[method];
+  if (term === "fare") return { gp: miles * { ...RIDE_DEALS.fares, ...fares }[method] / 100 * scale, paid: false };
+  if (term === "paid") return { gp: miles * { ...RIDE_DEALS.pays, ...pays }[method] / 100 * scale, paid: true };
+  return null;
+}
+
 /** Kinds of going on water (waterways.mjs plans them). */
 export const WATER_KINDS = new Set(["sea", "river", "wind", "lane"]);
 

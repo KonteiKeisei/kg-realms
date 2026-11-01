@@ -1,4 +1,4 @@
-import { spotName } from "./map-layers.mjs";
+import { spotName, spotTitle } from "./map-layers.mjs";
 import {groupMembers,sceneParties,partyLabel} from './party-groups.mjs';
 import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-rules.mjs";
 // The travel panel on a realm map, for everyone. The GM plans the route (stops on the map, pace,
@@ -7,7 +7,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // tokens stand where the party is by then. After a day's travel it stops for the GM: make camp
 // or push on. It stops at each encounter until the GM carries on.
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
-import { roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
+import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
 import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
@@ -63,7 +63,7 @@ const hrs = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : `${Math.r
 // legMethods (a method for that leg), legVessels (a VESSELS key, or "actor:<uuid>" for a vehicle
 // actor), legFares (gp a head, haggled). fares: the default prices, ship sp and coach cp a mile.
 const DEFAULT = { name: "", waypoints: [], stays: [], legModes: [], legMethods: [], legVessels: [], legFares: [], encounters: [], pace: "normal", hours: 8, rest: 16, show: "route", start: null, trip: null, now: null,
-  method: "foot", methodMph: 8, fares: { ship: 1, coach: 3 }, shipSkip: [] };
+  method: "foot", methodMph: 8, fares: { ship: 1, coach: 3, wagon: 2 }, shipSkip: [] };
 const SNAP_PX = 14, HIT_PX = 10, ENCOUNTER_MI = 2;
 /** The parts of a journey that route edits change (and Ctrl+Z puts back). */
 const ROUTE_KEYS = ["waypoints", "stays", "legModes", "legMethods", "legVessels", "legFares", "encounters", "name"];
@@ -558,9 +558,10 @@ export class TravelHud {
     const own = s.legFares?.[i];
     const f = { ...DEFAULT.fares, ...(s.fares ?? {}) }, k = this.priceScale;
     const method = s.legMethods?.[i] ?? s.method;
-    const def = leg.sea ? leg.miles * f.ship / 10 * k : method === "coach" ? leg.miles * f.coach / 100 * k : null;
+    const ride = !leg.sea && (method === "wagon" || method === "coach") ? ridePrice(leg.miles, method, s, k) : null;
+    const def = leg.sea ? leg.miles * f.ship / 10 * k : ride?.gp ?? null;
     if (def == null) return null;
-    return { gp: own ?? def, def, haggled: own != null && Math.abs(own - def) > 0.05 };
+    return { gp: own ?? def, def, haggled: own != null && Math.abs(own - def) > 0.05, paid: !!ride?.paid };
   }
 
   /**
@@ -840,7 +841,7 @@ export class TravelHud {
     const s = this.state, { sts } = now;
     if (!s.trip) return;
     let entry = s.trip.log ? game.journal.get(s.trip.log) : null;
-    const title = (scene.partyId?`${partyLabel(scene)}: `:"") + (s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "Journey"));
+    const title = (scene.partyId?`${partyLabel(scene)}: `:"") + (s.name || (sts.length > 1 ? `${this.stopTitle(sts[0], "Start")} to ${this.stopTitle(sts.at(-1), "End")}` : "Journey"));
     if (!entry) {
       const name = "Travel Logs";
       const folder = game.folders.find((f) => f.type === "JournalEntry" && f.name === name) ?? await Folder.create({ name, type: "JournalEntry" });
@@ -1035,7 +1036,7 @@ export class TravelHud {
     this.el.hidden = !!this.suspended;
     this.el.classList.toggle("collapsed", this.collapsed);
     const sts = this.stops();
-    const title = rulesOnly ? "Travel rules" : s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "Travel");
+    const title = rulesOnly ? "Travel rules" : s.name || (sts.length > 1 ? `${this.stopTitle(sts[0], "Start")} to ${this.stopTitle(sts.at(-1), "End")}` : "Travel");
     const parties=sceneParties(this.scene?.realScene??this.scene);
     const partyTabs=parties.length>1?`<nav class="kgr-party-tabs" aria-label="Travel party">${parties.map(t=>`<button data-party-focus="${esc(t.actor.id)}" class="${t.actor.id===this.scene.partyId?'on':''}" ${this.leader?'':'disabled'}>${esc(t.name)}${(this.scene.realScene??this.scene).getFlag(MODULE_ID,'partyJourneys')?.[t.actor.id]?.now?.status==='encounter'?' !':''}</button>`).join('')}</nav>`:'';
     // The shell's header (ui-shell.mjs); the party pills sit under it.
@@ -1072,10 +1073,11 @@ export class TravelHud {
         <label><span>Hours on the road ${rule(R.forced)}</span><input type="number" name="hours" min="1" max="16" value="${s.hours}"></label>
         <label>Hours in camp<input type="number" name="rest" min="1" max="72" value="${s.rest}"></label>
       </div>
-      <div class="grid2">
-        <label><span>Ship fare, a mile ${rule(R.fares)}</span><span class="unit"><input type="number" name="fare-ship" min="0" max="100" step="0.5" value="${fr.ship}"> sp</span></label>
-        <label>Coach fare, a mile<span class="unit"><input type="number" name="fare-coach" min="0" max="100" step="1" value="${fr.coach}"> cp</span></label>
-      </div>
+      <div class="row"><label><span>Ship fare, a mile ${rule(R.fares)}</span><span class="unit"><input type="number" name="fare-ship" min="0" max="100" step="0.5" value="${fr.ship}"> sp</span></label></div>
+      ${[["wagon", "Wagon", "Paid to guard"], ["coach", "Coach", "Paid as escort"]].map(([k, label, paid]) => {
+        const term = { ...RIDE_DEALS.terms, ...s.terms }[k], rate = term === "paid" ? { ...RIDE_DEALS.pays, ...s.pays }[k] : { ...RIDE_DEALS.fares, ...s.fares }[k];
+        return `<div class="grid2"><label>${label}<select name="term-${k}">${[["fare", "Party pays"], ["free", "Free ride"], ["paid", paid]].map(([v, l]) => `<option value="${v}" ${v === term ? "selected" : ""}>${l}</option>`).join("")}</select></label>${term === "free" ? "" : `<label>${term === "paid" ? "Pay" : "Fare"}, a mile each<span class="unit"><input type="number" name="rate-${k}" min="0" max="1000" step="1" value="${rate}"> cp</span></label>`}</div>`;
+      }).join("")}
       <div class="row"><label>Players see</label>${seg("show", s.show, [["route", "Route"], ["progress", "Progress"], ["none", "Nothing"]])}</div>`
       : summary;
     // The route sheet: each point where something changes, and the going to the next.
@@ -1089,7 +1091,7 @@ export class TravelHud {
       const move = at >= 0 && order.length > 1 ? `<span class="order"><button data-act="stop-up" data-i="${k - 1}" title="Visit this stop earlier" ${at === 0 ? "disabled" : ""}><i class="fa-solid fa-arrow-up"></i> Earlier</button><button data-act="stop-down" data-i="${k - 1}" title="Visit this stop later" ${at === order.length - 1 ? "disabled" : ""}><i class="fa-solid fa-arrow-down"></i> Later</button></span>` : "";
       // The stop's own controls on a second line, so the name and distance keep the first.
       const isEnd = k != null && k - 1 === s.waypoints.length - 1;
-      const onward = gm && isEnd ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
+      const onward = gm && isEnd && this.mode === "route" ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
       const tools = gm && k != null && k > 0 ? `<span class="stop-tools">${onward}${move}<label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button></span>` : "";
       return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${this.seaNodes?.has(i) ? '<small class="sea-available">Sea travel available</small>' : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
     };
@@ -1113,7 +1115,7 @@ export class TravelHud {
           <optgroup label="Overland">${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !L.sea && !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, !L.sea && legMethod === k)).join("")}</optgroup>
           ${byWater ? `<optgroup label="By boat">${Object.entries(VESSELS).map(([k, x]) => opt(`v:${k}`, `${x.label}, ${x.mph} mph`, L.sea && v.key === k)).join("")}${v?.actor ? opt(`v:${v.key}`, v.label, true) : ""}</optgroup>` : ""}</select>`;
         const fare = this.fareOf(leg);
-        const fareRow = fare ? `<span class="fare"><label>Fare <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
+        const fareRow = fare ? `<span class="fare"><label>${fare.paid ? "Pay" : "Fare"} <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
         const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"} ${rule(this.ruleText().vessels)}</span>` : "";
         const warn = L.seaFailed ? `<span class="warn-line"><i class="fa-solid fa-circle-exclamation"></i> No water joins these ports: going overland.</span>`
           : L.autoSea ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland (water is in the way): going by boat.</span>` : "";
@@ -1158,8 +1160,9 @@ export class TravelHud {
     const ground = r ? (() => { const t = r.ground.road + r.ground.trail + r.ground.offroad + r.ground.water || 1; return [["road", r.ground.road], ["trail", r.ground.trail], ["overland", r.ground.offroad], ["by water", r.ground.water]].filter(([, v]) => v / t >= 0.01).map(([k, v]) => `${Math.round(v / t * 100)}% ${k}`).join(", "); })() : "";
     // Nights out: in camp, aboard ship, or staying somewhere on the way.
     const nights = r ? Math.max(0, Math.ceil(elapsedAt(this.plan, r.hours, { hoursPerDay: s.hours, rest: s.rest }) / 24 - 1e-9) - 1) : 0;
-    const fares = r ? r.legs.map((l, i) => this.fareOf(i)?.gp ?? 0).reduce((a, b) => a + b, 0) : 0, heads = this.members().length || 1;
-    const totals = r ? `<p class="totals"><b>${both(r.miles)}</b>, ${hrs(r.hours)} on the way, about ${nights} night${nights === 1 ? "" : "s"} out. ${ground}.${fares ? ` Fares ${gp(fares)} gp a head${heads > 1 ? `, ${gp(fares * heads)} gp for ${heads}` : ""}.` : ""}${gm && this.plan?.encounters.length ? ` Encounters: ${this.plan.encounters.map((e) => esc(e.name)).join(", ")}.` : ""}</p>` : "";
+    const priced = r ? r.legs.map((l, i) => this.fareOf(i)).filter(Boolean) : [], heads = this.members().length || 1;
+    const fares = priced.filter((x) => !x.paid).reduce((a, x) => a + x.gp, 0), earned = priced.filter((x) => x.paid).reduce((a, x) => a + x.gp, 0);
+    const totals = r ? `<p class="totals"><b>${both(r.miles)}</b>, ${hrs(r.hours)} on the way, about ${nights} night${nights === 1 ? "" : "s"} out. ${ground}.${fares ? ` Fares ${gp(fares)} gp a head${heads > 1 ? `, ${gp(fares * heads)} gp for ${heads}` : ""}.` : ""}${earned ? ` Pay ${gp(earned)} gp a head${heads > 1 ? `, ${gp(earned * heads)} gp for ${heads}` : ""}.` : ""}${gm && this.plan?.encounters.length ? ` Encounters: ${this.plan.encounters.map((e) => esc(e.name)).join(", ")}.` : ""}</p>` : "";
     // The pinned footer (ui-shell.mjs): Undo, editing the route and its encounters, then More.
     const foot = gm ? `<footer class="kgr-sh-foot"><button data-act="undo" title="Undo the last route change (Ctrl+Z)" aria-label="Undo" ${this.history?.length ? "" : "disabled"}><i class="fa-solid fa-rotate-left"></i></button><button data-act="edit" class="${this.mode === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> ${this.mode === "route" ? "Finish route" : "Edit route"}</button>
       <button data-act="place-encounter" class="${this.mode === "encounter" ? "on" : ""}" ${r ? "" : "disabled"}><i class="fa-solid fa-triangle-exclamation"></i> ${this.mode === "encounter" ? "Finish adding" : "Add encounters"}</button>
@@ -1565,7 +1568,16 @@ export class TravelHud {
     const s = this.state;
     if (t.name === "coachMph") return this.save({ coachMph: Math.max(1, Math.min(30, Number(t.value) || METHODS.coach.roadMph)) });
     if (t.name === "methodMph") return this.save({ methodMph: Math.max(0.5, Math.min(30, Number(t.value) || 8)) });
-    if (t.name === "fare-ship" || t.name === "fare-coach") return this.save({ fares: { ...DEFAULT.fares, ...(s.fares ?? {}), [t.name.slice(5)]: Math.max(0, Number(t.value) || 0) } });
+    if (t.name.startsWith("term-")) {
+      // A new deal: prices set by hand on those legs were for the old one.
+      const k = t.name.slice(5), legFares = (s.legFares ?? []).map((v, i) => (!s.legModes?.[i] && (s.legMethods?.[i] ?? s.method) === k ? null : v));
+      return this.save({ terms: { ...RIDE_DEALS.terms, ...s.terms, [k]: t.value }, legFares });
+    }
+    if (t.name.startsWith("rate-")) {
+      const k = t.name.slice(5), key = { ...RIDE_DEALS.terms, ...s.terms }[k] === "paid" ? "pays" : "fares", value = Math.max(0, Number(t.value) || 0);
+      return this.save({ [key]: { ...(key === "fares" ? DEFAULT.fares : RIDE_DEALS.pays), ...(s[key] ?? {}), [k]: value } });
+    }
+    if (t.name === "fare-ship") return this.save({ fares: { ...DEFAULT.fares, ...(s.fares ?? {}), [t.name.slice(5)]: Math.max(0, Number(t.value) || 0) } });
     // A leg's price, haggled: kept until reset, whenever it is changed (before or during the journey).
     if (t.name.startsWith("fare-")) {
       const i = Number(t.name.slice(5)), legFares = [...(s.legFares ?? [])], v = t.value === "" ? null : Math.max(0, Number(t.value) || 0);
@@ -1598,6 +1610,14 @@ export class TravelHud {
     const center=Number.isFinite(d?.x)&&Number.isFinite(d?.y)?{x:d.x+(d.width??1)*g/2,y:d.y+(d.height??1)*g/2}:t.center;
     const { lon, lat } = sceneToLatLon(layer.frame, center);
     return { lon, lat, name: this.placeName(lon, lat) };
+  }
+
+  /** A stop's short name, for a journey's title: a stop named from where it stands reads as the place, not the whole line. */
+  stopTitle(w, fallback) {
+    if (!w?.name) return fallback;
+    if (!/^(In|On|Near|near)\s/.test(w.name) || !Number.isFinite(w.lon)) return w.name;
+    const here = lonLatToSource(w.lon, w.lat), mpp = SOURCE_MAP.milesPerPixel;
+    return spotTitle(w.lon, w.lat, this.getPlaces(), (p) => { const q = lonLatToSource(p.lon, p.lat); return Math.hypot(q[0] - here[0], q[1] - here[1]) * mpp; });
   }
 
   /** What to call a spot (map-layers.mjs): its realm, its geography, and what it is near. */
@@ -1657,7 +1677,7 @@ export class TravelHud {
   /** The editing bar while editing the route or adding encounters to it. */
   #barState() {
     const s = this.state, sts = this.stops(), route = this.mode === "route";
-    const title = s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "New route");
+    const title = s.name || (sts.length > 1 ? `${this.stopTitle(sts[0], "Start")} to ${this.stopTitle(sts.at(-1), "End")}` : "New route");
     const sel = route && this.selected != null ? s.waypoints[this.selected] : null;
     return {
       title: route ? "Editing the route" : "Adding encounters", mode: title, undo: true,

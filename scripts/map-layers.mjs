@@ -285,7 +285,7 @@ const ringSize = (ring) => Math.abs(ring.reduce((sum, a, i) => { const b = ring[
  * rough to say which side of a coast a party is on); where they nest, the smallest wins. A settlement
  * takes "near" before any other place. milesTo(place) gives its distance from the spot.
  */
-export function spotName(lon, lat, places, milesTo) {
+function spotParts(lon, lat, places, milesTo) {
   let town = null, td = 5, settlement = null, sd = 60, poi = null, pd = 60, geo = null;
   for (const p of places ?? []) {
     if (p.hidden || (p.unnamed && !p.edited)) continue;
@@ -308,11 +308,19 @@ export function spotName(lon, lat, places, milesTo) {
   // Every territory around it, innermost first, with what those are part of. Hidden ones say nothing.
   const byId = new Map(territoriesOf(places).map((t) => [t.id, t]));
   const realms = withParents(territoriesAt(lon, lat, places), byId).filter((t) => !t.hidden && !(t.unnamed && !t.edited)).map((t) => t.name).join(", ");
+  return { town, geo, realms, near: (settlement ?? poi)?.name ?? null };
+}
+export function spotName(lon, lat, places, milesTo) {
+  const { town, geo, realms, near } = spotParts(lon, lat, places, milesTo);
   if (town) return realms ? `In ${town.name}, ${realms}` : `In ${town.name}`;
   const where = [realms && `in ${realms}`, geo && `${areaKind(geo.p) === "water" ? "on" : "in"} ${geo.p.name}`].filter(Boolean).join(", ");
-  const near = (settlement ?? poi)?.name;
   const text = where && near ? `${where} near ${near}` : where || (near ? `near ${near}` : "Wilderness");
   return text[0].toUpperCase() + text.slice(1);
+}
+/** A spot's short name, for a journey's title: the town, else the water or land it is on, else what it is near. */
+export function spotTitle(lon, lat, places, milesTo) {
+  const { town, geo, realms, near } = spotParts(lon, lat, places, milesTo);
+  return town?.name ?? geo?.p.name ?? near ?? (realms ? realms.split(", ")[0] : "Wilderness");
 }
 
 /** Which places have an outline drawn on the map (their names come from the areas, not the places source). */

@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.88.1: wagon and coach deals
+
+- **Wagon and coach deals.** In the journey setup, each one can be Party pays, Free ride, or paid: Paid to guard for a wagon, Paid as escort for a coach. Rates are copper per mile per party member. Wagons start as a free ride, and coaches at the book's 3 cp. Pay is shown on each leg and in the journey's totals, the same way fares are.
+- Encumbrance and slow walkers don't slow a wagon or coach. The rules now say so.
+- Rewrote the wagon, coach and fare rules.
+- **Go on from here** only shows while editing the route.
+- **Fixed:** journey names used the whole location line ("In Arine, Empiria, Salvae Empire to Karackas"). They now read "Arine to Karackas".
+
 ## 0.88.0: wagons and coaches keep to the road
 
 - **Wagons and coaches keep to roads and trails.** They no longer go across country, however much shorter it is. A stop must be beside a road: within 3 miles, or a marker's width on a large map. If it is not, or no road joins two stops, the panel says which and how far, and suggests moving the stop, drawing a road, or choosing another way for that leg.
