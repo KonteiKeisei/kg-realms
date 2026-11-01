@@ -7,7 +7,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // tokens stand where the party is by then. After a day's travel it stops for the GM: make camp
 // or push on. It stops at each encounter until the GM carries on.
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
-import { buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
+import { roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
 import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
@@ -334,7 +334,7 @@ export class TravelHud {
       this.routeFavored = JSON.stringify(this.favoredTerrains());
       const pts = this.stops().map((w) => lonLatToSource(w.lon, w.lat)), baseMph = (walking?.baseFeet ?? currentFeet) / 10;
       const legs = pts.slice(1).map((_, i) => ({
-        method: { key: s.legMethods?.[i] ?? s.method, baseMph, mph: s.methodMph },
+        method: { key: s.legMethods?.[i] ?? s.method, baseMph, mph: s.methodMph, roadMph: s.coachMph },
         sea: s.legModes?.[i] === "sea" ? { vessel: this.vessel(s.legVessels?.[i]) } : null,
         // No way overland (an island, a port cut off by water): by boat instead, if water joins them.
         seaFallback: s.legModes?.[i] === "direct" ? null : { vessel: this.vessel(s.legVessels?.[i]) }
@@ -348,7 +348,10 @@ export class TravelHud {
         let leg = -1;
         for (let i = 0; i + 1 < pts.length && leg < 0; i++) if (!itinerary(this.graph, [pts[i], pts[i + 1]], { legModes: [s.legModes?.[i] ?? null], legs: [legs[i]], seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: SOURCE_MAP.milesPerPixel, baseMph })) leg = i;
         const i = Math.max(0, leg);
-        this.noRouteWhy = { from: names[i], to: names[i + 1], fromOn: under(pts[i]), toOn: under(pts[i + 1]), roads: this.graph?.nodes?.size ?? 0 };
+        const roadOnly = METHODS[legs[i]?.method?.key]?.roadsOnly && legs[i]?.method?.key;
+        const gap = (q) => roadGapMiles(this.graph, q, SOURCE_MAP.milesPerPixel), far = (q) => gap(q) > roadReachMiles(SOURCE_MAP.milesPerPixel);
+        const offRoad = roadOnly ? (far(pts[i]) ? { name: names[i], miles: gap(pts[i]) } : far(pts[i + 1]) ? { name: names[i + 1], miles: gap(pts[i + 1]) } : null) : null;
+        this.noRouteWhy = { from: names[i], to: names[i + 1], fromOn: under(pts[i]), toOn: under(pts[i + 1]), roads: this.graph?.nodes?.size ?? 0, roadOnly, offRoad };
         console.warn("kg-realms | no route", { ...this.noRouteWhy, stops: sts.map((w, k) => ({ name: names[k], lon: w.lon, lat: w.lat, sheet: pts[k], on: under(pts[k]) })), legModes: s.legModes, legMethods: s.legMethods });
       }
     } else {
@@ -1042,16 +1045,16 @@ export class TravelHud {
     const pace = PACES[s.pace], sp = this.speed(), base = sp.feet / 10, mph = base * pace.mph / 3;
     const seg = (name, value, list) => `<div class="seg">${list.map(([v, l, t]) => `<button data-set="${name}" data-value="${v}" class="${v === value ? "on" : ""}" ${t ? `title="${esc(t)}"` : ""}>${l}</button>`).join("")}</div>`;
     const R = this.ruleText();
-    const method = METHODS[s.method] ? s.method : "foot", own = method === "custom" || method === "flying";
+    const method = METHODS[s.method] ? s.method : "foot", own = method === "custom" || method === "flying", coachMph = s.coachMph ?? METHODS.coach.roadMph;
     // Miles a day at each pace for the party's way of travel, on open ground.
-    const daily = (k) => method === "flying" || method === "custom" ? (s.methodMph ?? 8) * s.hours : (method === "foot" ? base : 3) * PACES[k].mph / 3 * s.hours;
+    const daily = (k) => method === "flying" || method === "custom" ? (s.methodMph ?? 8) * s.hours : (method === "foot" ? base : method === "coach" ? coachMph : 3) * PACES[k].mph / 3 * s.hours;
     const paceSeg = seg("pace", s.pace, ["slow", "normal", "fast"].map((k) => [k, `${PACES[k].label} <small>${mi(daily(k) / s.hours)} mph</small>`, R.pace[k]]));
     const showText = { route: "players see the route", progress: "players see progress only", none: "players see nothing" }[s.show] ?? "";
     // The setup, folded into one line once a route exists (the Setup button opens it again).
     const open = gm && (this.setupOpen || sts.length < 2);
     // Someone encumbered (on foot, it slows the party): in red, with who and how.
     const load = sp.burdened.map((x) => `${x.name}: ${x.burden}`).join(", ");
-    const how = method === "foot" ? `<span class="${sp.burden ? "burdened" : ""}" ${load ? `data-tooltip="${esc(`Encumbered: ${load}. Lighten the load to travel faster.`)}"` : ""}>speed ${sp.feet} ft${sp.who ? ` (${esc(sp.who)}, slowest${sp.burden ? `, ${esc(sp.burden)}` : ""})` : ""}</span>${sp.burdened.length && !sp.burden ? ` · <span class="burdened" data-tooltip="${esc(`Encumbered: ${load}.`)}">${esc(sp.burdened.map((x) => x.name.split(" ")[0]).join(", "))} encumbered</span>` : ""}` : own ? `${mi(s.methodMph ?? 8)} mph` : METHODS[method].offroad ? "slow pace off the roads" : "travel pace";
+    const how = method === "foot" ? `<span class="${sp.burden ? "burdened" : ""}" ${load ? `data-tooltip="${esc(`Encumbered: ${load}. Lighten the load to travel faster.`)}"` : ""}>speed ${sp.feet} ft${sp.who ? ` (${esc(sp.who)}, slowest${sp.burden ? `, ${esc(sp.burden)}` : ""})` : ""}</span>${sp.burdened.length && !sp.burden ? ` · <span class="burdened" data-tooltip="${esc(`Encumbered: ${load}.`)}">${esc(sp.burdened.map((x) => x.name.split(" ")[0]).join(", "))} encumbered</span>` : ""}` : own ? `${mi(s.methodMph ?? 8)} mph` : METHODS[method].offroad ? "roads and trails only" : "travel pace";
     const biome=this.currentBiome(), favored=this.favoredTerrains().includes(biome?.type);
     // The setup in one line of chips (0.65.3): how, the pace, a day's miles, the hours, the ground.
     const chip = (text, cls = "", tip = "") => `<span class="kgr-sh-chip ${cls}" ${tip ? `data-tooltip="${esc(tip)}"` : ""}>${text}</span>`;
@@ -1062,6 +1065,7 @@ export class TravelHud {
       <div class="row"><label>Name<input type="text" name="name" value="${esc(s.name)}" placeholder="${esc(title)}"></label></div>
       <div class="row"><label>Travelling by ${rule(R.method)}</label><div class="seg wrap">${Object.entries(METHODS).map(([k, m]) => `<button data-set="method" data-value="${k}" class="${k === method ? "on" : ""}">${esc(m.short)}</button>`).join("")}</div></div>
       ${own ? `<div class="row"><label>${method === "flying" ? "Flying speed" : "Speed"} <input type="number" name="methodMph" min="0.5" max="30" step="0.5" value="${s.methodMph ?? 8}"> mph</label></div>` : ""}
+      ${method === "coach" ? `<div class="row"><label>Speed on roads, at normal pace <input type="number" name="coachMph" min="1" max="30" step="0.5" value="${coachMph}"> mph</label></div>` : ""}
       <div class="hint">${ruleContent(R.methods[method])}<p>Boats are chosen per leg, between ports.</p></div>
       <div class="row"><label>Pace ${rule(R.paceAll)}</label>${paceSeg}</div>
       <div class="grid2">
@@ -1099,8 +1103,8 @@ export class TravelHud {
       const leg = g.leg, L = r?.legs[leg], direct = s.legModes?.[leg] === "direct", first = !seen.has(leg);
       seen.add(leg);
       const done = pr && L && L.start + L.hours <= pr.hour + 1e-6;
-      const legMethod = s.legMethods?.[leg] ?? null, flying = (legMethod ?? s.method) === "flying";
-      const toggle = gm && first && !L?.sea && !flying && !done ? `<button data-act="way" data-i="${leg}" class="way ${direct ? "direct" : ""}" title="${direct ? "Going straight across country. Click to use roads." : "Using roads where they save time. Click to go straight across country."}">${direct ? '<i class="fa-solid fa-tree"></i> Direct' : '<i class="fa-solid fa-road"></i> Road'}</button>` : "";
+      const legMethod = s.legMethods?.[leg] ?? null, flying = (legMethod ?? s.method) === "flying", roadsOnly = !!METHODS[legMethod ?? s.method]?.roadsOnly;
+      const toggle = gm && first && !L?.sea && !flying && !roadsOnly && !done ? `<button data-act="way" data-i="${leg}" class="way ${direct ? "direct" : ""}" title="${direct ? "Going straight across country. Click to use roads." : "Using roads where they save time. Click to go straight across country."}">${direct ? '<i class="fa-solid fa-tree"></i> Direct' : '<i class="fa-solid fa-road"></i> Road'}</button>` : "";
       let how = "";
       if (gm && first && L) {
         const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, byWater = this.legByWater(leg);
@@ -1170,7 +1174,8 @@ export class TravelHud {
     const route = list || via || totals ? shellSection("Route", `${list}${via}${totals}`, { count: Math.max(0, sts.length - 1) ? `${sts.length - 1} stop${sts.length === 2 ? "" : "s"}` : null, open: !this.routeShut, key: "route" }) : "";
     const failed = !gm || this.stops().length < 2 ? ""
       : this.routeError ? `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> The route could not be worked out: ${esc(this.routeError)}. Try Recalculate the route (More); the console (F12) has the details.</p>`
-      : this.noRoute ? (() => { const w = this.noRouteWhy; return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> No way found${w ? ` from ${esc(w.from)} (on ${esc(w.fromOn)}) to ${esc(w.to)} (on ${esc(w.toOn)})` : " between these stops"}. Water is in the way and no boat route joins them${w && (w.fromOn === "water" || w.toOn === "water") ? `: ${esc(w.toOn === "water" ? w.to : w.from)} stands on water (the map's own, a shoreline's water side, or a painted biome)` : ""}. If that is wrong, check the shorelines: on the Waterways tab, Show the map's water, and look for a shoreline whose water leaks round an open end. The console (F12) has the details.</p>`; })() : "";
+      : this.noRoute && this.noRouteWhy?.roadOnly ? (() => { const w = this.noRouteWhy, who = METHODS[w.roadOnly].short.toLowerCase(); return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> A ${esc(who)} goes only by road and trail. ${w.offRoad ? `${esc(w.offRoad.name)} is ${Number.isFinite(w.offRoad.miles) ? `${mi(w.offRoad.miles)} mi from the nearest one` : "not near one, and this map has none"}: move the stop to a road, or choose another way for this leg.` : `No road or trail joins ${esc(w.from)} and ${esc(w.to)}: draw one on the Roads tab, or choose another way for this leg.`}</p>`; })()
+    : this.noRoute ? (() => { const w = this.noRouteWhy; return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> No way found${w ? ` from ${esc(w.from)} (on ${esc(w.fromOn)}) to ${esc(w.to)} (on ${esc(w.toOn)})` : " between these stops"}. Water is in the way and no boat route joins them${w && (w.fromOn === "water" || w.toOn === "water") ? `: ${esc(w.toOn === "water" ? w.to : w.from)} stands on water (the map's own, a shoreline's water side, or a painted biome)` : ""}. If that is wrong, check the shorelines: on the Waterways tab, Show the map's water, and look for a shoreline whose water leaks round an open end. The console (F12) has the details.</p>`; })() : "";
     const main = gm && this.tab === "enc" ? `${hint}${this.#encounterTab(rows)}` : this.tab === "rules" ? this.#rulesTab() : `${settings}${hint}${failed}${route}${warn}`;
     // The redraw keeps the panel where it was scrolled to.
     const html = `${head}${tabs}<div class="body">${this.tab === "rules" ? "" : this.#nowBox()}${main}</div>${foot}`;
@@ -1558,6 +1563,7 @@ export class TravelHud {
     }
     if (t.name === "rest") return this.save({ rest: Math.max(16, Math.min(72, Number(t.value) || 16)) });
     const s = this.state;
+    if (t.name === "coachMph") return this.save({ coachMph: Math.max(1, Math.min(30, Number(t.value) || METHODS.coach.roadMph)) });
     if (t.name === "methodMph") return this.save({ methodMph: Math.max(0.5, Math.min(30, Number(t.value) || 8)) });
     if (t.name === "fare-ship" || t.name === "fare-coach") return this.save({ fares: { ...DEFAULT.fares, ...(s.fares ?? {}), [t.name.slice(5)]: Math.max(0, Number(t.value) || 0) } });
     // A leg's price, haggled: kept until reset, whenever it is changed (before or during the journey).

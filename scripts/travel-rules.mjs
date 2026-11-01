@@ -25,12 +25,12 @@ export function travelRules(rules = "2014") {
   return { rules, pace, paceAll: Object.values(pace).join(""),
     terrain: y24 ? paragraphs(["Pace limits", "Plains and grassland: fast. Forest, hills and desert: normal. Mountains, swamp and ice: slow."], ["Routes", "Roads remove the terrain cap. Trails raise it by one pace."]) : paragraphs(["Difficult terrain", "Forests, swamps, mountains and ice halve off-road progress."]),
     forced: paragraphs(["After 8 travel hours", "Each extra hour is a forced march."], ["Save", "At the end of each extra hour, every character makes a Constitution save. DC = 10 + hours travelled beyond 8."], ["Failure", "Gain one level of Exhaustion."]),
-    method: paragraphs(["On foot", "The slowest walker sets the party's speed."], ["Other travel", "Mounts and wagons use travel pace. Flying mounts use their own speed and fly directly."]),
+    method: paragraphs(["On foot", "The slowest walker sets the party's speed."], ["Other travel", "Mounts and wagons use travel pace. Coaches are faster on roads. Wagons and coaches go only by road and trail. Flying mounts use their own speed and fly directly."]),
     methods: {
       foot: paragraphs(["Speed", "Use the slowest walking speed. A speed of 30 ft gives 3 mph at normal pace."]),
       mounted: paragraphs(["Speed", "Use travel pace."], ["Gallop", "For about one hour, a mount can cover twice the distance of fast pace."]),
-      wagon: paragraphs(["Routes", "Use travel pace on roads and trails; use slow pace off-road."]),
-      coach: paragraphs(["Speed", "Use wagon speed."], ["Fare", "The starting price is 3 cp per mile."]),
+      wagon: paragraphs(["Speed", "Use travel pace."], ["Routes", "Roads and trails only. A stop must be beside one."]),
+      coach: paragraphs(["Speed", "6 mph on roads at normal pace, because it changes horses at stations: a house rule the GM can change, since the book gives it wagon speed. Travel pace on trails."], ["Routes", "Roads and trails only. A stop must be beside one."], ["Fare", "The starting price is 3 cp per mile."]),
       flying: paragraphs(["Flight", "Use the configured speed. Travel directly over land and water; pace does not change it."]),
       custom: paragraphs(["Speed", "Use the configured speed. Terrain slows progress as it does for walking."])
     },

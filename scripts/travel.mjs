@@ -21,14 +21,16 @@ export const PACES = {
 /**
  * How the party travels overland. On foot: the slowest walker sets the speed (30 ft, 3 mph at
  * normal pace). Mounted: the travel pace table (24 miles a day at normal pace). A wagon or a coach
- * keeps the pace on roads and trails but goes at slow pace off them. A flying mount goes straight,
+ * goes only by road and trail: a stop must be beside one, and the hop to it is at slow pace. A wagon
+ * keeps the travel pace. A coach changes horses at stations, so it is faster on roads (a house rule:
+ * the book gives it wagon speed), and keeps the travel pace on trails. A flying mount goes straight,
  * over any ground or water, at its own speed. Custom: a speed the GM sets. By water, see VESSELS.
  */
 export const METHODS = {
   foot: { label: "On foot", short: "On foot" },
   mounted: { label: "Mounted", short: "Mounted" },
-  wagon: { label: "Wagon or caravan", short: "Wagon", offroad: "slow" },
-  coach: { label: "Coach", short: "Coach", offroad: "slow", fare: true },
+  wagon: { label: "Wagon or caravan", short: "Wagon", offroad: "slow", roadsOnly: true },
+  coach: { label: "Coach", short: "Coach", offroad: "slow", roadsOnly: true, roadMph: 6, fare: true },
   flying: { label: "Flying mount", short: "Flying", flying: true },
   custom: { label: "Custom speed", short: "Custom" }
 };
@@ -216,9 +218,24 @@ function offroadCost(a, b, terrainAt, milesPerPixel, opts = {}) {
   return { cost, water };
 }
 
+/** How far a stop can be from a road and still count as beside it, for a wagon: 3 miles, or a marker's width on a large map. */
+export const roadReachMiles = (milesPerPixel) => Math.max(3, 24 * milesPerPixel);
+/** Miles from a sheet point to the nearest road or trail. Infinity with none. */
+export function roadGapMiles(graph, p, milesPerPixel) {
+  let best = Infinity;
+  for (const n of graph.nodes.values()) for (const e of n.edges) {
+    if (e.kind === "offroad") continue;
+    const b = graph.nodes.get(e.to)?.at, a = n.at;
+    if (!b) continue;
+    const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    best = Math.min(best, Math.hypot(a[0] + dx * t - p[0], a[1] + dy * t - p[1]));
+  }
+  return best * milesPerPixel;
+}
+
 /**
  * Plan a journey from sheet point `from` to `to`.
- * options: { mode: "best" | "roads" | "direct", trailRule, terrainAt, milesPerPixel, hookPx (how far to leave
+ * options: { mode: "best" | "roads" | "direct" | "roadsOnly" (never across country: null if a road cannot do it), trailRule, terrainAt, milesPerPixel, hookPx (how far to leave
  * the network), hooks (network nodes tried at each end) }.
  * Returns { legs: [{ kind, name, pts, miles, terrain }], miles, normalHours } or null.
  */
@@ -233,13 +250,14 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
     const { cost, water } = offroadCostB(from, to);
     return water && mode !== "direct" ? null : { cost, legs: [{ kind: "offroad", pts: [from, to] }] };
   };
+  if (mode === "roadsOnly" && (roadGapMiles(graph, from, mpp) > roadReachMiles(mpp) || roadGapMiles(graph, to, mpp) > roadReachMiles(mpp))) return null;
   if (mode === "direct" || !graph.nodes.size) return finish(direct());
   // Network nodes near each end, joined off-road.
   const all = [...graph.nodes.values()];
   const near = (p) => all.map((n) => ({ n, d: Math.hypot(n.at[0] - p[0], n.at[1] - p[1]) }))
     .filter((x) => x.d <= hookPx).sort((a, b) => a.d - b.d).slice(0, hooks);
   const starts = near(from), goals = near(to);
-  if (!starts.length || !goals.length) return finish(direct());
+  if (!starts.length || !goals.length) return mode === "roadsOnly" ? null : finish(direct());
   const goalCost = new Map(goals.map(({ n }) => { const c = offroadCostB(n.at, to); return [n.k, c.water ? Infinity : c.cost]; }));
   // Dijkstra over hours (at 1 mph scale; pace scales all legs alike).
   const dist = new Map(), prev = new Map(), heap = [];
@@ -266,6 +284,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
     }
   }
   const viaNet = best;
+  if (!viaNet && mode === "roadsOnly") return null;
   const straight = mode === "best" || mode === "roads" ? direct() : null;
   if (!viaNet || (straight && straight.cost < viaNet.cost)) return finish(straight ?? (viaNet ? null : direct()));
   // Walk back into legs, merging consecutive edges of one route.
@@ -384,8 +403,10 @@ export function methodSpeed(method, { pace = "normal", rules = "2014", trailRule
   const k = method?.key ?? "foot", M = METHODS[k] ?? METHODS.foot, f = PACES[pace].mph / 3;
   if (k === "flying") return () => method.mph ?? 8;
   const base = k === "foot" ? (method?.baseMph ?? 3) * f : k === "custom" ? (method?.mph ?? 3) : 3 * f;
+  // A coach's own speed, on roads only (its stations are there): the GM's, or the default. Pace scales it.
+  const road = M.roadMph ? (method?.roadMph ?? M.roadMph) * f : base;
   return (kind, T) => {
-    const v = base * speedFactor(kind, T, { trailRule, rules, pace });
+    const v = (kind === "road" ? road : base) * speedFactor(kind, T, { trailRule, rules, pace });
     return M.offroad && kind === "offroad" ? Math.min(v, PACES.slow.mph * speedFactor(kind, T, { trailRule, rules, pace: "slow" })) : v;
   };
 }
@@ -411,7 +432,7 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
     }
     const flying = h.method?.key === "flying";
     // legModes: "direct" across country; null, "road" (the ship turned down) or "sea" (no water found): the roads.
-    const m = flying || legModes[i] === "direct" ? "direct" : mode;
+    const m = METHODS[h.method?.key]?.roadsOnly ? "roadsOnly" : flying || legModes[i] === "direct" ? "direct" : mode;
     let bySea = !!plan, autoSea = false;
     if (!plan) {
       plan = planJourney(graph, from, to, { mode: m, rules, pace, trailRule, terrainAt: flying ? () => PLAINS : terrainAt, milesPerPixel, hookPx: 2000 });

@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.88.0: wagons and coaches keep to the road
+
+- **Wagons and coaches keep to roads and trails.** They no longer go across country, however much shorter it is. A stop must be beside a road: within 3 miles, or a marker's width on a large map. If it is not, or no road joins two stops, the panel says which and how far, and suggests moving the stop, drawing a road, or choosing another way for that leg.
+- **Coaches are faster on roads.** 6 mph at normal pace, because a coach changes horses at stations. The speed can be changed when Coach is chosen. Pace scales it, and on trails a coach keeps the travel pace. This is a house rule, and its "?" says so: the book gives a coach wagon speed.
+
 ## 0.87.3: Go on from here fits
 
 - **Fixed:** on a route's last stop, Go on from here broke across three lines and pushed Earlier off the edge. It now stays on one line, and a stop's tools wrap when the panel is narrow.
