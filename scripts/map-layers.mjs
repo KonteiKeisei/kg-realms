@@ -229,6 +229,22 @@ export function hierarchyOf(place, places, { showHidden = false } = {}) {
   const some = new Map(sets.flat().filter((t) => !every.some((u) => u.id === t.id)).map((t) => [t.id, t]));
   return result(every, [...some.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))));
 }
+/**
+ * The domains and territories as a tree: [{ place, children }], domains first, then by name. Each sits
+ * under the nearest thing it is part of, by its link or by the borders around it. Whatever cannot
+ * reach the top (a circle in saved data) stands at the top rather than vanishing.
+ */
+export function territoryTree(places) {
+  const list = territoriesOf(places), nodes = new Map(list.map((p) => [p.id, { place: p, children: [] }])), roots = [], placed = new Set();
+  const order = (a, b) => (b.place.kind === "domain") - (a.place.kind === "domain") || String(a.place.name).localeCompare(String(b.place.name));
+  const parents = new Map(list.map((p) => [p.id, hierarchyOf(p, places, { showHidden: true }).within[0]?.id ?? null]));
+  for (const p of list) { const up = parents.get(p.id); if (up && nodes.has(up)) nodes.get(up).children.push(nodes.get(p.id)); else roots.push(nodes.get(p.id)); }
+  const reach = (n) => { placed.add(n.place.id); n.children = n.children.filter((c) => !placed.has(c.place.id)).sort(order); n.children.forEach(reach); };
+  roots.forEach(reach);
+  for (const p of list) if (!placed.has(p.id)) { const n = nodes.get(p.id); roots.push(n); reach(n); }
+  return roots.sort(order);
+}
+
 /** What a territory can be part of, a domain or another territory: not itself, nothing already part of it. */
 export function partOfChoices(place, places) {
   const list = territoriesOf(places), byId = new Map(list.map((t) => [t.id, t]));

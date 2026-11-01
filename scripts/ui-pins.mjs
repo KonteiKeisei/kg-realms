@@ -8,7 +8,7 @@
 import { onCanvas } from "./canvas-input.mjs";
 import { markerCatalog, iconFor } from "./map-symbols.mjs";
 import { latLonToScene } from "./geo.mjs";
-import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, canBeBiome, hierarchyOf, partOfChoices, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, canBeBiome, hierarchyOf, partOfChoices, territoryTree, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
 import { biomeTypes, biomeForClass, zoneForPlace } from "./biomes.mjs";
 import { borderSelect, borderHome, followOf } from "./borders.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
@@ -395,6 +395,9 @@ export class PinEditor {
     if (!places.length) return `<p class="hint">${q ? "No place by that name." : "No places yet. Add place puts one on the map."}</p>`;
     const known = new Set(KINDS.map(([k]) => k));
     return [...KINDS, ["other", "Other"]].map(([kind, label]) => {
+      // Domains and territories are one tree, nested by what each is part of. A search lists them flat.
+      if (kind === "territory") return "";
+      if (kind === "domain") return this.#realmSection(places, q, open);
       const list = places.filter((p) => (known.has(p.kind) ? p.kind : "other") === kind);
       if (!list.length) return "";
       const key = `kind:${kind}`, sel = list.some((p) => p.id === this.selected), isOpen = !!q || sel || open.has(key);
@@ -402,10 +405,29 @@ export class PinEditor {
       const inner = isOpen ? classes.map((c) => {
         const rows = list.filter((p) => (p.class || "Unsorted") === c).sort((a, b) => String(a.name).localeCompare(String(b.name)));
         const gkey = `${kind}|${c}`, gOpen = !!q || rows.some((p) => p.id === this.selected) || open.has(gkey);
-        return `<details class="kgr-enc-group" data-place-open="${esc(gkey)}" ${gOpen ? "open" : ""}><summary><span>${esc(c)}</span><small>${rows.length}</small></summary>${gOpen ? rows.map((p) => `<div class="kgr-enc-list-row ${p.id === this.selected ? "on" : ""}"><button type="button" data-act="list-pick" data-id="${esc(p.id)}"><span>${esc(p.name || "Unnamed")}</span>${p.hidden || p.visibility === "hidden" ? "<small>Hidden from players</small>" : ""}</button><button type="button" data-act="list-locate" data-id="${esc(p.id)}" aria-label="Find ${esc(p.name)} on the map" title="Find it on the map"><i class="fa-solid fa-location-crosshairs"></i></button></div>`).join("") : ""}</details>`;
+        return `<details class="kgr-enc-group" data-place-open="${esc(gkey)}" ${gOpen ? "open" : ""}><summary><span>${esc(c)}</span><small>${rows.length}</small></summary>${gOpen ? rows.map((p) => this.#placeRow(p)).join("") : ""}</details>`;
       }).join("") : "";
       return `<details data-place-open="${key}" ${isOpen ? "open" : ""}><summary>${label}<small>${list.length}</small></summary>${inner}</details>`;
     }).join("");
+  }
+
+  #placeRow(p, type = "") {
+    return `<div class="kgr-enc-list-row ${p.id === this.selected ? "on" : ""}"><button type="button" data-act="list-pick" data-id="${esc(p.id)}"><span>${esc(p.name || "Unnamed")}</span>${type ? `<small>${esc(type)}</small>` : ""}${p.hidden || p.visibility === "hidden" ? "<small>Hidden from players</small>" : ""}</button><button type="button" data-act="list-locate" data-id="${esc(p.id)}" aria-label="Find ${esc(p.name)} on the map" title="Find it on the map"><i class="fa-solid fa-location-crosshairs"></i></button></div>`;
+  }
+  /** The Domains and territories section: each with what is part of it folded beneath. */
+  #realmSection(places, q, open) {
+    const realms = places.filter((p) => p.kind === "domain" || p.kind === "territory");
+    if (!realms.length) return "";
+    const key = "kind:realms", holdsSelected = realms.some((p) => p.id === this.selected), isOpen = !!q || holdsSelected || open.has(key);
+    const contains = (n) => n.place.id === this.selected || n.children.some(contains);
+    const count = (n) => n.children.reduce((sum, c) => sum + 1 + count(c), 0);
+    const node = (n) => {
+      if (!n.children.length) return this.#placeRow(n.place, n.place.class);
+      const k = `realm:${n.place.id}`, on = n.children.some(contains) || open.has(k);
+      return `${this.#placeRow(n.place, n.place.class)}<details class="kgr-enc-group" data-place-open="${esc(k)}" ${on ? "open" : ""}><summary><span>Part of ${esc(n.place.name)}</span><small>${count(n)}</small></summary>${on ? n.children.map(node).join("") : ""}</details>`;
+    };
+    const inner = !isOpen ? "" : q ? realms.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((r) => this.#placeRow(r, r.class)).join("") : territoryTree(this.getPlaces()).map(node).join("");
+    return `<details data-place-open="${key}" ${isOpen ? "open" : ""}><summary>Domains and territories<small>${realms.length}</small></summary>${inner}</details>`;
   }
 
   /** Centre the map on a place. */

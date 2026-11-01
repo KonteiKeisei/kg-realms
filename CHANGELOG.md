@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.87.1: a nested list
+
+- **The Places list nests domains and territories.** One section, Domains and territories, shows each with what is part of it folded beneath, by its Part of link or by the borders around it. A country holds its states, and they their counties. A search lists matches flat, and selecting one opens the way to it.
+
 ## 0.87.0: domains, territories and Part of
 
 - **Domains and territories.** Territory/Domain becomes two kinds. A **Domain** is the top level: a country or empire. A **Territory** is anything below one, at any depth and of any type: a state, a county within it, a region. Existing places split by their type: Empire, Kingdom, Country, Republic and the like are domains; Region, State, County, Province and the like are territories. A kingdom under an empire is a territory: set its Kind so.
