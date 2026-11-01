@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>Faerun generator verification</title>
+<style>body{font:16px system-ui;background:#242628;color:#eee;margin:48px}main{max-width:430px;padding:24px;background:#35383b;border-radius:8px}.form-group{display:flex;justify-content:space-between;align-items:center;margin:24px 0}select,button{font:inherit;padding:8px}.hint{font-size:14px;color:#ccc}.actions{display:flex;gap:12px;margin-top:24px}#result{margin-top:24px}</style>
+<main id="dialog"></main><div id="result"></div>
+<script type="module">
+  window.game={user:{isGM:true},settings:{get:()=>undefined}};
+  window.CONST={GRID_TYPES:{GRIDLESS:0,HEXODDQ:2,SQUARE:1}};
+  window.ui={notifications:{error:(s)=>document.querySelector('#result').textContent=s,info:(s)=>document.querySelector('#result').textContent=s}};
+  window.Scene={implementation:{create:async(data)=>data}};
+  window.foundry={utils:{getRoute:(p)=>'../'+p.replace(/^modules\/kg-realms\//,'')},applications:{api:{DialogV2:{wait:(options)=>new Promise((resolve)=>{
+    const root=document.querySelector('#dialog');root.innerHTML=`<h1>${options.window.title}</h1><form>${options.content}<div class="actions">${options.buttons.map(b=>`<button type="button" data-action="${b.action}">${b.label}</button>`).join('')}</div></form>`;
+    const form=root.querySelector('form');options.render(null,{element:root});
+    for(const b of options.buttons)root.querySelector(`[data-action="${b.action}"]`).onclick=(event)=>resolve(b.callback?b.callback(event,{form}):b.action);
+  })}}}};
+  const {openGenerator}=await import('../scripts/generator.mjs');await openGenerator();
+</script>

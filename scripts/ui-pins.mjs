@@ -1,0 +1,498 @@
+// The GM's pin editor. Drag a place's marker to move it; click a marker to select it (its kind
+// and map marker are set here) and open its place card, where everything else about it is edited.
+// Edits are saved with the other place edits, so the hover card, search and journeys follow them.
+//
+// Pointer events are heard before Foundry's own (canvas-input.mjs), and taken only when they start
+// on a place, so panning the map still works everywhere else and Foundry draws no selection box.
+
+import { onCanvas } from "./canvas-input.mjs";
+import { markerCatalog, iconFor } from "./map-symbols.mjs";
+import { latLonToScene } from "./geo.mjs";
+import { placeLayer, placeShape, placeOutline, recordIndex, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { ruleTooltip } from "./travel-rules.mjs";
+// Drawing an area's border (0.77): how near (screen px) a click to the first corner closes it, and
+// how near a click must be to a corner or an edge to take it.
+const CLOSE_PX = 12, NODE_PX = 9, EDGE_PX = 7;
+
+const DRAG_PX = 4;
+const KEY = [["faerun-city", "City"], ["faerun-town", "Town"], ["faerun-village", "Village"], ["faerun-keep", "Castle"], ["faerun-ruin", "Ruin"], ["faerun-peak", "Peak"], ["faerun-dungeon", "Dungeon"], ["faerun-tower", "Tower"], ["faerun-site", "Site"]];
+const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
+// The list of places (0.75): a section for each kind, a group for each class inside it.
+const KINDS = [["settlement", "Settlements"], ["site", "Sites"], ["natural", "Natural features"]];
+const OPEN_KEY = "kgr-places-open";
+
+export class PinEditor {
+  /** getLayer, getPlaces, getPlace(id), saveEdits(fn) (place edits: { edits, added }), preview(places). */
+  constructor(options) {
+    Object.assign(this, options);
+    this.active = false;
+    this.selected = null;
+    this.press = null;     // { id, start: [x, y], moved }
+    this.panel = null;
+    this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), dblclick: (e) => { if (this.drawing) { this.#stop(e); this.#finishBorder(false); } } };
+    this.undoStack = [];
+    this.lastClick = null;
+    // Esc steps back one level: stop adding, then let go of the place, then leave the editor.
+    this.onKey = (e) => {
+      if (!this.active || e.target?.closest?.("input, textarea, select, [contenteditable]")) return;
+      if (e.key === "Escape") {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (this.drawing) { this.drawing = null; this.#overlay(); return this.#render(); }
+        if (this.placing || this.picking || this.adding) { this.placing = this.picking = this.adding = false; return this.#render(); }
+        if (this.selected) return this.select(null);
+        return this.onLeave?.();
+      }
+      if (e.key === "Enter" && this.drawing) { e.preventDefault(); e.stopImmediatePropagation(); return this.#finishBorder(false); }
+      if ((e.key === "Delete" || e.key === "Backspace") && this.corner != null && !this.drawing) { e.preventDefault(); e.stopImmediatePropagation(); return this.#removeCorner(this.corner); }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyZ") { e.preventDefault(); e.stopImmediatePropagation(); this.#undo(); }
+    };
+  }
+
+  /** What the editing bar says on this tab. */
+  status() {
+    const p = this.selected ? this.getPlace(this.selected) : null;
+    if (this.placing) return { hint: "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
+    if (this.drawing) return { hint: `Drawing ${p?.name ?? "the"} border · click to add corners · click the first corner to close it · Enter or double-click leaves the ends apart`, esc: "cancels drawing", tip: this.drawing.pts.length > 2 ? "Click the first corner to close the border" : "Click to add a corner", crosshair: true };
+    if (p && this.#outline(p)) return { hint: `${p.name} · drag a corner to move it · click an edge to add one · right-click a corner to remove it`, esc: "lets go of it", tip: "" };
+    if (p) return { hint: `${p.name} · drag to move it · double-click for its card`, esc: "lets go of it", tip: "" };
+    return { hint: "Drag a place to move it · click to select · double-click for its card", esc: "leaves editing", tip: "" };
+  }
+
+  /** Every place edit goes through here first, so Ctrl+Z can step back. */
+  #remember() {
+    const now = this.getEdits?.();
+    if (!now) return;
+    this.undoStack.push(foundry.utils.deepClone(now));
+    if (this.undoStack.length > 40) this.undoStack.shift();
+  }
+
+  async #undo() {
+    const prev = this.undoStack.pop();
+    if (!prev) return ui.notifications.info("KG Realms: nothing to undo on the places.");
+    await this.saveEdits(() => prev);
+    if (this.selected && !this.getPlace(this.selected)) this.selected = null;
+    this.#render();
+  }
+
+  toggle(on = !this.active) { on ? this.open() : this.close(); }
+
+  async open() {
+    if (this.active || !game.user.isGM || !this.getLayer()?.frame) return;
+    this.active = true;
+    this.catalog = await markerCatalog(foundry.utils.getRoute("modules/kg-realms") + "/");
+    this.offCanvas = onCanvas(this.handlers);
+    window.addEventListener("keydown", this.onKey, { capture: true });
+    this.#render();
+  }
+
+  close() {
+    if (!this.active) return;
+    this.active = false;
+    this.offCanvas?.(); this.offCanvas = null;
+    window.removeEventListener("keydown", this.onKey, { capture: true });
+    this.selected = this.press = null;
+    this.placing = false;
+    this.drawing = this.editing = this.cornerDrag = null; this.corner = null;
+    this.getLayer()?.setAreaEdit?.(null);
+    this.panel?.remove();
+    this.panel = null;
+  }
+
+  #global(e) { const r = canvas.app.view.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  #stop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+
+  #placeAt(g) {
+    const layer = this.getLayer();
+    const scene = canvas.stage.worldTransform.applyInverse({ x: g[0], y: g[1] });
+    return layer.placeAt(scene, 10);
+  }
+
+  #down(e) {
+    if (!this.active) return;
+    const g = this.#global(e);
+    // Right-click a corner of the selected outline: removed.
+    if (e.button === 2) { const i = this.#cornerAt(g); if (i >= 0 && !this.drawing) { this.#stop(e); this.#removeCorner(i); } return; }
+    if (e.button !== 0) return;
+    if (this.placing) { this.#stop(e); return this.#addPlace(g); }
+    if (this.drawing) { this.#stop(e); return this.#addCorner(g); }
+    if (this.selected && placeShape(this.getPlace(this.selected)) !== "point") {
+      // The place's own point (its name's place): dragged as a marker is.
+      const p = this.getPlace(this.selected), s = this.getLayer().toScreen(p.lon, p.lat);
+      if (s && Math.hypot(s[0] - g[0], s[1] - g[1]) < 13) { this.#stop(e); this.press = { id: p.id, start: g, moved: false }; return; }
+    }
+    if (this.selected && this.#outline(this.getPlace(this.selected))) {
+      const i = this.#cornerAt(g);
+      if (i >= 0) { this.#stop(e); this.corner = i; this.cornerDrag = { i, moved: false }; this.#overlay(); return this.onStatus?.(); }
+      const at = this.#edgeAt(g);
+      if (at >= 0) { this.#stop(e); const o = this.#editPts(); o.pts.splice(at + 1, 0, this.getLayer().fromScreen(...g)); this.editing = o; this.corner = at + 1; this.cornerDrag = { i: at + 1, moved: true }; return this.#overlay(); }
+    }
+    const id = this.#placeAt(g);
+    if (!id) return;
+    this.#stop(e);
+    this.press = { id, start: g, moved: false };
+  }
+
+  #move(e) {
+    if (!this.active) return;
+    if (this.drawing) { this.hover = this.getLayer().fromScreen(...this.#global(e)); return this.#overlay(); }
+    if (this.cornerDrag) {
+      this.#stop(e);
+      const o = this.editing ?? this.#editPts();
+      o.pts[this.cornerDrag.i] = this.getLayer().fromScreen(...this.#global(e));
+      this.editing = o; this.cornerDrag.moved = true;
+      return this.#overlay();
+    }
+    if (!this.press) return;
+    this.#stop(e);
+    const g = this.#global(e);
+    if (!this.press.moved && Math.hypot(g[0] - this.press.start[0], g[1] - this.press.start[1]) < DRAG_PX) return;
+    this.press.moved = true;
+    const [lon, lat] = this.getLayer().fromScreen(...g);
+    this.press.at = [lon, lat];
+    if (!this.frame) this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      if (this.press?.at) this.preview(this.press.id, this.press.at);
+    });
+  }
+
+  async #up(e) {
+    if (!this.active) return;
+    if (this.cornerDrag) {
+      this.#stop(e);
+      const { moved } = this.cornerDrag, o = this.editing;
+      this.cornerDrag = null;
+      if (moved && o) await this.#saveOutline(this.selected, o.pts, o.closed);
+      return;
+    }
+    if (!this.press) return;
+    this.#stop(e);
+    const { id, moved, at } = this.press;
+    this.press = null;
+    if (moved && at) {
+      await this.#save(id, { lon: +at[0].toFixed(6), lat: +at[1].toFixed(6) });
+      this.lastClick = null;
+      return this.select(id);
+    }
+    // A click selects; a second click on the same place soon after opens its card, as on the map.
+    const now = Date.now(), again = this.lastClick?.id === id && now - this.lastClick.t < 450;
+    this.lastClick = again ? null : { id, t: now };
+    this.select(id);
+    if (again) this.openCard?.(id);
+  }
+
+  select(id) {
+    this.selected = id; this.placing = false; this.drawing = null; this.editing = null; this.corner = null; this.cornerDrag = null;
+    // The map shows the layer the place is on, so its area and name can be seen (0.77.1).
+    const p = id ? this.getPlace(id) : null;
+    if (p) this.showLayer?.(placeLayer(p) ?? "places");
+    this.#render(); this.#overlay();
+  }
+
+  /* ------------------------------------------------------------------ area borders (0.77) */
+
+  /** The selected place's outline as the map draws it ({ pts, closed, fromRecord }), or null. */
+  #outline(p) { return p ? placeOutline(p, recordIndex(this.getRegions?.() ?? [])) : null; }
+  /** A copy of the selected outline to change (the edit in progress, if any). */
+  #editPts() { const o = this.editing ?? this.#outline(this.getPlace(this.selected)); return o ? { pts: o.pts.map((c) => [...c]), closed: !!o.closed } : { pts: [], closed: false }; }
+  #cornerAt(g) {
+    const o = this.editing ?? this.#outline(this.selected ? this.getPlace(this.selected) : null), layer = this.getLayer();
+    if (!o) return -1;
+    let best = -1, bd = NODE_PX;
+    o.pts.forEach((c, i) => { const s = layer.toScreen(c[0], c[1]), d = Math.hypot(s[0] - g[0], s[1] - g[1]); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+  #edgeAt(g) {
+    const o = this.editing ?? this.#outline(this.getPlace(this.selected)), layer = this.getLayer();
+    if (!o || o.pts.length < 2) return -1;
+    const s = o.pts.map((c) => layer.toScreen(c[0], c[1])), n = o.closed ? s.length : s.length - 1;
+    let best = -1, bd = EDGE_PX;
+    for (let i = 0; i < n; i++) {
+      const a = s[i], b = s[(i + 1) % s.length], dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((g[0] - a[0]) * dx + (g[1] - a[1]) * dy) / l)), d = Math.hypot(a[0] + dx * t - g[0], a[1] + dy * t - g[1]);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  #addCorner(g) {
+    const d = this.drawing, layer = this.getLayer();
+    if (d.pts.length > 2) { const f = layer.toScreen(...d.pts[0]); if (Math.hypot(f[0] - g[0], f[1] - g[1]) < CLOSE_PX) return this.#finishBorder(true); }
+    d.pts.push(layer.fromScreen(...g));
+    this.#overlay(); this.onStatus?.();
+  }
+  async #finishBorder(closed) {
+    const d = this.drawing;
+    if (!d) return;
+    if (d.pts.length < 2) return ui.notifications.info("KG Realms: a border needs at least two corners. Esc cancels.");
+    this.drawing = null; this.hover = null;
+    await this.#saveOutline(this.selected, d.pts, closed && d.pts.length > 2);
+  }
+  async #removeCorner(i) {
+    const o = this.#editPts();
+    if (o.pts.length <= (o.closed ? 3 : 2)) return ui.notifications.warn(`KG Realms: ${o.closed ? "a closed border needs at least three corners" : "a line needs at least two corners"}. Use Remove border instead.`);
+    o.pts.splice(i, 1); this.corner = null;
+    await this.#saveOutline(this.selected, o.pts, o.closed);
+  }
+  async #saveOutline(id, pts, closed) {
+    if (!id) return;
+    const p = this.getPlace(id);
+    const shape = closed ? "area" : (placeShape(p) === "point" ? "line" : placeShape(p) === "area" && pts.length < 3 ? "line" : placeShape(p));
+    this.editing = null;
+    const fields = { area: pts.map(([lon, lat]) => [+lon.toFixed(6), +lat.toFixed(6)]), areaClosed: !!closed, shape: closed ? "area" : shape };
+    if (closed && pts.length > 2 && !insideRing(pts, [p.lon, p.lat])) { const [lon, lat] = interiorPoint(pts); Object.assign(fields, { lon: +lon.toFixed(6), lat: +lat.toFixed(6) }); }
+    await this.#save(id, fields);
+    this.#render(); this.#overlay();
+  }
+  /** What the map shows for the selected place's border: the one being drawn, edited, or kept. */
+  #overlay() {
+    const layer = this.getLayer();
+    if (!layer?.setAreaEdit) return;
+    if (!this.active) return layer.setAreaEdit(null);
+    if (this.drawing) return layer.setAreaEdit(this.hover ? [...this.drawing.pts, this.hover] : this.drawing.pts, false, null);
+    if (!this.selected) return layer.setAreaEdit(null);
+    const p = this.selected ? this.getPlace(this.selected) : null;
+    const o = this.editing ?? (p ? this.#outline(p) : null);
+    const label = p && placeShape(p) !== "point" ? { at: [p.lon, p.lat], name: p.name } : null;
+    layer.setAreaEdit(o?.pts ?? null, !!o?.closed, this.corner, label);
+  }
+
+  /** A new place where the GM clicked, then open it for editing. */
+  async #addPlace(g) {
+    this.placing = false;
+    const [lon, lat] = this.getLayer().fromScreen(...g);
+    const id = `added-${foundry.utils.randomID()}`;
+    const kind = this.newKind ?? "settlement";
+    const CLASS = { settlement: "Town", site: "Site", natural: "Region" };
+    this.#remember();
+    await this.saveEdits((w) => {
+      w.added ??= {};
+      w.added[id] = { id, name: "New place", kind, class: CLASS[kind], rank: 4, level: "surface", lon: +lon.toFixed(6), lat: +lat.toFixed(6) };
+      return w;
+    });
+    this.select(id);
+    this.openCard?.(id, { edit: true });
+  }
+
+  async #save(id, fields) {
+    this.#remember();
+    await this.saveEdits((w) => {
+      if (w.added?.[id]) w.added[id] = { ...w.added[id], ...fields };
+      else { w.edits ??= {}; w.edits[id] = { ...(w.edits[id] ?? {}), ...fields }; }
+      for (const k of Object.keys(fields)) if (fields[k] === null) { delete w.edits?.[id]?.[k]; delete w.added?.[id]?.[k]; }
+      if (w.edits?.[id] && !Object.keys(w.edits[id]).length) delete w.edits[id];
+      return w;
+    });
+  }
+
+  #render() {
+    if (!this.active) return;
+    if (!this.panel) {
+      this.panel = document.createElement("div");
+      this.panel.className = this.host ? "kgr-tab kgr-pins" : "kgr-ui kgr-panel kgr-roads kgr-pins";
+      (this.host ?? document.body).append(this.panel);
+      this.panel.addEventListener("click", (e) => this.#click(e));
+      this.panel.addEventListener("change", (e) => this.#change(e));
+      // A section opened draws its rows; it stays open (toggle does not bubble: listen as it goes down).
+      this.panel.addEventListener("toggle", (e) => {
+        const d = e.target, key = d.dataset?.placeOpen;
+        if (!key) return;
+        const was = this.#open().has(key);
+        this.#setOpen(key, d.open);
+        if (d.open && !was && !d.querySelector(".kgr-enc-list-row, .kgr-enc-group")) this.#redrawList();
+      }, true);
+      this.panel.addEventListener("input", (e) => { if (e.target.name === "place-filter") { this.filter = e.target.value; this.#redrawList(); } });
+    }
+    const p = this.selected ? this.getPlace(this.selected) : null;
+    const body = p ? `
+      <p class="kgr-sel node"><i class="fa-solid fa-location-dot"></i> <b>${esc(p.name)}</b> (${esc(p.class ?? "place")}). Drag its marker to move it.</p>
+      <div class="row"><button data-act="card"><i class="fa-solid fa-id-card"></i> Open its card</button></div>
+      ${this.#areaRows(p)}
+      <div class="row"><label>Kind <select name="kind">${[["settlement", "Settlement"], ["site", "Site"], ["natural", "Natural feature"]].map(([v, l]) => `<option value="${v}" ${p.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+      <div class="row"><label>Marker</label><button data-act="markers" class="marker-current" title="Choose a marker">${this.#thumb(p.marker ? (p.marker.startsWith("faerun-") ? p.marker : "mk-" + p.marker) : iconFor(p))} Change</button>${p.marker ? `<button data-act="marker-default">Default</button>` : ""}</div>
+      ${this.picking ? this.#markerGrid(p) : ""}
+      <div class="row">${p.edited && !p.added ? `<button data-act="reset-pos"><i class="fa-solid fa-location-crosshairs"></i> Reset position</button><button data-act="reset" class="danger"><i class="fa-solid fa-rotate-left"></i> Reset all edits</button>` : ""}<button data-act="done">Done</button></div>
+      <div class="row"><button data-act="remove-place" class="danger" title="${p.added ? "Delete this place you added" : "Gone from this world: off the map, out of search and journeys. It can be restored below the list of places, with its edits."}"><i class="fa-solid fa-eraser"></i> ${p.added ? "Delete place" : "Remove from the map"}</button></div>`
+      : `<p class="hint">Click a place to select it (its kind and map marker show here). Double-click it for its card: name, art, what is known, scene, who sees it.</p>${Object.keys(this.getMarkers()).length ? `<h4 class="kgr-own">Your markers</h4><div class="kgr-own-list">${Object.entries(this.getMarkers()).map(([k, m]) => `<span title="${esc(m.name)}"><img src="${esc(foundry.utils.getRoute(m.src))}" alt=""> ${esc(m.name)}</span>`).join("")}</div><p class="hint">Click a place, then Change, to give it one of these.</p>` : ""}${this.#removedRow()}`;
+    const tools = `<div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${this.newKind !== "site" && this.newKind !== "natural" ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
+    const files = `<div class="kgr-file-row"><button data-act="export" title="Save every place edit and your markers to a file"><i class="fa-solid fa-file-export"></i> Export places</button><button data-act="import" title="Load place edits from a file"><i class="fa-solid fa-file-import"></i> Import places</button></div>`;
+    this.panel.innerHTML = `${tools}${body}${this.placing || this.adding ? "" : `<div class="kgr-enc-list kgr-place-list"><span class="cap">On this map (${this.getPlaces().length})</span><input type="search" name="place-filter" placeholder="Find a place" value="${esc(this.filter ?? "")}" aria-label="Find a place"><div class="kgr-place-groups">${this.#list()}</div></div>`}${files}`;
+    this.onStatus?.();
+  }
+
+  /** Which sections of the list are open (kept on this computer). */
+  #open() {
+    if (!this.openGroups) { try { this.openGroups = new Set(JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]")); } catch { this.openGroups = new Set(); } }
+    return this.openGroups;
+  }
+  #setOpen(key, on) {
+    const s = this.#open();
+    if (on) s.add(key); else s.delete(key);
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...s])); } catch { /* storage off */ }
+  }
+
+  /** Every place on this map: by kind, then by class, A to Z. A filter opens every match. */
+  #list() {
+    const q = (this.filter ?? "").trim().toLowerCase(), open = this.#open();
+    const places = this.getPlaces().filter((p) => !q || String(p.name ?? "").toLowerCase().includes(q));
+    if (!places.length) return `<p class="hint">${q ? "No place by that name." : "No places yet. Add place puts one on the map."}</p>`;
+    const known = new Set(KINDS.map(([k]) => k));
+    return [...KINDS, ["other", "Other"]].map(([kind, label]) => {
+      const list = places.filter((p) => (known.has(p.kind) ? p.kind : "other") === kind);
+      if (!list.length) return "";
+      const key = `kind:${kind}`, sel = list.some((p) => p.id === this.selected), isOpen = !!q || sel || open.has(key);
+      const classes = [...new Set(list.map((p) => p.class || "Unsorted"))].sort((a, b) => a.localeCompare(b));
+      const inner = isOpen ? classes.map((c) => {
+        const rows = list.filter((p) => (p.class || "Unsorted") === c).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        const gkey = `${kind}|${c}`, gOpen = !!q || rows.some((p) => p.id === this.selected) || open.has(gkey);
+        return `<details class="kgr-enc-group" data-place-open="${esc(gkey)}" ${gOpen ? "open" : ""}><summary><span>${esc(c)}</span><small>${rows.length}</small></summary>${gOpen ? rows.map((p) => `<div class="kgr-enc-list-row ${p.id === this.selected ? "on" : ""}"><button type="button" data-act="list-pick" data-id="${esc(p.id)}"><span>${esc(p.name || "Unnamed")}</span>${p.hidden || p.visibility === "hidden" ? "<small>Hidden from players</small>" : ""}</button><button type="button" data-act="list-locate" data-id="${esc(p.id)}" aria-label="Find ${esc(p.name)} on the map" title="Find it on the map"><i class="fa-solid fa-location-crosshairs"></i></button></div>`).join("") : ""}</details>`;
+      }).join("") : "";
+      return `<details data-place-open="${key}" ${isOpen ? "open" : ""}><summary>${label}<small>${list.length}</small></summary>${inner}</details>`;
+    }).join("");
+  }
+
+  /** Centre the map on a place. */
+  #locate(id) {
+    const p = this.getPlace(id), layer = this.getLayer();
+    if (!p || !layer?.frame || !Number.isFinite(p.lat)) return;
+    canvas.animatePan?.({ ...latLonToScene(layer.frame, p.lat, p.lon), duration: 400 });
+  }
+
+  /** Shape, Layer and the border (map-layers.mjs): which layer the place is on, a point or an area. */
+  #areaRows(p) {
+    const shape = placeShape(p), layer = placeLayer(p), o = this.#outline(p);
+    const seg = (act, list, on) => `<div class="kgr-seg-row">${list.map(([v, l]) => `<button type="button" data-act="${act}" data-v="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</div>`;
+    const shapeRule = ruleTooltip("<p><strong>Point</strong> A single place on the map: a marker and its name.</p><p><strong>Area</strong> A border that closes, with a light wash of colour inside: a kingdom, a forest, a sea.</p><p><strong>Line</strong> A line with two ends, named along it: a river, a strait, a mountain spine, a border line.</p><p><strong>Default</strong> Its type decides; this changes it for this place only.</p>");
+    const layerRule = ruleTooltip("<p><strong>Places</strong> Settlements, sites, peaks: where a party can stand.</p><p><strong>Realms</strong> Kingdoms, empires and regions: who holds the land.</p><p><strong>Geography</strong> Forests, ranges, deserts, seas, lakes and rivers: what the land and water are.</p><p><strong>Showing</strong> The map shows one layer at a time (the layers rail on the travel panel). A place shows only on its own layer.</p>");
+    const border = shape === "point" ? "" : this.drawing
+      ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. Click the first corner to close the border; Enter or double-click leaves its ends apart. Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> Finish as a line</button><button data-act="border-cancel">Cancel</button></div>`
+      : `<p class="hint">${o ? `${o.pts.length} corners, ${o.closed ? "closed" : "ends apart"}${o.fromRecord ? " (the world's rectangle: draw or reshape it)" : ""}.` : "No border yet: its name shows at its point on its layer."}</p>
+        <div class="row"><button data-act="border-draw"><i class="fa-solid fa-draw-polygon"></i> ${o && !o.fromRecord ? "Redraw border" : "Draw border"}</button>${o && !o.fromRecord && shape === "area" ? `<button data-act="border-toggle">${o.closed ? "Open the shape" : "Close the shape"}</button>` : ""}${p.area ? `<button data-act="border-remove" class="danger">Remove border</button>` : ""}</div>`;
+    return `<div class="kgr-area-rows"><div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}
+      <div class="row"><span>Layer ${layerRule}</span></div>${seg("layer", MAP_LAYERS.map((k) => [k, LAYER_NAMES[k]]), layer ?? "places")}${border}</div>`;
+  }
+
+  /** The places removed from this world (the world has moved on), to bring one back. */
+  #removedRow() {
+    const gone = (this.getRemoved?.() ?? []).sort((a, b) => a.name.localeCompare(b.name));
+    if (!gone.length) return "";
+    return `<h4 class="kgr-own">Removed from this world (${gone.length})</h4>
+      <div class="row"><select name="restore">${gone.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}${g.class ? ` (${esc(g.class)})` : ""}</option>`).join("")}</select><button data-act="restore-place"><i class="fa-solid fa-trash-arrow-up"></i> Restore</button></div>`;
+  }
+
+  /** Only the list, so the filter keeps its place as it is typed. */
+  #redrawList() { const box = this.panel?.querySelector(".kgr-place-groups"); if (box) box.innerHTML = this.#list(); }
+
+  async #click(e) {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    const id = this.selected;
+    if (act === "shape" || act === "layer") {
+      const v = e.target.closest("[data-v]").dataset.v, p = this.getPlace(id);
+      if (!p) return;
+      if (act === "shape" && v !== "point" && placeLayer(p) === "places") await this.#save(id, { shape: v, layer: "realms" });
+      else await this.#save(id, { [act]: v });
+      this.#render(); return this.#overlay();
+    }
+    if (act === "border-draw") { this.drawing = { pts: [] }; this.editing = null; this.#render(); this.#overlay(); return this.onStatus?.(); }
+    if (act === "border-finish") return this.#finishBorder(false);
+    if (act === "border-cancel") { this.drawing = null; this.#render(); return this.#overlay(); }
+    if (act === "border-toggle") { const o = this.#editPts(); if (!o.closed && o.pts.length < 3) return ui.notifications.warn("KG Realms: a closed border needs at least three corners."); return this.#saveOutline(id, o.pts, !o.closed); }
+    if (act === "border-remove") { await this.#save(id, { area: null, areaClosed: null }); this.#render(); return this.#overlay(); }
+    if (act === "list-pick") { const pick = e.target.closest("[data-id]").dataset.id; this.select(pick); return this.#locate(pick); }
+    if (act === "list-locate") return this.#locate(e.target.closest("[data-id]").dataset.id);
+    if (act === "remove-place") {
+      const p = this.getPlace(id);
+      if (!p) return;
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: p.added ? "Delete place" : "Remove from the map" }, content: p.added ? `<p>Delete <b>${esc(p.name)}</b>, a place you added?</p>` : `<p>Remove <b>${esc(p.name)}</b> from this world? It goes from the map, search and journeys.</p><p class="hint">Restore it any time from the Places tab (Removed from this world), with its edits.</p>`, rejectClose: false });
+      if (!ok) return;
+      this.selected = null;
+      await this.saveEdits((w) => {
+        if (w.added?.[id]) { delete w.added[id]; delete w.edits?.[id]; return w; }
+        w.edits = { ...(w.edits ?? {}), [id]: { ...(w.edits?.[id] ?? {}), removed: true } };
+        return w;
+      });
+      return this.#render();
+    }
+    if (act === "restore-place") {
+      const pick = this.panel.querySelector('[name="restore"]')?.value;
+      if (pick) await this.restorePlace?.(pick);
+      return this.#render();
+    }
+    if (act === "close") return this.onClose?.() ?? this.close();
+    if (act === "done") return this.select(null);
+    if (act === "card") return this.openCard?.(id);
+    if (act === "markers") { this.picking = !this.picking; return this.#render(); }
+    if (act === "delete-marker") {
+      const key = e.target.closest("[data-marker]").dataset.marker;
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Delete marker" }, content: `<p>Delete the marker <b>${esc(this.getMarkers()[key]?.name)}</b>? Places using it go back to their default marker.</p>`, rejectClose: false });
+      if (!ok) return;
+      await this.saveMarkers((m) => { const c = { ...m }; delete c[key]; return c; });
+      return this.#render();
+    }
+    if (act === "pick-marker") { this.picking = false; await this.#save(id, { marker: e.target.closest("[data-marker]").dataset.marker }); return this.#render(); }
+    if (act === "marker-default") { await this.#save(id, { marker: null }); return this.#render(); }
+    if (act === "add-marker") { this.adding = !this.adding; return this.#render(); }
+    if (act === "add-place") { this.placing = !this.placing; this.selected = null; return this.#render(); }
+    if (act === "add-browse") {
+      const input = this.panel.querySelector('[name="new-src"]');
+      return new foundry.applications.apps.FilePicker.implementation({ type: "image", current: input.value, callback: (path) => { input.value = path; } }).render(true);
+    }
+    if (act === "add-save") {
+      const name = this.panel.querySelector('[name="new-name"]').value.trim(), src = this.panel.querySelector('[name="new-src"]').value.trim();
+      if (!name || !src) return ui.notifications.warn("KG Realms: a new marker needs a name and an image.");
+      const key = `custom-${foundry.utils.randomID(8)}`;
+      await this.saveMarkers((m) => ({ ...m, [key]: { name, src } }));
+      this.adding = false;
+      if (id) await this.#save(id, { marker: key });
+      ui.notifications.info(id ? `KG Realms: marker "${name}" added and given to ${this.getPlace(id)?.name}.` : `KG Realms: marker "${name}" added. Click a place, then Change, to use it (under Your markers).`);
+      return this.#render();
+    }
+    if (act === "export") return this.exportPlaces?.();
+    if (act === "import") return this.importPlaces?.();
+    if (act === "reset-pos") { await this.#save(id, { lon: null, lat: null }); return this.#render(); }
+    if (act === "reset") {
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Reset place" }, content: "<p>Remove every edit to this place (name, position, description, image, links)?</p>", rejectClose: false });
+      if (!ok) return;
+      this.#remember();
+      await this.saveEdits((w) => { delete w.edits?.[id]; return w; });
+      return this.#render();
+    }
+  }
+
+  async #change(e) {
+    const t = e.target, id = this.selected;
+    if (t.name === "new-kind") { this.newKind = t.value; return; }
+    if (!id || !t.name) return;
+    if (t.name === "kind") await this.#save(id, { kind: t.value });
+  }
+
+  #thumb(icon) {
+    if (!icon) return '<span class="kgr-thumb none"></span>';
+    if (icon.startsWith("faerun-")) return `<span class="kgr-thumb key">${esc(KEY.find(([k]) => k === icon)?.[1] ?? "")}</span>`;
+    const key = icon.slice(3), own = this.getMarkers()[key];
+    return `<img class="kgr-thumb" src="${esc(own ? foundry.utils.getRoute(own.src) : foundry.utils.getRoute(`modules/kg-realms/data/markers/${key}.png`))}" alt="">`;
+  }
+
+  #markerGrid(p) {
+    const cell = (marker, label, inner, del = false) => `<button class="kgr-marker ${p.marker === marker ? "on" : ""}" data-act="pick-marker" data-marker="${esc(marker)}" title="${esc(label)}">${inner}${del ? `<i class="fa-solid fa-xmark del" data-act="delete-marker"></i>` : ""}</button>`;
+    const own = Object.entries(this.getMarkers());
+    const groups = {};
+    for (const m of this.catalog ?? []) (groups[m.group] ??= []).push(m);
+    return `<div class="kgr-markers">
+      <h4>Map key</h4><div class="grid">${KEY.map(([k, label]) => cell(k, label, `<span class="kgr-thumb key">${label}</span>`)).join("")}</div>
+      ${own.length ? `<h4>Your markers</h4><div class="grid">${own.map(([k, m]) => cell(k, m.name, `<img src="${esc(foundry.utils.getRoute(m.src))}" alt="">`, true)).join("")}</div>` : ""}
+      ${Object.entries(groups).map(([g, list]) => `<h4>${esc(g)}</h4><div class="grid">${list.map((m) => cell(m.id, m.name, `<img src="${esc(foundry.utils.getRoute(`modules/kg-realms/data/markers/${m.file}`))}" alt="">`)).join("")}</div>`).join("")}
+    </div>`;
+  }
+
+  #addForm() {
+    return `<div class="kgr-add"><div class="row"><label>Name <input type="text" name="new-name" placeholder="Harbour, Ruin, Shrine..."></label></div>
+      <div class="row"><label>Image <input type="text" name="new-src" placeholder="Path to a PNG or WebP"></label><button data-act="add-browse"><i class="fa-solid fa-file-image"></i></button></div>
+      <p class="hint">A contrasting outline is added automatically.${this.selected ? " The selected place takes the new marker." : ""}</p>
+      <div class="row"><button data-act="add-save"><i class="fa-solid fa-check"></i> Add marker</button></div></div>`;
+  }
+
+  refresh() { if (this.active) this.#render(); }
+
+  /** The camera moved: nothing in the panel follows it any more. */
+  refreshView() {}
+}

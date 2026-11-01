@@ -1,0 +1,1942 @@
+import {groupMembers,sceneParties,partyLabel} from './party-groups.mjs';
+import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-rules.mjs";
+// The travel panel on a realm map, for everyone. The GM plans the route (stops on the map, pace,
+// rules, stays, encounters along the way) and starts the journey; from then the party travels
+// with the game clock: however time moves on (this panel, Calendaria, anything), the party's
+// tokens stand where the party is by then. After a day's travel it stops for the GM: make camp
+// or push on. It stops at each encounter until the GM carries on.
+// The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
+import { buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
+import { randomCampEscape } from "./camp-resolution.mjs";
+import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours } from "./waterways.mjs";
+import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
+import { CampPanel, showDC } from "./ui-camp.mjs";
+import { onCanvas, RightClick } from "./canvas-input.mjs";
+import { applyHeight, heightGrip } from "./float-panel.mjs";
+import { editBar, uiBounds } from "./ui-editbar.mjs";
+import { selectPartyTokens } from "./party-token.mjs";
+import {chooseSettlementGate, enterSettlement, settlementArrivalMode} from './settlement-entry.mjs';
+import { lonLatToSource, sourceToLonLat, SOURCE_MAP } from "./source-map.mjs";
+import { latLonToScene, sceneToLatLon } from "./geo.mjs";
+import { isPrimaryGM, primaryGM } from "./authority.mjs";
+import { journeyKey, progressKey, snapshotNeeded } from "./journey-state.mjs";
+import { captureScroll, restoreScroll } from "./panel-scroll.mjs";
+import { shellHead, shellSection } from "./ui-shell.mjs";
+import { writeJourney } from "./journey-write.mjs";
+import { walkingHistory, retimeWalking, baseTravelHour } from "./walking-timing.mjs";
+import { biomeLookup, biomeFlag, syncPartyBiome, freezeBiomeTravel, biomeTypes } from "./biomes.mjs";
+import { partyFavoredBiomes } from "./favored-terrain.mjs";
+import { isRiverHazard, isHazard } from "./river-hazards.mjs";
+
+const MODULE_ID = "kg-realms";
+const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
+/**
+ * How encumbered a character is, else "": the system's own encumbrance conditions (dnd5e, with its
+ * encumbrance rule on), else its carried weight against the thresholds.
+ */
+function burdenOf(a) {
+  const st = a?.statuses;
+  if (st?.has?.("exceedingCarryingCapacity")) return "over carrying capacity";
+  if (st?.has?.("heavilyEncumbered")) return "heavily encumbered";
+  if (st?.has?.("encumbered")) return "encumbered";
+  // dnd5e works out the variant thresholds (5 and 10 times Strength) whatever rule the world uses:
+  // they count only under Variant Encumbrance; with the rule off, only carrying capacity counts.
+  const e = a?.system?.attributes?.encumbrance, v = Number(e?.value), t = e?.thresholds ?? {};
+  if (!Number.isFinite(v)) return "";
+  let rule = "normal";
+  try { rule = game.settings.get("dnd5e", "encumbrance") ?? "normal"; } catch {}
+  if (rule === "none") return "";
+  if (Number.isFinite(t.maximum) && v > t.maximum) return "over carrying capacity";
+  if (rule !== "variant") return "";
+  if (Number.isFinite(t.heavilyEncumbered) && v > t.heavilyEncumbered) return "heavily encumbered";
+  if (Number.isFinite(t.encumbered) && v > t.encumbered) return "encumbered";
+  if (!t.encumbered && Number.isFinite(Number(e?.max)) && Number(e.max) > 0 && v > Number(e.max)) return "over carrying capacity";
+  return "";
+}
+const KM = 1.609344;
+const mi = (m) => (m < 10 ? m.toFixed(1) : Math.round(m).toLocaleString());
+const both = (m) => `${mi(m)} mi (${mi(m * KM)} km)`;
+const hrs = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : `${Math.round(h * 10) / 10} h`);
+// method: how the party travels (METHODS), methodMph for a custom speed or a flying mount. Per leg
+// (by waypoint, the leg into it): legModes null | "direct" | "sea" | "road" (a ship turned down),
+// legMethods (a method for that leg), legVessels (a VESSELS key, or "actor:<uuid>" for a vehicle
+// actor), legFares (gp a head, haggled). fares: the default prices, ship sp and coach cp a mile.
+const DEFAULT = { name: "", waypoints: [], stays: [], legModes: [], legMethods: [], legVessels: [], legFares: [], encounters: [], pace: "normal", hours: 8, rest: 16, show: "route", start: null, trip: null, now: null,
+  method: "foot", methodMph: 8, fares: { ship: 1, coach: 3 }, shipSkip: [] };
+const SNAP_PX = 14, HIT_PX = 10, ENCOUNTER_MI = 2;
+/** The parts of a journey that route edits change (and Ctrl+Z puts back). */
+const ROUTE_KEYS = ["waypoints", "stays", "legModes", "legMethods", "legVessels", "legFares", "encounters", "name"];
+/** Lists kept per waypoint, which move with it. */
+const LEG_KEYS = ["stays", "legModes", "legMethods", "legVessels", "legFares"];
+/** How far from a port a boat may be boarded: the harbour (miles). */
+const HARBOUR_MI = 18;
+const rule = ruleTooltip;
+const gp = (v) => (v >= 10 ? Math.round(v).toLocaleString() : (Math.round(v * 10) / 10).toString());
+
+/** Seconds to move when the GM chooses one more hour, capped by the next encounter or arrival. */
+export function pushedHourAdvance(now, dayEnd, next) {
+  if (!Number.isFinite(now) || !Number.isFinite(dayEnd)) return 0;
+  const stop = Math.min(Math.max(now, dayEnd) + 3600, Number.isFinite(next?.since) ? next.since : Infinity);
+  return Math.max(0, Math.ceil(stop - now));
+}
+
+export class TravelHud {
+  /** getLayer, getPlaces, getRoutes, getEncounters (with sheet `at`, radius in px), getTerrain (async). */
+  constructor(options) {
+    Object.assign(this, options);
+    this.el = null;
+    this.mode = null; // "route" | "encounter" while editing on the map
+    this.result = null;
+    this.plan = null;
+    this.appliedWalking = "null";
+    this.asked = new Set();
+    this.camp = new CampPanel(this);
+    this.right = new RightClick();
+    this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), contextmenu: (e) => { if (this.mode) e.preventDefault(); } };
+  }
+
+  get editing() { return !!this.mode; }
+  /** 2014 (difficult terrain halves the distance) or 2024 (terrain caps the pace): a world setting. */
+  get rules() { return this.#get("travelRules") ?? "2014"; }
+
+  /** The travel rules as short text for tips and the Rules tab, in the edition the world uses. */
+  ruleText(rules = this.rules) {
+    const out = travelRules(rules), lore = this.getWorldRules?.()?.seasons;
+    // The world's own sea lore (KG Realms: Faerûn's Sword Coast winds), else the general rule.
+    if (Array.isArray(lore) && lore.length) out.seasons = ruleParagraphs(lore.filter((r) => Array.isArray(r) && r.length === 2).map(([a, b]) => [String(a), String(b)]));
+    return out;
+  }
+
+  /** Leave route or encounter editing (the map editor is opening). */
+  stopEditing() { if (!this.mode) return; this.#setMode(null); this.render(); }
+
+  /** Hide the panel while the map editor is open, and show it again after. */
+  suspend(on) {
+    this.suspended = !!on;
+    if (on) this.#setMode(null);
+    this.render();
+    if (!on && this.refreshPending) return this.refresh();
+  }
+  get scene() { return this.getScene?.() ?? canvas.scene; }
+  get state() { return { ...DEFAULT, ...(this.scene?.getFlag(MODULE_ID, "journey") ?? {}), ...(this.scene?.partyId?{partyId:this.scene.partyId}:{}) }; }
+  get clock() { return game.time.worldTime; }
+  /** The GM who moves the tokens and asks the questions (one, when several are on). */
+  get leader() { return isPrimaryGM(); }
+
+  /** Every stop, starting from the party: where it stands now, or where it set off from. */
+  stops() {
+    const s = this.state;
+    const start = (s.trip && s.start) ? s.start : this.#partyStop();
+    return start ? [start, ...s.waypoints] : s.waypoints;
+  }
+  /** The GM's open tab: the route, or the encounters along it (per user, this browser). */
+  get tab() { try { const t = localStorage.getItem("kgr-travel-tab"); return ["enc", "rules"].includes(t) ? t : "route"; } catch { return "route"; } }
+  set tab(v) { try { localStorage.setItem("kgr-travel-tab", v); } catch { /* storage off */ } }
+  get collapsed() { try { return localStorage.getItem("kgr-travel-collapsed") === "1"; } catch { return false; } }
+  set collapsed(v) { try { localStorage.setItem("kgr-travel-collapsed", v ? "1" : "0"); } catch { /* storage off */ } }
+
+  async save(changes, { undoable = true, scene = this.scene, expectedTrip = journeyKey(this.state), expectedCamp = undefined } = {}) {
+    if (!this.leader || !scene) return;
+    const state = { ...DEFAULT, ...(scene.getFlag(MODULE_ID, "journey") ?? {}) };
+    if (expectedTrip !== undefined && journeyKey(state) !== expectedTrip) return;
+    // Route edits (stops, legs, stays, the journey's encounters) can be stepped back with Ctrl+Z.
+    if (undoable && ROUTE_KEYS.some((k) => k in changes)) {
+      const before = Object.fromEntries(ROUTE_KEYS.map((k) => [k, foundry.utils.deepClone(this.state[k] ?? null)]));
+      if (ROUTE_KEYS.some((k) => k in changes && JSON.stringify(changes[k]) !== JSON.stringify(before[k]))) {
+        (this.history ??= []).push(before);
+        if (this.history.length > 40) this.history.shift();
+      }
+    }
+    await writeJourney(scene, () => changes, { trip: expectedTrip, campId: expectedCamp });
+  }
+
+  /** Step the route back one edit. */
+  async undo() {
+    const prev = this.history?.pop();
+    if (!prev) return ui.notifications.info("KG Realms: nothing to undo on this route.");
+    this.selected = null;
+    await this.save(Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v ?? (k === "name" ? "" : [])])), { undoable: false });
+  }
+
+  mount() {
+    this.unmount();
+    this.history = [];
+    this.result=this.plan=this.resultTrip=this.sheet=this.trackMiles=null;this.routeFeet=null;
+    this.asked.clear();this.openedEncounterCards?.clear();
+    this.suspended = false;
+    this.offRoute = null;
+    this.el = document.createElement("section");
+    this.el.className = "kgr-ui kgr-travel";
+    document.body.append(this.el);
+    this.el.addEventListener("click", (e) => this.#click(e));
+    this.el.addEventListener("change", (e) => this.#change(e));
+    // The Route section folded or open: kept across redraws.
+    this.el.addEventListener("toggle", (e) => { if (e.target.dataset?.sec === "route") this.routeShut = !e.target.open; }, true);
+    // A ship for a sea leg: a vehicle actor dropped on the leg's ship line (water vehicles only).
+    this.el.addEventListener("dragover", (e) => {
+      if (this.camp.dragOver(e)) return;
+      if (game.user.isGM && e.target.closest?.(".ship-drop, [data-camp-drop]")) { e.preventDefault(); e.target.closest(".ship-drop")?.classList.add("over"); }
+    });
+    this.el.addEventListener("dragleave", (e) => e.target.closest?.(".ship-drop")?.classList.remove("over"));
+    // The watch order (rows dragged, a scene dropped on the camp), else a ship on a sea leg.
+    this.el.addEventListener("drop", async (e) => { if (await this.camp.drop(e)) return; this.#drop(e); });
+    this.el.addEventListener("dragstart", (e) => { if (!this.camp.dragStart(e)) assetDrag(e); });
+    this.el.addEventListener("focusout", () => setTimeout(() => { if (this.held && this.el && !this.el.contains(document.activeElement)) this.render(); }, 0));
+    this.el.addEventListener("pointerdown", (e) => this.#grab(e));
+    this.onResize = () => this.#place();
+    window.addEventListener("resize", this.onResize);
+    this.refresh();
+  }
+
+  /* ------------------------------------------------------------------ position */
+  // As the ship HUD does it: x and y as client settings (-1 until first placed), a lock in the
+  // header, dragging by the header only while unlocked, kept on screen, and a panel on the right
+  // half of the screen grows and shrinks from its right edge.
+
+  #get(k) { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } }
+  #set(k, v) { return game.settings.set(MODULE_ID, k, v).catch(() => {}); }
+  get locked() { return !!this.#get("travelHudLocked"); }
+
+  #clamp(x, y) {
+    const w = this.el?.offsetWidth || 400, h = this.el?.offsetHeight || 200;
+    return [Math.max(0, Math.min(x, window.innerWidth - w)), Math.max(0, Math.min(y, window.innerHeight - Math.min(h, 60)))];
+  }
+
+  /** First placement: hard against the left of the sidebar, under the scene navigation. */
+  #defaultPos() {
+    const w = this.el?.offsetWidth || 400;
+    const b = uiBounds();
+    return [Math.max(b.left + 12, Math.round(b.right - w - 14)), Math.max(12, Math.round(b.top + 12))];
+  }
+
+  #pinnedRight() {
+    const x = parseInt(this.el?.style.left) || this.#get("travelHudX");
+    return x + (this.el?.offsetWidth || 400) / 2 >= window.innerWidth / 2;
+  }
+
+  #place() {
+    if (!this.el) return;
+    let sx = this.#get("travelHudX"), sy = this.#get("travelHudY");
+    if (!(sx >= 0) || !(sy >= 0)) { [sx, sy] = this.#defaultPos(); this.#set("travelHudX", sx); this.#set("travelHudY", sy); }
+    const [x, y] = this.#clamp(sx, sy);
+    Object.assign(this.el.style, { left: `${x}px`, top: `${y}px`, right: "auto" });
+    this.el.classList.toggle("locked", this.locked);
+    // Its height, as set with the grip on its bottom edge (put back after each redraw); minimised, it fits.
+    heightGrip(this.el, (h) => this.#set("travelHudH", h));
+    const height = this.collapsed ? 0 : this.#get("travelHudH") ?? 0;
+    applyHeight(this.el, height);
+    if (!this.collapsed && !height) this.el.style.maxHeight = `${Math.max(72, uiBounds().bottom - y - 12)}px`;
+  }
+
+  /** Re-render without the panel jumping: on the right half, keep the right edge where it was. */
+  #keepEdge(fn) {
+    if (!this.el) return fn();
+    const holdRight = this.#pinnedRight(), rightEdge = (parseInt(this.el.style.left) || 0) + this.el.offsetWidth;
+    fn();
+    if (holdRight && this.el) {
+      const [x] = this.#clamp(rightEdge - this.el.offsetWidth, parseInt(this.el.style.top) || 0);
+      this.el.style.left = `${x}px`;
+      this.#set("travelHudX", x);
+    }
+  }
+
+  #grab(e) {
+    if (e.button !== 0 || this.locked || !e.target.closest("header") || e.target.closest("button, [data-act], input, select")) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ox = parseInt(this.el.style.left) || 0, oy = parseInt(this.el.style.top) || 0;
+    const move = (ev) => { const [x, y] = this.#clamp(ox + ev.clientX - sx, oy + ev.clientY - sy); this.el.style.left = `${x}px`; this.el.style.top = `${y}px`; };
+    const up = async () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      this.el.classList.remove("dragging");
+      await this.#set("travelHudX", parseInt(this.el.style.left) || 0);
+      await this.#set("travelHudY", parseInt(this.el.style.top) || 0);
+    };
+    this.el.classList.add("dragging");
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  }
+
+  unmount() {
+    this.lifecycleEpoch = (this.lifecycleEpoch ?? 0) + 1;
+    this.panelHtml = null;
+    this.refreshGeneration = (this.refreshGeneration ?? 0) + 1;
+    this.#setMode(null);
+    if (this.onResize) window.removeEventListener("resize", this.onResize);
+    this.el?.remove();
+    this.el = null;
+    this.camp.renderScene(null);
+    this.getLayer()?.setJourney(null);
+  }
+
+  toggle() { this.#keepEdge(() => { this.collapsed = !this.collapsed; if (this.collapsed) this.#setMode(null); this.render(); }); }
+
+  /* ------------------------------------------------------------------ plan */
+
+  /** Work the route out again. A failure is said in the panel (and the console), not lost. */
+  async refresh(opts = {}) {
+    try {
+      const out = await this.#refreshNow(opts);
+      if (this.routeError) { this.routeError = null; this.render?.(); }
+      return out;
+    } catch (err) {
+      console.error("kg-realms | working out the route", err);
+      this.routeError = err?.message ?? String(err);
+      this.result = this.sheet = null;
+      this.render?.();
+    }
+  }
+
+  async #refreshNow({force = false} = {}) {
+    if (!this.el && !this.headless) return;
+    // A saved editor point must paint before expensive route/sea rebuilding. Keep the last plan
+    // until editing ends, or a clock tick/explicit journey request needs a current projection.
+    if (this.suspended && !force) {
+      this.refreshPending = true;
+      this.refreshGeneration = (this.refreshGeneration ?? 0) + 1;
+      return;
+    }
+    this.refreshPending = false;
+    const generation = this.refreshGeneration = (this.refreshGeneration ?? 0) + 1;
+    const scene = this.scene, element = this.el;
+    const s = this.state;
+    let currentFeet, walking = null;
+    // The last route stays in place while the new one is worked out (the travel log reads it meanwhile).
+    let result = null;
+    if (this.stops().length > 1) {
+      const routes = this.getRoutes();
+      if (this.graphFor !== routes) {
+        // Roads are named from the map's road and trail labels.
+        const labels = this.getPlaces().filter((p) => ['Road', 'Trail'].includes(p.class)).map((p) => ({ name: p.name, at: lonLatToSource(p.lon, p.lat) }));
+        this.graph = buildGraph(routes.features, lonLatToSource, labels);
+        this.graphFor = routes;
+      }
+      const grid = await this.getTerrain();
+      if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
+      this.prepareBiomes(grid);
+      // Freeze travel defaults at departure. Editing a forest during play must not retime
+      // miles already covered. Position flags and new camp DCs use the live configuration.
+      const previousBiomes=s.trip?.biomeTravel;
+      const travelBiomes=s.trip?(previousBiomes?.version?previousBiomes:freezeBiomeTravel(previousBiomes??{},true)):freezeBiomeTravel(this.getBiomes?.()??{});
+      const travelKey=JSON.stringify(travelBiomes);
+      if(this.travelBiomeGrid!==grid||this.travelBiomeKey!==travelKey){this.travelBiomeGrid=grid;this.travelBiomeKey=travelKey;this.travelBiomeQuery=biomeLookup(travelBiomes,terrainLookup(grid),lonLatToSource,{legacyPriority:!!travelBiomes.legacyPriority});}
+      const terrainAt = this.travelBiomeQuery.terrain;
+      if(s.trip&&!previousBiomes?.version&&this.leader&&this.canSync?.()!==false){
+        await writeJourney(scene,fresh=>fresh.trip&&JSON.stringify(fresh.trip.biomeTravel??null)===JSON.stringify(previousBiomes??null)?{"trip.biomeTravel":structuredClone(travelBiomes)}:null,{trip:journeyKey(s),valid:()=>this.scene===scene&&generation===this.refreshGeneration&&this.canSync?.()!==false});
+        if(generation!==this.refreshGeneration||this.scene!==scene||this.el!==element)return;
+      }
+      this.#buildSea(grid);
+      // routeFeet: the speed this route was worked out with (a change to it works it out again).
+      currentFeet = this.speed().feet;
+      walking = s.trip ? walkingHistory(s.trip.walking, this.resultTrip === journeyKey(s) ? this.routeFeet : s.now?.walkFeet ?? currentFeet) : { baseFeet: currentFeet, favored: this.favoredTerrains(), changes: [] };
+      this.routeFeet = currentFeet;
+      this.routeFavored = JSON.stringify(this.favoredTerrains());
+      const pts = this.stops().map((w) => lonLatToSource(w.lon, w.lat)), baseMph = (walking?.baseFeet ?? currentFeet) / 10;
+      const legs = pts.slice(1).map((_, i) => ({
+        method: { key: s.legMethods?.[i] ?? s.method, baseMph, mph: s.methodMph },
+        sea: s.legModes?.[i] === "sea" ? { vessel: this.vessel(s.legVessels?.[i]) } : null,
+        // No way overland (an island, a port cut off by water): by boat instead, if water joins them.
+        seaFallback: s.legModes?.[i] === "direct" ? null : { vessel: this.vessel(s.legVessels?.[i]) }
+      }));
+      result = itinerary(this.graph, pts, { stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: SOURCE_MAP.milesPerPixel, baseMph });
+      // No way found: which leg, and what lies under its ends (the panel says, and the console).
+      this.noRouteWhy = null;
+      if (!result) {
+        const sts = this.stops(), names = sts.map((w, i) => w.name ?? (i ? `stop ${i}` : "the start"));
+        const under = (q) => { const T = terrainAt(q[0], q[1]); return T?.water ? "water" : T?.name ?? "land"; };
+        let leg = -1;
+        for (let i = 0; i + 1 < pts.length && leg < 0; i++) if (!itinerary(this.graph, [pts[i], pts[i + 1]], { legModes: [s.legModes?.[i] ?? null], legs: [legs[i]], seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: SOURCE_MAP.milesPerPixel, baseMph })) leg = i;
+        const i = Math.max(0, leg);
+        this.noRouteWhy = { from: names[i], to: names[i + 1], fromOn: under(pts[i]), toOn: under(pts[i + 1]), roads: this.graph?.nodes?.size ?? 0 };
+        console.warn("kg-realms | no route", { ...this.noRouteWhy, stops: sts.map((w, k) => ({ name: names[k], lon: w.lon, lat: w.lat, sheet: pts[k], on: under(pts[k]) })), legModes: s.legModes, legMethods: s.legMethods });
+      }
+    } else {
+      const grid = await this.getTerrain();
+      if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
+      this.#buildSea(grid);
+      this.prepareBiomes(grid);
+    }
+    if (result && walking) {
+      const raw = result;
+      result = retimeWalking(raw, walking, { terrainAt: this.travelBiomeQuery.terrain });
+      const lastFeet = walking.changes.at(-1)?.feet ?? walking.baseFeet;
+      const lastFavored = walking.changes.findLast(c => Array.isArray(c.favored))?.favored ?? walking.favored ?? [], favored = this.favoredTerrains();
+      const favoredChanged = JSON.stringify(lastFavored) !== JSON.stringify(favored);
+      if (s.trip && this.leader && this.canSync?.() !== false && (!s.trip.walking || lastFeet !== currentFeet || favoredChanged)) {
+        this.result = result; this.#projectProgress();
+        const p = this.progress();
+        const updated = { ...walking, changes: [...walking.changes] };
+        if ((lastFeet !== currentFeet || favoredChanged) && p && p.status !== "arrived") {
+          const hour = baseTravelHour(result.track, p.hour);
+          updated.changes = updated.changes.filter((c) => c.hour < hour - 1e-9);
+          updated.changes.push({ hour, feet: currentFeet, at: this.clock, ...(favoredChanged || walking.favored || walking.changes.some(c => c.favored) ? { favored } : {}) });
+        }
+        const trip = journeyKey(s), previous = JSON.stringify(s.trip.walking ?? null);
+        if (JSON.stringify(updated) !== previous) await writeJourney(scene, (fresh) => JSON.stringify(fresh.trip?.walking ?? null) === previous ? { "trip.walking": updated } : null,
+          { trip, valid: () => this.scene === scene && generation === this.refreshGeneration && this.canSync?.() !== false });
+        if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
+        result = retimeWalking(raw, this.state.trip?.walking ?? walking, { terrainAt: this.travelBiomeQuery.terrain });
+      }
+    }
+    const r = this.result = result;
+    // Stops with no way between them: the panel says so, and still lists the stops.
+    this.noRoute = this.stops().length > 1 && !result;
+    this.resultTrip = journeyKey(this.state);
+    this.appliedWalking = JSON.stringify(this.state.trip?.walking ?? null);
+    this.appliedBiomeTravel = JSON.stringify(this.state.trip?.biomeTravel ?? null);
+    this.plan = null;
+    if (r) {
+      // Miles done at each point of the track, for "x mi of y".
+      let m = 0;
+      this.trackMiles = r.track.map((p, i) => (m += i ? Math.hypot(p.at[0] - r.track[i - 1].at[0], p.at[1] - r.track[i - 1].at[1]) * SOURCE_MAP.milesPerPixel : 0));
+      const scale = r.miles / (m || 1);
+      this.trackMiles = this.trackMiles.map((v) => v * scale);
+      this.#projectProgress();
+      // The route sheet: places passed, roads joined and left, and stops kept (places or stays).
+      const sts = this.stops();
+      const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && !(p.unnamed && !p.edited) && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class))
+        .map((p) => ({ name: p.name, at: lonLatToSource(p.lon, p.lat), settlement: p.kind === "settlement" }));
+      const nums = this.#numbers();
+      this.sheet = routeSheet(r, { stops: sts.map((w, i) => ({ name: w.name ?? "Stop", keep: i === 0 || nums[i - 1] != null })), places, milesPerPixel: SOURCE_MAP.milesPerPixel });
+      this.shipHints = this.headless ? [] : this.#shipHints();
+    } else { this.sheet = null; this.shipHints = []; }
+    // Port availability is independent of whether sailing would beat the road. Cache it with
+    // the route sheet, so clock updates and camp redraws do not rescan the world's ports.
+    const nodes = this.sheet?.nodes ?? this.stops().slice(0, 1).map((w) => ({ at: lonLatToSource(w.lon, w.lat) }));
+    this.seaNodes = new Set(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at); return this.portAt({ lon, lat }) ? [i] : []; }));
+    // The GM is told when a change to the route leaves encounters placed for it behind.
+    if (game.user.isGM) {
+      const met = new Set((this.plan?.encounters ?? []).map((e) => e.id));
+      const off = (s.encounters ?? []).filter((e) => !met.has(e.id));
+      const was = this.offRoute;
+      this.offRoute = new Set(off.map((e) => e.id));
+      const fresh = was && this.plan ? off.filter((e) => !was.has(e.id)) : [];
+      if (fresh.length) ui.notifications.warn(`KG Realms: the route no longer passes ${fresh.map((e) => e.name).join(", ")}. They are listed under Encounters.`);
+    }
+    await this.tick({ force: true });
+    if (!this.leader && this.state.trip) this.onSyncNeeded?.(scene.id);
+  }
+
+  /** Camp state changes reuse the route, graph, terrain and route sheet. */
+  refreshProgress() {
+    if (!this.result || this.appliedWalking !== JSON.stringify(this.state.trip?.walking ?? null) || (this.appliedBiomeTravel ?? "null") !== JSON.stringify(this.state.trip?.biomeTravel ?? null)) return this.refresh();
+    this.#projectProgress();
+    return this.tick();
+  }
+
+  prepareBiomes(grid) {
+    const config=this.getBiomes?.()??{},key=JSON.stringify(config);
+    if(this.biomeGrid!==grid||this.biomeKey!==key||!this.biomeQuery){this.biomeGrid=grid;this.biomeKey=key;this.biomeQuery=biomeLookup(config,terrainLookup(grid),lonLatToSource);}
+  }
+  currentBiome() {
+    if(!this.biomeQuery)return null;
+    const p=this.progress(),stop=!p?this.#partyStop():null,at=p?this.#at(p.hour):stop?lonLatToSource(stop.lon,stop.lat):null;
+    return at?biomeFlag(this.biomeQuery(...at),{world:this.getWorld?.(),scene:this.scene?.id}):null;
+  }
+  async syncBiome() {
+    if(!this.getBiomes||!this.leader||this.canSync?.()===false)return;
+    const scene=this.scene,epoch=this.lifecycleEpoch;
+    const grid=await this.getTerrain();if(scene!==this.scene||epoch!==this.lifecycleEpoch)return;
+    this.prepareBiomes(grid);
+    // Without a journey, a real party token is the position source. No token means unknown,
+    // rather than clearing flags belonging to a journey on another scene.
+    if(!this.progress()&&!this.#partyStop())return;
+    const valid=()=>this.scene===scene&&this.lifecycleEpoch===epoch&&this.leader&&this.canSync?.()!==false;
+    this.biomeSync=(this.biomeSync??Promise.resolve()).catch(()=>{}).then(()=>valid()?syncPartyBiome(this.members(),this.currentBiome(),valid):undefined);
+    return this.biomeSync.catch(e=>console.warn("kg-realms | biome flags:",e));
+  }
+
+  #projectProgress() {
+    const r = this.result, s = this.state;
+    if (!r) return;
+    const encounters = game.user.isGM ? encounterHours(r.track, [...[...this.getEncounters(), ...this.#ownEncounters()].map((e) => ({ ...e, radius: e.reach })), ...(this.getTowns?.() ?? [])]).filter((e) => e.kind !== "town" || e.hour > .25) : [];
+    this.plan = { hours: r.hours, encounters, sail: r.sail, stays: r.legEnds.map((hour, i) => ({ hour, seconds: (s.stays[i] ?? 0) * 86400 })) };
+    const opts = { hoursPerDay: s.hours, rest: s.rest };
+    this.camps = s.trip ? projectCamps(s.trip, { ...this.plan, encounters: this.#withCamps(encounters, campHours(this.plan, r.hours, opts)) }, opts) : campHours(this.plan, r.hours, opts);
+    this.plan.encounters = this.#withCamps(encounters, this.camps);
+  }
+
+  /* ------------------------------------------------------------------ water */
+
+  /** The sea for routing: the map's water and the GM's waterways, rebuilt when either changes. */
+  #buildSea(grid) {
+    const ww = this.getWaterways?.() ?? {}, key = JSON.stringify(ww);
+    if (this.seaKey === key && this.seaGrid === grid) return;
+    this.seaKey = key; this.seaGrid = grid; this.seaCache = new Map();
+    // Ports, for keeping their harbours open: the GM's, and settlements by the map's own water (the
+    // sea is not built yet to ask). Within 6 miles, as autoPort().
+    const ports = terrainHarbours(grid, grid ? this.getPlaces() : [], lonLatToSource, SOURCE_MAP.milesPerPixel);
+    this.sea = grid ? buildSea(grid, Object.entries(ww).map(([id, w]) => ({ id, ...w, pts: (w.pts ?? []).map((c) => lonLatToSource(c[0], c[1])) })), { milesPerPixel: SOURCE_MAP.milesPerPixel, ports }) : null;
+  }
+
+  /** The way by water between two sheet points for a vessel, in this season (remembered). */
+  seaPlan(from, to, vessel) {
+    if (!this.sea) return null;
+    const season = this.getSeason?.() ?? "summer", key = `${from.map(Math.round)}|${to.map(Math.round)}|${vessel.mph}|${season}`;
+    if (!this.seaCache.has(key)) this.seaCache.set(key, planSea(this.sea, from, to, { mph: vessel.mph, season, reach: HARBOUR_MI / SOURCE_MAP.milesPerPixel }));
+    return this.seaCache.get(key);
+  }
+
+  /** A leg's vessel: a VESSELS key, or a vehicle actor dropped on the leg ("actor:<uuid>"). */
+  vessel(key) {
+    if (key?.startsWith("actor:")) {
+      const a = fromUuidSync(key.slice(6), { strict: false });
+      const v = a ? TravelHud.vehicleVessel(a) : null;
+      if (v) return v;
+    }
+    return { key: VESSELS[key] ? key : "sailing", ...(VESSELS[key] ?? VESSELS.sailing) };
+  }
+
+  /**
+   * A dnd5e vehicle actor as a vessel, or null when it is not a water vehicle. Its speed comes
+   * from its travel pace (mph) when the sheet has one, else from the vehicle table by its name,
+   * else 2 mph. Crewed (it sails round the clock) unless it is a rowed boat.
+   */
+  static vehicleVessel(actor) {
+    if (actor?.type !== "vehicle") return null;
+    const sys = actor.system ?? {}, type = sys.vehicleType ?? sys.details?.type;
+    if (type && type !== "water") return null;
+    const preset = Object.entries(VESSELS).find(([, v]) => new RegExp(`\\b${v.label.split(" ")[0]}`, "i").test(actor.name));
+    const travel = sys.attributes?.travel, mv = sys.attributes?.movement ?? {};
+    const paced = Number(travel?.paces?.water ?? travel?.speeds?.water ?? travel?.water);
+    const units = String(travel?.units ?? mv.units ?? "").toLowerCase();
+    const mph = paced > 0 ? (units === "kph" || units === "km" ? paced / 1.609 : paced)
+      : ["mi", "mph"].includes(units) && Number(mv.swim) > 0 ? Number(mv.swim) : preset?.[1].mph ?? 2;
+    return { key: `actor:${actor.uuid}`, label: actor.name, mph, crewed: preset ? preset[1].crewed : !/row|keel|canoe|raft/i.test(actor.name), actor: actor.uuid, img: actor.img };
+  }
+
+  /** A settlement by the water (the sea, a lake, or a river the GM drew): a port unless the GM says not. */
+  autoPort(p) {
+    return automaticPort(p, this.sea, lonLatToSource, SOURCE_MAP.milesPerPixel);
+  }
+  /**
+   * A GM's port setting, else the automatic rule. The automatic answer scans the sea, so it is
+   * remembered per place until the sea is rebuilt or the place moves.
+   */
+  isPort(p) {
+    if (!p) return false;
+    if (p.port != null) return !!p.port;
+    if (this.portSea !== this.sea) { this.portSea = this.sea; this.portCache = new Map(); }
+    const key = `${p.id}|${p.lon}|${p.lat}|${p.kind}`;
+    let auto = this.portCache.get(key);
+    if (auto === undefined) this.portCache.set(key, auto = !!this.autoPort(p));
+    return auto;
+  }
+
+  /** The port at a stop (snapped to a place, or within a mile of one), or null. */
+  portAt(w) {
+    if (!w) return null;
+    const at = lonLatToSource(w.lon, w.lat), mpp = SOURCE_MAP.milesPerPixel;
+    let best = null, bd = 1 / mpp;
+    for (const p of this.getPlaces()) {
+      if (p.hidden || !this.isPort(p)) continue;
+      const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - at[0], q[1] - at[1]);
+      if (d < bd || (Math.abs(p.lon - w.lon) < 1e-9 && Math.abs(p.lat - w.lat) < 1e-9)) { bd = d; best = p; }
+    }
+    return best;
+  }
+  /** Whether leg i (from stop i to stop i + 1) runs port to port. */
+  legByWater(i) { const sts = this.stops(); return !!(this.portAt(sts[i]) && this.portAt(sts[i + 1])); }
+
+  /** The world's prices against the book's (the Prices setting): ×1 to ×10, or ÷2 to ÷10. */
+  get priceScale() {
+    const m = /^([xd])(\d+)$/.exec(this.#get("priceScale") ?? "x1");
+    return !m ? 1 : m[1] === "x" ? Number(m[2]) : 1 / Number(m[2]);
+  }
+
+  /** A leg's fare a head (gp): the GM's haggled price, else the default for the way it goes. null: free. */
+  fareOf(i) {
+    const s = this.state, leg = this.result?.legs[i];
+    if (!leg) return null;
+    const own = s.legFares?.[i];
+    const f = { ...DEFAULT.fares, ...(s.fares ?? {}) }, k = this.priceScale;
+    const method = s.legMethods?.[i] ?? s.method;
+    const def = leg.sea ? leg.miles * f.ship / 10 * k : method === "coach" ? leg.miles * f.coach / 100 * k : null;
+    if (def == null) return null;
+    return { gp: own ?? def, def, haggled: own != null && Math.abs(own - def) > 0.05 };
+  }
+
+  /**
+   * Where a ship would be quicker, as cards: one for each port the party boards at (a stop that is a
+   * port, or the first port the road passes after a stop that is not), each with the ports it could
+   * sail to. A stop with no stay set is optional: a ship sails on past it, calling there when it is
+   * a port (the party can still choose to stop when it arrives) and skipping it when it is not. A
+   * stop with a stay is not sailed past. Only voyages that beat the road (round the clock) by a
+   * quarter, and at least six hours, are offered. The GM takes one, or keeps the road.
+   */
+  #shipHints() {
+    const r = this.result, sh = this.sheet, s = this.state;
+    if (!r || !sh || !this.sea || !game.user.isGM) return [];
+    const mpp = SOURCE_MAP.milesPerPixel, now = this.progress()?.hour ?? -1;
+    const ports = this.getPlaces().filter((p) => !p.hidden && this.isPort(p)).map((p) => ({ p, at: lonLatToSource(p.lon, p.lat) }));
+    const near = (at) => { let b = null, bd = 2 / mpp; for (const q of ports) { const d = Math.hypot(q.at[0] - at[0], q.at[1] - at[1]); if (d < bd) { bd = d; b = q; } } return b; };
+    const pts = sh.nodes.map((n, i) => ({ n, i, q: near(n.at) }));
+    const anchors = pts.filter((x) => x.n.stop != null);
+    const stayOf = (x) => (x.n.stop > 0 ? Number(s.stays?.[x.n.stop - 1]) || 0 : 0);
+    const vessel = this.vessel("sailing"), opts = { hoursPerDay: s.hours, rest: s.rest };
+    const f = { ...DEFAULT.fares, ...(s.fares ?? {}) };
+    const mark = (x) => ({ ...x.q, hour: x.n.hour, stop: x.n.stop, node: x.i, name: x.n.name });
+    const cards = [];
+    for (let k = 0; k + 1 < anchors.length; k++) {
+      const from = anchors[k], ax = from.q ? from : pts.slice(from.i + 1, anchors[k + 1].i).find((x) => x.q);
+      if (!ax || ax.n.hour < now - 1e-6) continue;
+      const a = mark(ax), options = [], calls = [], skips = [];
+      const consider = (bx) => {
+        if (!bx || bx.i <= ax.i || bx.q.p.id === a.p.id) return;
+        const b = mark(bx);
+        if (s.shipSkip?.includes(`${a.p.id}|${b.p.id}`)) return;
+        if (r.legs.some((l) => l.sea && l.start < b.hour - 0.5 && l.start + l.hours > a.hour + 0.5)) return;
+        // Port to port: calling at each port stop on the way.
+        const seq = [a, ...calls, b];
+        let hours = 0, miles = 0;
+        for (let i = 1; i < seq.length; i++) {
+          const leg = this.seaPlan(seq[i - 1].at, seq[i].at, vessel);
+          if (!leg) return;
+          hours += leg.hours; miles += leg.miles;
+        }
+        const land = elapsedAt(this.plan, b.hour, opts) - elapsedAt(this.plan, a.hour, opts);
+        if (hours > land * 0.75 || land - hours < 6) return;
+        options.push({ b, calls: [...calls], skips: [...skips], sea: { hours, miles }, land, fare: miles * f.ship / 10 * this.priceScale });
+      };
+      for (let j = k + 1; j < anchors.length; j++) {
+        const to = anchors[j], prev = anchors[j - 1];
+        consider(to.q ? to : pts.slice(Math.max(prev.i, ax.i) + 1, to.i).findLast((x) => x.q));
+        // Sail on past it only when it is optional (no stay) and not the end.
+        if (j === anchors.length - 1 || stayOf(to) > 0) break;
+        if (to.q) calls.push(mark(to)); else skips.push({ name: to.n.name });
+      }
+      // A port an earlier card already sails to or calls at waits until that card is turned down.
+      const covered = cards.some((c) => c.options.some((o) => o.b.p.id === a.p.id || o.calls.some((x) => x.p.id === a.p.id)));
+      if (options.length && !covered) cards.push({ a, options });
+    }
+    return cards;
+  }
+
+  /**
+   * Take a voyage from a card: the port boarded at and the port sailed to become stops, the ports
+   * called at stay as stops, and every leg from boarding to landing goes by sea. Whatever lay between
+   * (path points, optional stops that are not ports) is dropped.
+   */
+  async takeShip(card, opt) {
+    const s = this.state, ends = this.result.legEnds;
+    const vals = (k) => Object.fromEntries(LEG_KEYS.map((key) => [key, s[key]?.[k] ?? null]));
+    const entries = s.waypoints.map((p, k) => ({ p, hour: ends[k], vals: vals(k) }));
+    const add = (m) => {
+      if (m.stop === 0) return null;
+      if (m.stop != null) return entries[m.stop - 1];
+      const next = entries.find((e) => e.hour >= m.hour - 1e-6);
+      const e = { p: { lon: m.p.lon, lat: m.p.lat, name: m.p.name }, hour: m.hour, vals: { ...Object.fromEntries(LEG_KEYS.map((key) => [key, null])), stays: 0, legMethods: next?.vals.legMethods ?? null } };
+      entries.push(e);
+      return e;
+    };
+    const a = add(card.a), b = add(opt.b), calls = new Set(opt.calls.map((c) => entries[c.stop - 1]).filter(Boolean));
+    if (!b) return;
+    entries.sort((x, y) => x.hour - y.hour);
+    const lo = a ? entries.indexOf(a) : -1, hi = entries.indexOf(b);
+    const keep = entries.filter((e, k) => k <= lo || k >= hi || calls.has(e));
+    for (const e of keep) {
+      const k = entries.indexOf(e);
+      if (k > lo && k <= hi) { e.vals.legModes = "sea"; e.vals.legVessels = e.vals.legVessels ?? "sailing"; e.vals.legFares = null; }
+    }
+    this.selected = null;
+    await this.save({ waypoints: keep.map((e) => e.p), ...Object.fromEntries(LEG_KEYS.map((key) => [key, keep.map((e) => e.vals[key])])) });
+    ui.notifications.info(`KG Realms: by ship from ${card.a.p.name} to ${opt.b.p.name}${opt.calls.length ? `, calling at ${opt.calls.map((c) => c.p.name).join(", ")}` : ""}.`);
+  }
+
+  /**
+   * The stops the list shows (a place, a stay, or the end) numbered 1, 2, 3 in order; the other
+   * clicks only shape the path. Returns an array over the waypoints: a number, or null.
+   */
+  #numbers() {
+    const s = this.state, w = s.waypoints;
+    let n = 0;
+    return w.map((p, i) => (i === w.length - 1 || p.stop || this.#onPlace(p) || (s.stays[i] ?? 0) > 0 ? ++n : null));
+  }
+
+  /** Whether a stop sits on a place (it was snapped to one). */
+  #onPlace(w) { return this.getPlaces().some((q) => Math.abs(q.lon - w.lon) < 1e-9 && Math.abs(q.lat - w.lat) < 1e-9); }
+
+  /** This journey's own encounters, placed along the route: sheet `at`, a small radius. */
+  #ownEncounters() {
+    return (this.state.encounters ?? []).map((e) => ({ ...e, at: lonLatToSource(e.lon, e.lat), reach: (e.radius ?? ENCOUNTER_MI) / SOURCE_MAP.milesPerPixel }));
+  }
+
+  /** Where the journey stands now: replayed on the GM's side, the GM's last word for players. */
+  progress(now = this.clock, opts = {}) {
+    const s = this.state;
+    if (!s.trip) return null;
+    if (!game.user.isGM) return s.now;
+    if (!this.plan) return null;
+    return replayTrip(s.trip, this.plan, now, { hoursPerDay: s.hours, ...(this.unfocused?{autoRest:s.rest,skipCamp:true}:{}), ...opts });
+  }
+
+  /** Redraw for the current time, and (GM) move the party there. */
+  tick({ force = false } = {}) {
+    if (this.refreshPending) return this.refresh({force: true});
+    if (!this.headless) { this.draw(); this.render(); }
+    else if(!this.unfocused)this.camp.followClock(this.progress());
+    if (force) this.forceSnapshot = true;
+    if (this.leader) return this.#sync().catch((err) => console.warn("kg-realms | journey sync:", err));
+  }
+
+  async advanceClock(seconds) {
+    if (!this.leader || seconds <= 0) return;
+    this.motionDuration = 8000;
+    try { await game.time.advance(seconds); await this.tick({ force: true }); }
+    finally { this.motionDuration = null; }
+  }
+
+  /** The day of the journey (1 on setting off) on which travel hour `hour` falls, by the plan's schedule. */
+  #dayAt(hour) {
+    const s = this.state;
+    return Math.floor(elapsedAt(this.plan, hour, { hoursPerDay: s.hours, rest: s.rest }) / 24 + 1e-9) + 1;
+  }
+  #at(hour) {
+    const escape = this.state.trip?.escape;
+    if (escape && Math.abs(hour - escape.hour) < 1e-6 && this.progress()?.status === "halted") return escape.at;
+    return this.result ? pointAtHour(this.result.track, hour) : null;
+  }
+
+  async planCampEscape(miles) {
+    const from = this.#at(this.progress()?.hour ?? 0); if (!from) return null;
+    const grid=await this.getTerrain();this.prepareBiomes(grid);const terrain=this.biomeQuery.terrain;
+    const valid = ([x, y]) => x >= 0 && y >= 0 && x <= SOURCE_MAP.width && y <= SOURCE_MAP.height && !terrain(x, y).water;
+    const escape = randomCampEscape(from, miles, SOURCE_MAP.milesPerPixel, valid); if (!escape) return null;
+    const mph = Math.max(.1, this.speed().feet / 10 * PACES[this.state.pace].mph / 3);
+    let seconds = 0;
+    for (let i = 0; i < 8; i++) {
+      const x = from[0] + (escape.at[0] - from[0]) * (i + .5) / 8, y = from[1] + (escape.at[1] - from[1]) * (i + .5) / 8;
+      seconds += escape.distance / 8 / (mph * speedFactor("offroad", terrain(x, y), { rules: this.rules, pace: this.state.pace })) * 3600;
+    }
+    return { ...escape, origin: from, returnSeconds: Math.ceil(seconds) };
+  }
+
+  /** One card per held encounter on this GM's client; redraws and clock ticks never reopen it. */
+  async openHeldEncounter(p = this.progress()) {
+    if (!game.user.isGM || p?.status !== "encounter" || !p.encounter?.id || !this.openEncounter) return;
+    const e = p.encounter, own = (this.state.encounters ?? []).find((o) => o.id === e.id);
+    if (e.generic && !e.notes && !e.img && !e.pinned && !e.images?.length && !e.actor && !e.actors?.length && !own?.pinned && !own?.img) return;
+    const key = `${this.scene.partyId??''}|${journeyKey(this.state)}|${e.id}|${p.since}`;
+    const opened = this.openedEncounterCards ??= new Set(); if (opened.has(key)) return;
+    opened.add(key); if (opened.size > 64) opened.delete(opened.values().next().value);
+    try { await this.showEncounterCard(e.id, !!own); } catch (err) { opened.delete(key); console.warn("kg-realms | encounter card:", err); }
+  }
+  showEncounterCard(id,own=false,options) { const e=this.plan?.encounters?.find(e=>e.id===id),key=e?.sourceId??id;return options===undefined?this.openEncounter?.(key,own):this.openEncounter?.(key,own,options); }
+  #milesAt(hour) {
+    const t = this.result?.track, m = this.trackMiles;
+    if (!t?.length) return 0;
+    let i = t.findIndex((p) => p.hour >= hour);
+    if (i < 0) return m.at(-1);
+    if (i === 0) return 0;
+    const a = t[i - 1], b = t[i], f = (hour - a.hour) / Math.max(1e-9, b.hour - a.hour);
+    return m[i - 1] + (m[i] - m[i - 1]) * f;
+  }
+
+  /** The GM's side: tokens to the party's place, questions at stops, news in the chat, players told. */
+  #sync() {
+    // One at a time: a tick while one runs is caught up once it finishes.
+    if (this.syncWork) { this.again = true; return this.syncWork; }
+    this.syncWork = (async () => {
+      try { do { this.again = false; await this.#syncOnce(); } while (this.again); }
+      finally { this.syncWork = null; }
+    })();
+    return this.syncWork;
+  }
+
+  async #syncOnce() {
+    const scene = this.scene, epoch = this.lifecycleEpoch, generation = this.refreshGeneration, result = this.result, s = this.state, p = this.progress(), trip = journeyKey(s);
+    if (!p || !this.result) { await this.syncBiome(); return; }
+    if(this.unfocused&&p.made?.length){
+      const decisions=[...(s.trip.decisions??[])],made=[...p.made];for(let i=0;made.length;i++){if(!decisions[i])decisions[i]=made.shift();}
+      await writeJourney(scene,()=>({'trip.decisions':decisions}),{trip});
+    }
+    if(this.unfocused&&p.status==='encounter')this.onBackgroundEncounter?.(this,p);
+    const valid = () => this.scene === scene && this.lifecycleEpoch === epoch && this.refreshGeneration === generation && this.result === result && this.leader && this.canSync?.() !== false && journeyKey(scene.getFlag(MODULE_ID, "journey")) === trip;
+    if (!valid()) return;
+    await this.syncBiome();if(!valid())return;
+    if(p.status==="encounter"&&isHazard(p.encounter)&&p.encounter.autoDiscover!==false&&(p.encounter.visibility??"hidden")==="hidden"){
+      await this.discoverHazard?.(p.encounter.sourceId??p.encounter.id);if(!valid())return;
+    }
+    const force = this.forceSnapshot; this.forceSnapshot = false;
+    const at = this.#at(p.hour);
+    if (at) await this.#moveTo(at, { scene, duration: this.motionDuration ?? (Math.abs(p.hour - (s.now?.hour ?? p.hour)) > .5 ? 8000 : 800) });
+    if (!valid()) return;
+    // Each stop is announced once (chat, Perception rolls, the questions). What was announced is kept
+    // with the journey, so reloading Foundry does not ask again. A journey from before 0.42.1 has no
+    // record: the stop it was already at counts as announced.
+    const key = progressKey(s, p);
+    const old = s.now;
+    const told = old?.told === key || (old && old.told == null && old.status === p.status && (old.encounter?.name ?? null) === (p.encounter?.name ?? null));
+    if (!told && !this.asked.has(key)) {
+      this.asked.add(key);
+      if (this.asked.size > 128) this.asked.delete(this.asked.values().next().value);
+      this.#announce(p);
+      this.#logStop(p);
+    }
+    const snap = { hour: Math.round(p.hour * 100) / 100, walkFeet: this.routeFeet ?? this.speed().feet, status: p.status, sailing: !!p.sailing, until: p.until ?? null, since: p.since ?? null, night: p.night ?? null, limit: p.limit ?? null, camp: !!p.camp, campStart: p.campStart ?? null, dayHours: p.dayHours, encounter: p.encounter ? { id: p.encounter.id ?? null, ...(p.encounter.sourceId?{sourceId:p.encounter.sourceId}:{}), name: p.encounter.name, kind: p.encounter.kind ?? null } : null, told: key };
+    if (valid() && snapshotNeeded(old, snap, { force })) await writeJourney(scene, () => ({ now: snap }), { trip, valid });
+  }
+
+  /* ------------------------------------------------------------------ travel log */
+  // Each journey keeps a journal entry in the Travel Logs folder, made when the party sets off and
+  // named for the journey and the day it left. Each time the party stops (an encounter, the end of
+  // a day, a stay, a halt, a town) a dated line records how far it has come; arriving writes the
+  // last line and closes the log. Planning and route edits are never logged. It is never opened.
+
+  /** A world time as the calendar writes it (Calendaria's format when it is on). */
+  dateText(t = this.clock, format = "datetime24") {
+    const c = game.time.calendar?.timeToComponents?.(t) ?? game.time.components ?? {};
+    const C = globalThis.CALENDARIA;
+    try {
+      if (C?.api?.formatDate) {
+        const yz = C.managers?.CalendarManager?.getActiveCalendar?.()?.years?.yearZero ?? 0;
+        const s = C.api.formatDate({ ...c, year: (c.year ?? 0) + yz, month: (c.month ?? 0) + 1, day: (c.dayOfMonth ?? 0) + 1 }, format);
+        if (s) return s;
+      }
+    } catch { /* plain dates below */ }
+    const v = game.time.calendar?.months?.values, months = Array.isArray(v) ? v : Object.values(v ?? {});
+    const m = months[c.month]?.name ? game.i18n.localize(months[c.month].name) : `month ${(c.month ?? 0) + 1}`;
+    const time = format.includes("time") ? `, ${String(c.hour ?? 0).padStart(2, "0")}:${String(c.minute ?? 0).padStart(2, "0")}` : "";
+    return `${(c.dayOfMonth ?? 0) + 1} ${m} ${c.year ?? ""}${time}`.trim();
+  }
+
+  /** A stop the party has just reached, in the log. */
+  #logStop(p) {
+    const where = this.#near(this.#at(p.hour)), e = p.encounter;
+    const text = {
+      encounter: e?.kind === "town" ? `Reached ${esc(e.name)}.` : `Encounter: <b>${esc(e?.name ?? "Encounter")}</b>, ${p.camp ? "in camp " : ""}${where}${e?.dc != null ? ` (Perception DC ${e.dc})` : ""}.`,
+      decide: `The day's travel ends ${where}, after ${hrs(p.dayHours ?? 0)} on the way.`,
+      stay: `The party stays ${where} for ${this.#span(((p.until ?? p.since) - p.since) / 3600)}.`,
+      halted: `Travel stops ${where}.`,
+      arrived: `Arrived ${where}.`
+    }[p.status];
+    if (text) this.#log(text, { hour: p.hour, at: p.since, close: p.status === "arrived" });
+  }
+
+  /**
+   * Add a line to the journey's log (null: only make sure it exists). hour: the travel hour it
+   * stands at (for the miles), at: the world time. close: the last line, with the totals.
+   * Lines are written one at a time, in order.
+   */
+  #log(text, { hour = null, at = this.clock, close = false } = {}) {
+    if (!game.user.isGM) return;
+    // Where the party stands is read now: by the time the line is written the route may be being worked out again.
+    const r = this.result, sts = this.stops(), scene = this.scene, trip = journeyKey(this.state);
+    const now = { hour, miles: hour != null && r ? this.#milesAt(hour) : null, day: hour != null && this.plan ? this.#dayAt(hour) : null, total: r ? { miles: r.miles, days: this.#dayAt(r.hours) } : null, sts };
+    this.logging = (this.logging ?? Promise.resolve()).then(() => this.#writeLog(text, { at, close, now, scene, trip })).catch((err) => console.warn("kg-realms | travel log:", err));
+    return this.logging;
+  }
+
+  async #writeLog(text, { at, close, now, scene, trip }) {
+    const valid = () => this.scene === scene && this.leader && journeyKey(this.state) === trip;
+    if (!valid()) return;
+    const s = this.state, { sts } = now;
+    if (!s.trip) return;
+    let entry = s.trip.log ? game.journal.get(s.trip.log) : null;
+    const title = (scene.partyId?`${partyLabel(scene)}: `:"") + (s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "Journey"));
+    if (!entry) {
+      const name = "Travel Logs";
+      const folder = game.folders.find((f) => f.type === "JournalEntry" && f.name === name) ?? await Folder.create({ name, type: "JournalEntry" });
+      if (!valid()) return;
+      const plan = now.total ? `${mi(now.total.miles)} miles planned, about ${now.total.days} days` : "";
+      const head = `<h2>${esc(title)}</h2><p>Set out from <b>${esc(sts[0]?.name ?? "the start")}</b> on ${esc(this.dateText(s.trip.departed))}${sts.length > 2 ? `, by way of ${sts.slice(1, -1).map((w) => esc(w.name ?? "a stop")).join(", ")}` : ""}, for <b>${esc(sts.at(-1)?.name ?? "the end")}</b>. ${plan}.</p>`;
+      entry = await JournalEntry.create({ name: `${title}, ${this.dateText(s.trip.departed, "dateLong")}`, folder: folder?.id ?? null, pages: [{ name: "Log", type: "text", text: { content: head } }], flags: { [MODULE_ID]: { journey: true, partyId:scene.partyId??null, miles: 0 } } });
+      if (!valid()) return;
+      await this.save({ trip: { ...this.state.trip, log: entry.id } }, { undoable: false, scene, expectedTrip: trip });
+    }
+    if (!valid() || !text || entry.getFlag(MODULE_ID, "closed")) return;
+    const page = entry.pages.contents[0];
+    const was = entry.getFlag(MODULE_ID, "miles") ?? 0, miles = now.miles ?? was;
+    const day = now.day != null ? `, day ${now.day}` : "";
+    const progress = now.miles != null ? ` ${mi(miles)} mi travelled${miles - was >= 0.1 ? ` (${mi(miles - was)} since the last entry)` : ""}.` : "";
+    let line = `<p><b>${esc(this.dateText(at))}${day}</b>: ${text}${progress}</p>`;
+    if (close) {
+      const days = Math.max(1, Math.ceil((at - s.trip.departed) / 86400 - 1e-9));
+      line += `<p><i>Journey over: ${mi(miles)} miles in ${days} day${days === 1 ? "" : "s"}.</i></p>`;
+    }
+    await page?.update({ "text.content": `${page.text?.content ?? ""}${line}` });
+    await entry.update({ [`flags.${MODULE_ID}.miles`]: miles, ...(close ? { [`flags.${MODULE_ID}.closed`]: true } : {}) });
+  }
+
+  #announce(p) {
+    const s = this.state, where = this.#near(this.#at(p.hour));
+    const say = (text, gmOnly = false) => ChatMessage.create({ content: `<p><i class="fa-solid fa-person-hiking"></i> ${text}</p>`, speaker: { alias: s.name || "Journey" }, ...(gmOnly ? { whisper: game.users.filter((u) => u.isGM).map((u) => u.id) } : {}) });
+    if (p.status === "arrived") return say(`The party arrives ${where}.`);
+    if (p.status === "stay") return say(`The party stays ${where} for ${hrs((p.until - p.since) / 3600)}.`);
+    if(this.unfocused)return;
+    if (p.status === "encounter" && p.encounter?.kind === "town") return this.#askTown(p);
+    if (p.status === "encounter") {
+      this.openHeldEncounter(p);
+      const e = p.encounter, who = perceptionAgainst(this.party(), e.dc, s.pace);
+      say(`<b>Encounter: ${esc(e.name)}</b> ${p.camp ? "in camp " : ""}${where}${e.dc != null ? `, Perception DC ${e.dc}` : ""}.${who.length && e.dc != null ? `<br>Passive Perception: ${who.map((c) => `${esc(c.name)} ${c.adjusted} ${c.notices ? "notices" : "misses it"}`).join(", ")}` : ""}${e.notes ? `<br>${esc(e.notes)}` : ""}`, true);
+      // Each encounter says how it is noticed: the party rolls Perception (the default), or passive only.
+      // In camp only the one on watch rolls, when the GM asks (the camp panel).
+      if (e.dc != null && e.perception !== "passive" && !p.camp) this.requestPerception(e);
+      return;
+    }
+    // The end of the day's travel: the camp panel holds the choice (make camp, or push on).
+    if (p.status === "decide") return ui.notifications.info("KG Realms: the day's travel is over. Make camp or push on in the travel panel.");
+  }
+
+  /** Where the party is now, [lon, lat] (a random encounter in camp goes there), or null. */
+  whereNow() {
+    const p = this.progress(), at = p ? this.#at(p.hour) : null;
+    return at ? sourceToLonLat(at[0], at[1]) : null;
+  }
+
+  /**
+   * Ask the party to roll Perception for an encounter: through Flash Token Bar 5e when it is active
+   * (its roll request, to the party's actors, with the DC), else on dnd5e a chat card with the
+   * system's Perception roll button for each player to click. The card never names the encounter.
+   * The DC goes with the rolls when players may see it (Show Perception DC, or Tenacity active), so
+   * the chat card shows success or failure and Tenacity can be spent on it.
+   */
+  async requestPerception(e) {
+    const dc = e.dc != null && showDC() ? e.dc : null;
+    const actors = this.members().filter((a) => a?.id);
+    const flash = game.modules.get("flash-rolls-5e");
+    try {
+      if (flash?.active && flash.api?.requestRoll && actors.length) {
+        return await flash.api.requestRoll({ requestType: "skill", rollKey: "prc", actorIds: actors.map((a) => a.id), dc: dc ?? undefined, sendAsRequest: true });
+      }
+    } catch (err) { console.warn("kg-realms | Flash Token Bar 5e roll request failed; asking in the chat instead:", err); }
+    if (game.system.id !== "dnd5e") return ui.notifications.info("KG Realms: ask the party for Perception rolls (no roll request for this game system).");
+    const names = actors.length ? ` (${actors.map((a) => esc(a.name)).join(", ")})` : "";
+    return ChatMessage.create({
+      content: `<p><i class="fa-solid fa-eye"></i> <b>Keep your eyes open.</b> Everyone${names}, make a Wisdom (Perception) check.</p><p>${dc != null ? `[[/skill skill=perception dc=${dc}]]` : "[[/skill perception]]"}</p>`,
+      speaker: { alias: this.state.name || "Journey" }
+    });
+  }
+
+  /** The party reaches a town with a local map: is it stopping there? */
+  async #askTown(p) {
+    const scene = this.scene, trip = journeyKey(this.state);
+    const name = p.encounter.name;
+    const stay = await foundry.applications.api.DialogV2.confirm({
+      window: { title: `${name}` },
+      content: `<p>The party reaches <b>${esc(name)}</b>.</p><p>Is the party stopping in ${esc(name)}?</p>`,
+      yes: { label: `Stop in ${name}`, icon: "fa-solid fa-door-open" }, no: { label: "Carry on", icon: "fa-solid fa-play" },
+      rejectClose: false
+    }).catch(() => null);
+    if (stay === null || stay === undefined || this.scene !== scene || !this.leader || journeyKey(this.state) !== trip) return;
+    return this.#townChoice(!!stay);
+  }
+
+  /**
+   * Stopping: travel on the realm map is paused (Stopped) until the GM resumes it, and the GM is
+   * offered to activate the town's scene. Carrying on: the journey goes on as if nothing happened.
+   */
+  async #townChoice(stay) {
+    const s = this.state, p = this.progress(), now = this.clock;
+    if (!this.leader || p?.status !== "encounter" || p.encounter?.kind !== "town") return;
+    const town = p.encounter, resumed = { ...(s.trip.resumed ?? {}), [town.id]: now };
+    const halts = stay ? [...(s.trip.halts ?? []), { from: now, to: null }] : (s.trip.halts ?? []);
+    await this.save({ trip: { ...s.trip, resumed, halts, ...(stay ? {townStop: {sceneId: town.sceneId, name: town.name, from: now, arrival: settlementArrivalMode(this.result, p.hour)}} : {}) } });
+    if (!stay) return;
+    ChatMessage.create({ content: `<p><i class="fa-solid fa-door-open"></i> The party stops in ${esc(town.name)}.</p>`, speaker: { alias: s.name || "Journey" } });
+    return this.#enterStoppedTown();
+  }
+
+  async #enterStoppedTown() {
+    if (!this.leader || this.enteringTown) return;
+    const source = this.scene, trip = journeyKey(this.state), stop = this.state.trip?.townStop;
+    const scene = stop && game.scenes.get(stop.sceneId);
+    const valid = () => this.leader && this.scene === source && journeyKey(this.state) === trip && this.progress()?.status === 'halted' && this.progress()?.since === stop?.from;
+    if (!scene || !valid()) return;
+    this.enteringTown = true;
+    try {
+      const arrival = stop.arrival ?? settlementArrivalMode(this.result, this.progress()?.hour);
+      const gate = await chooseSettlementGate(scene, {arrival});
+      if (gate && valid()) return await this.enterTown(scene, gate, valid, arrival);
+    } finally { this.enteringTown = false; }
+  }
+
+  /** The GM chooses land entries and multiple docks. A sole dock can be used directly. */
+  async enterTown(scene, gateId, valid = () => this.leader, arrival = this.state.trip?.townStop?.arrival ?? 'land') {
+    return enterSettlement(scene, gateId, {sourceScene: this.scene, globalActor: this.#get('partyActor'), valid, arrival});
+  }
+
+  async #decide(choice) {
+    const s = this.state, p = this.progress();
+    if (!p || p.status !== "decide") return;
+    if (choice.rest || choice.push) choice = { ...choice, started: this.clock };
+    const decisions = [...(s.trip.decisions ?? [])];
+    decisions[p.stop] = choice;
+    const say = (text) => ChatMessage.create({ content: `<p><i class="fa-solid fa-person-hiking"></i> ${text}</p>`, speaker: { alias: s.name || "Journey" } });
+    if (choice.push) say(`The party pushes on for 1 hour.${p.limit + 1 > 8 ? ` At the end of the hour, each character makes a DC ${10 + (p.limit + 1 - 8)} Constitution saving throw or gains a level of exhaustion.` : ""}`);
+    else say(`The party makes camp ${this.#near(this.#at(p.hour))} for ${choice.rest} hours.`);
+    await this.save({ trip: { ...s.trip, decisions }, ...(choice.rest ? { rest: choice.rest } : {}) });
+  }
+
+  draw() {
+    const layer = this.getLayer();
+    if (!layer) return;
+    const s = this.state, r = this.result, gm = game.user.isGM;
+    if (this.stops().length < 2 || (!gm && s.show === "none")) return layer.setJourney(null);
+    const ll = (p) => sourceToLonLat(p[0], p[1]);
+    const p = this.progress(), hour = p?.hour ?? 0;
+    const marks = [];
+    const progressOnly = !gm && s.show === "progress";
+    let path = [];
+    if (r) {
+      path = (progressOnly ? r.track.filter((q) => q.hour <= hour) : r.track).map((q) => ll(q.at));
+      // A camp where each night falls ashore (none while a crewed ship sails on).
+      for (const h of this.camps ?? []) {
+        if (progressOnly && h > hour) break;
+        marks.push({ at: ll(this.#at(h)), kind: h <= hour ? "done" : "camp" });
+      }
+    }
+
+    // Numbered stops, named beside them.
+    const nums = this.#numbers();
+    if (gm || s.show === "route") s.waypoints.forEach((w, i) => {
+      if (nums[i] == null) { if (gm) marks.push({ at: [w.lon, w.lat], kind: "via", selected: this.mode === "route" && this.selected === i }); return; }
+      marks.push({ at: [w.lon, w.lat], label: `${nums[i]}`, name: this.#onPlace(w) ? "" : (w.name ?? ""), kind: "stop", selected: this.mode === "route" && this.selected === i });
+    });
+    // Encounters last, so a route point never hides one; the one being dragged follows the pointer.
+    const drag = this.encDrag?.moved ? this.encDrag : null;
+    if (gm) for (const e of s.encounters ?? []) marks.push({ at: drag?.id === e.id ? [drag.lon, drag.lat] : this.#placeOf(e), name: e.name, kind: "encounter" });
+    const here = p ? this.#at(hour) : null;
+    if (here) marks.push({ at: ll(here), name: "Party", kind: "here" });
+    else if (gm && this.stops()[0]) { const f = this.stops()[0]; marks.push({ at: [f.lon, f.lat], name: "Start", kind: "here" }); }
+    if (progressOnly && here) path.push(ll(here));    layer.setJourney(path.length > 1 ? path : null, marks);
+  }
+
+  /* ------------------------------------------------------------------ panel */
+
+  render() {
+    if (!this.el) return;
+    const scroll = captureScroll(this.el);
+    // Typing in a field: hold the redraw until it loses focus (the clock redraws often). A ticked box
+    // or a pressed button is done at once: the redraw shows it.
+    // A new watch in camp: the watcher's portrait comes up for everyone (minimised or not); and the
+    // camp scene, while it runs, over the map. Both for the players even with the journey hidden
+    // from them (they roll their camp checks in the scene), and even while the panel's redraw waits.
+    const p = this.stops().length >= 2 ? this.progress() : null;
+    if (p) { this.camp.watchChanged(p); this.camp.renderScene(p); } else this.camp.renderScene(null);
+    const f = document.activeElement;
+    if (f && this.el.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && !["button", "checkbox", "radio"].includes(f.type)) {
+      // The journey moved on (camp made, the rest begun, dawn): the field is let go, the panel follows.
+      const stage = p ? `${p.status}|${p.night ?? ""}|${this.state.watch?.setup ?? ""}` : "";
+      if (stage === this.stage) { this.held = true; return; }
+      f.blur();
+    }
+    this.held = false;
+    this.stage = p ? `${p.status}|${p.night ?? ""}|${this.state.watch?.setup ?? ""}` : "";
+    const gm = game.user.isGM, s = this.state, r = this.result;
+    const rulesOnly = !gm && (s.show === "none" || this.stops().length < 2);
+    this.el.hidden = !!this.suspended;
+    this.el.classList.toggle("collapsed", this.collapsed);
+    const sts = this.stops();
+    const title = rulesOnly ? "Travel rules" : s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "Travel");
+    const parties=sceneParties(this.scene?.realScene??this.scene);
+    const partyTabs=parties.length>1?`<nav class="kgr-party-tabs" aria-label="Travel party">${parties.map(t=>`<button data-party-focus="${esc(t.actor.id)}" class="${t.actor.id===this.scene.partyId?'on':''}" ${this.leader?'':'disabled'}>${esc(t.name)}${(this.scene.realScene??this.scene).getFlag(MODULE_ID,'partyJourneys')?.[t.actor.id]?.now?.status==='encounter'?' !':''}</button>`).join('')}</nav>`:'';
+    // The shell's header (ui-shell.mjs); the party pills sit under it.
+    const head = shellHead({ icon: "fa-person-hiking", eyebrow: "Travel", title, lock: { attr: 'data-act="lock"', on: this.locked }, min: { attr: 'data-act="collapse"', on: this.collapsed } }) + partyTabs;
+    if (rulesOnly) { this.panelHtml = null; this.el.innerHTML = head + (this.collapsed ? "" : `<nav class="kgr-tabs"><button data-tab="rules" class="on">Rules</button></nav><div class="body">${this.#rulesTab()}</div>`); this.#place(); restoreScroll(this.el, scroll); return; }
+    if (this.collapsed) { this.panelHtml = null; this.el.innerHTML = head + `<p class="progress-line">${this.#statusLine()}</p>` + (gm ? this.#buttons() : ""); this.#place(); restoreScroll(this.el, scroll); return; }
+    const pace = PACES[s.pace], sp = this.speed(), base = sp.feet / 10, mph = base * pace.mph / 3;
+    const seg = (name, value, list) => `<div class="seg">${list.map(([v, l, t]) => `<button data-set="${name}" data-value="${v}" class="${v === value ? "on" : ""}" ${t ? `title="${esc(t)}"` : ""}>${l}</button>`).join("")}</div>`;
+    const R = this.ruleText();
+    const method = METHODS[s.method] ? s.method : "foot", own = method === "custom" || method === "flying";
+    // Miles a day at each pace for the party's way of travel, on open ground.
+    const daily = (k) => method === "flying" || method === "custom" ? (s.methodMph ?? 8) * s.hours : (method === "foot" ? base : 3) * PACES[k].mph / 3 * s.hours;
+    const paceSeg = seg("pace", s.pace, ["slow", "normal", "fast"].map((k) => [k, `${PACES[k].label} <small>${mi(daily(k) / s.hours)} mph</small>`, R.pace[k]]));
+    const showText = { route: "players see the route", progress: "players see progress only", none: "players see nothing" }[s.show] ?? "";
+    // The setup, folded into one line once a route exists (the Setup button opens it again).
+    const open = gm && (this.setupOpen || sts.length < 2);
+    // Someone encumbered (on foot, it slows the party): in red, with who and how.
+    const load = sp.burdened.map((x) => `${x.name}: ${x.burden}`).join(", ");
+    const how = method === "foot" ? `<span class="${sp.burden ? "burdened" : ""}" ${load ? `data-tooltip="${esc(`Encumbered: ${load}. Lighten the load to travel faster.`)}"` : ""}>speed ${sp.feet} ft${sp.who ? ` (${esc(sp.who)}, slowest${sp.burden ? `, ${esc(sp.burden)}` : ""})` : ""}</span>${sp.burdened.length && !sp.burden ? ` · <span class="burdened" data-tooltip="${esc(`Encumbered: ${load}.`)}">${esc(sp.burdened.map((x) => x.name.split(" ")[0]).join(", "))} encumbered</span>` : ""}` : own ? `${mi(s.methodMph ?? 8)} mph` : METHODS[method].offroad ? "slow pace off the roads" : "travel pace";
+    const biome=this.currentBiome(), favored=this.favoredTerrains().includes(biome?.type);
+    // The setup in one line of chips (0.65.3): how, the pace, a day's miles, the hours, the ground.
+    const chip = (text, cls = "", tip = "") => `<span class="kgr-sh-chip ${cls}" ${tip ? `data-tooltip="${esc(tip)}"` : ""}>${text}</span>`;
+    const summary = `<div class="setup-sum chips"><div class="kgr-sh-chips">${chip(esc(METHODS[method].short), "gold")}${chip(`${esc(pace.label)} pace`)}${chip(`${both(daily(s.pace))} a day`)}${chip(`${s.hours} h road · ${s.rest} h camp`)}${chip(how, sp.burden || sp.burdened.length ? "warn" : "")}${gm ? chip(esc(showText)) : ""}${biome ? chip(`${esc(biome.name)}${favored && method !== "flying" ? " · Ranger" : ""}`, favored && method !== "flying" ? "gold" : "", favored && method !== "flying" ? "Ranger: biome travel penalty halved" : "Biome here") : ""}</div>
+      ${gm && sts.length > 1 ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
+    const fr = { ...DEFAULT.fares, ...(s.fares ?? {}) };
+    const settings = open ? `${summary}
+      <div class="row"><label>Name<input type="text" name="name" value="${esc(s.name)}" placeholder="${esc(title)}"></label></div>
+      <div class="row"><label>Travelling by ${rule(R.method)}</label><div class="seg wrap">${Object.entries(METHODS).map(([k, m]) => `<button data-set="method" data-value="${k}" class="${k === method ? "on" : ""}">${esc(m.short)}</button>`).join("")}</div></div>
+      ${own ? `<div class="row"><label>${method === "flying" ? "Flying speed" : "Speed"} <input type="number" name="methodMph" min="0.5" max="30" step="0.5" value="${s.methodMph ?? 8}"> mph</label></div>` : ""}
+      <div class="hint">${ruleContent(R.methods[method])}<p>Boats are chosen per leg, between ports.</p></div>
+      <div class="row"><label>Pace ${rule(R.paceAll)}</label>${paceSeg}</div>
+      <div class="grid2">
+        <label><span>Hours on the road ${rule(R.forced)}</span><input type="number" name="hours" min="1" max="16" value="${s.hours}"></label>
+        <label>Hours in camp<input type="number" name="rest" min="1" max="72" value="${s.rest}"></label>
+      </div>
+      <div class="grid2">
+        <label><span>Ship fare, a mile ${rule(R.fares)}</span><span class="unit"><input type="number" name="fare-ship" min="0" max="100" step="0.5" value="${fr.ship}"> sp</span></label>
+        <label>Coach fare, a mile<span class="unit"><input type="number" name="fare-coach" min="0" max="100" step="1" value="${fr.coach}"> cp</span></label>
+      </div>
+      <div class="row"><label>Players see</label>${seg("show", s.show, [["route", "Route"], ["progress", "Progress"], ["none", "Nothing"]])}</div>`
+      : summary;
+    // The route sheet: each point where something changes, and the going to the next.
+    const sh = this.sheet, nums = this.#numbers();
+    const dayOf = (h) => this.#dayAt(h);
+    const node = (n, i) => {
+      const k = n.stop, first = i === 0;
+      const badge = first ? '<i class="fa-solid fa-person-hiking"></i>' : k != null ? `${nums[k - 1] ?? k}` : "";
+      // Stops can be put earlier or later in the journey; the route is worked out again in the new order.
+      const order = s.waypoints.map((w, i) => i).filter((i) => nums[i] != null), at = order.indexOf(k - 1);
+      const move = at >= 0 && order.length > 1 ? `<span class="order"><button data-act="stop-up" data-i="${k - 1}" title="Visit this stop earlier" ${at === 0 ? "disabled" : ""}><i class="fa-solid fa-arrow-up"></i> Earlier</button><button data-act="stop-down" data-i="${k - 1}" title="Visit this stop later" ${at === order.length - 1 ? "disabled" : ""}><i class="fa-solid fa-arrow-down"></i> Later</button></span>` : "";
+      // The stop's own controls on a second line, so the name and distance keep the first.
+      const isEnd = k != null && k - 1 === s.waypoints.length - 1;
+      const onward = gm && isEnd ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
+      const tools = gm && k != null && k > 0 ? `<span class="stop-tools">${onward}${move}<label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button></span>` : "";
+      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="Show on the map">${esc(n.name)}</button>${this.seaNodes?.has(i) ? '<small class="sea-available">Sea travel available</small>' : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
+    };
+    // Where the party is: a marker after the last point passed.
+    const pr = this.progress(), partyAt = pr && pr.status !== "arrived" && sh ? sh.nodes.findLastIndex((n) => n.hour <= pr.hour + 1e-6) : -1;
+    // The going to the next point. The first piece of each leg says how the leg goes (the party's
+    // way, another method, or a boat between ports) and, for a fare, its price, which the GM can
+    // haggle at any time. A leg already behind the party is not changed.
+    const seen = new Set();
+    const going = (g) => {
+      const leg = g.leg, L = r?.legs[leg], direct = s.legModes?.[leg] === "direct", first = !seen.has(leg);
+      seen.add(leg);
+      const done = pr && L && L.start + L.hours <= pr.hour + 1e-6;
+      const legMethod = s.legMethods?.[leg] ?? null, flying = (legMethod ?? s.method) === "flying";
+      const toggle = gm && first && !L?.sea && !flying && !done ? `<button data-act="way" data-i="${leg}" class="way ${direct ? "direct" : ""}" title="${direct ? "Going straight across country. Click to use roads." : "Using roads where they save time. Click to go straight across country."}">${direct ? '<i class="fa-solid fa-tree"></i> Direct' : '<i class="fa-solid fa-road"></i> Road'}</button>` : "";
+      let how = "";
+      if (gm && first && L) {
+        const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, byWater = this.legByWater(leg);
+        const opt = (value, label, on) => `<option value="${esc(value)}" ${on ? "selected" : ""}>${esc(label)}</option>`;
+        const sel = `<select name="how-${leg}" ${done ? "disabled" : ""} aria-label="How this leg goes">
+          <optgroup label="Overland">${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !L.sea && !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, !L.sea && legMethod === k)).join("")}</optgroup>
+          ${byWater ? `<optgroup label="By boat">${Object.entries(VESSELS).map(([k, x]) => opt(`v:${k}`, `${x.label}, ${x.mph} mph`, L.sea && v.key === k)).join("")}${v?.actor ? opt(`v:${v.key}`, v.label, true) : ""}</optgroup>` : ""}</select>`;
+        const fare = this.fareOf(leg);
+        const fareRow = fare ? `<span class="fare"><label>Fare <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
+        const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"} ${rule(this.ruleText().vessels)}</span>` : "";
+        const warn = L.seaFailed ? `<span class="warn-line"><i class="fa-solid fa-circle-exclamation"></i> No water joins these ports: going overland.</span>`
+          : L.autoSea ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland (water is in the way): going by boat.</span>` : "";
+        how = `<span class="leg-how">${sel}${drop}${fareRow}${warn}</span>`;
+      }
+      return `<li class="going ${g.kind}"><span class="via">${esc(g.via)}</span><span class="meta">${mi(g.miles)} mi · ${hrs(g.hours)}</span>${toggle}${how}</li>`;
+    };
+    const party = (i) => (i === partyAt && i < sh.nodes.length - 1 ? `<li class="party"><span class="dot"></span>${gm ? "Party" : "You are here"}, ${mi(this.#milesAt(pr.hour))} mi</li>` : "");
+    // Quicker ways by ship from a port: offered under it, one row for each port it could sail to.
+    const shipHint = (i) => (this.shipHints ?? []).map((h, k) => (h.a.node !== i ? "" : `<li class="ship-hint"><b><i class="fa-solid fa-ship"></i> Faster by ship from ${esc(h.a.p.name)}</b>
+      ${h.options.map((o, j) => `<div class="ship-opt"><div class="grow"><span><b>To ${esc(o.b.p.name)}</b>: ${this.#span(o.sea.hours)}, saves ${this.#span(o.land - o.sea.hours)} · ${gp(o.fare)} gp a head</span>
+        ${o.calls.length ? `<small>Calling at ${o.calls.map((c) => esc(c.p.name)).join(", ")}: the party can stop there.</small>` : ""}
+        ${o.skips.length ? `<small class="skip">Skips ${o.skips.map((c) => esc(c.name)).join(", ")} (not a port).</small>` : ""}</div>
+        <button data-act="ship-take" data-i="${k}" data-o="${j}" class="primary">Sail</button></div>`).join("")}
+      <span class="sub">Sailing ship, day and night. Stops with a stay are not sailed past.</span>
+      <span class="row"><button data-act="ship-skip" data-i="${k}" title="No ship from here: the party goes on overland (this suggestion goes away)">Stay overland</button></span></li>`)).join("");
+    // The sheet in parts, one for each stop and what lies on the way to the next. The part the party is
+    // in shows whole; the others fold to their stop, with a line saying what is folded (0.69.1).
+    const groupOf = [], starts = [];
+    if (sh) { let g = -1; sh.nodes.forEach((n, i) => { if (i === 0 || n.stop != null) { g++; starts[g] = i; } groupOf[i] = g; }); }
+    const legNow = sh ? groupOf[Math.max(0, partyAt)] ?? 0 : 0;
+    const legOpen = (g) => g === legNow || this.mode === "route" || !!this.openLegs?.has(g);
+    const foldRow = (html, i) => legOpen(groupOf[i]) ? html : html.replace(/<li class="/g, '<li class="folded ');
+    const stopRow = (n, i) => {
+      const g = groupOf[i], next = starts[g + 1], inside = (next ?? sh.nodes.length) - i - 1, hints = gm ? (this.shipHints ?? []).filter((h) => groupOf[h.a.node] === g).length : 0;
+      if (next == null || g === legNow || this.mode === "route") return node(n, i);
+      const miles = sh.nodes[next].miles - n.miles, on = !!this.openLegs?.has(g);
+      const what = [`${mi(miles)} mi to ${esc(sh.nodes[next].name)}`, inside ? `${inside} on the way` : null, hints ? `${hints} ship offer${hints === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+      return node(n, i).replace(/<\/li>$/, `<button type="button" class="link fold-toggle" data-act="leg-fold" data-g="${g}" aria-expanded="${on}"><i class="fa-solid fa-caret-${on ? "down" : "right"}"></i> ${on ? "Fold" : what}</button></li>`);
+    };
+    const list = sh ? `<ol class="stops">${sh.nodes.map((n, i) => (i === 0 || n.stop != null ? stopRow(n, i) : foldRow(node(n, i), i)) + party(i) + (gm ? foldRow(shipHint(i), i) : "") + (sh.segments[i] ? foldRow(going(sh.segments[i]), i) : "")).join("")}</ol>`
+      : sts.length ? `<ol class="stops">${sts.map((w, i) => node({ name: w.name ?? (i ? "Stop" : "Start"), at: lonLatToSource(w.lon, w.lat), miles: 0, hour: 0, stop: i }, i).replace(/<span class="meta">[^<]*<\/span>/, '<span class="meta"></span>')).join("")}</ol>` : "";
+    // Points that only shape the path: listed small, each removable.
+    const shaping = s.waypoints.map((w, i) => ({ w, i })).filter(({ i }) => nums[i] == null);
+    const shapeLabel = `Path shaped through ${shaping.length} point${shaping.length === 1 ? "" : "s"}`;
+    const via = !gm || !shaping.length ? "" : !this.shapingOpen && this.mode !== "route"
+      ? `<button data-act="shaping" class="disclose"><i class="fa-solid fa-caret-right"></i> ${shapeLabel}</button>`
+      : `<div class="via-points"><button data-act="shaping" class="disclose"><i class="fa-solid fa-caret-down"></i> ${shapeLabel}</button>${shaping.map(({ w, i }) => { const at = lonLatToSource(w.lon, w.lat); return `<span class="chip ${this.selected === i ? "sel" : ""}"><button class="link" data-act="goto" data-x="${at[0]}" data-y="${at[1]}" data-i="${i}" title="Show on the map">${esc(w.name ?? "Point")}</button><button data-act="del" data-i="${i}" title="Remove this point"><i class="fa-solid fa-xmark"></i></button></span>`; }).join("")}<button data-act="recalc" class="clear-shaping" title="Drop these points and work the route out afresh along the roads between your stops"><i class="fa-solid fa-arrows-rotate"></i> Recalculate route</button></div>`;
+    const hint = this.mode === "route" ? `<p class="hint edit"><b>Editing the route.</b> ${this.extending ? "<b>Click the map for the journey's new end.</b> " : ""}Click a place or the map to set where the journey ends; the route takes the best roads there. Click the route to add a point, then drag it to pull the path that way or onto a place to stop there. Shift+click a place to add it as a stop. Go on from here (on the last stop) keeps it and lets the next click set a new end. Right-click a stop, or select it and press Delete, to remove it. Ctrl+Z undoes. Esc to finish.</p>`
+      : this.mode === "encounter" ? `<p class="hint edit"><b>Adding encounters.</b> Click the route to place one. Drag one to move it along the route. Click one to edit it, right-click to remove it. Ctrl+Z undoes. Esc to finish.</p>`
+      : sts.length < 2 ? `<p class="hint">${gm ? "Click Edit route, then click the map to add stops." : "No route yet."}</p>` : "";
+    const ground = r ? (() => { const t = r.ground.road + r.ground.trail + r.ground.offroad + r.ground.water || 1; return [["road", r.ground.road], ["trail", r.ground.trail], ["overland", r.ground.offroad], ["by water", r.ground.water]].filter(([, v]) => v / t >= 0.01).map(([k, v]) => `${Math.round(v / t * 100)}% ${k}`).join(", "); })() : "";
+    // Nights out: in camp, aboard ship, or staying somewhere on the way.
+    const nights = r ? Math.max(0, Math.ceil(elapsedAt(this.plan, r.hours, { hoursPerDay: s.hours, rest: s.rest }) / 24 - 1e-9) - 1) : 0;
+    const fares = r ? r.legs.map((l, i) => this.fareOf(i)?.gp ?? 0).reduce((a, b) => a + b, 0) : 0, heads = this.members().length || 1;
+    const totals = r ? `<p class="totals"><b>${both(r.miles)}</b>, ${hrs(r.hours)} on the way, about ${nights} night${nights === 1 ? "" : "s"} out. ${ground}.${fares ? ` Fares ${gp(fares)} gp a head${heads > 1 ? `, ${gp(fares * heads)} gp for ${heads}` : ""}.` : ""}${gm && this.plan?.encounters.length ? ` Encounters: ${this.plan.encounters.map((e) => esc(e.name)).join(", ")}.` : ""}</p>` : "";
+    // The pinned footer (ui-shell.mjs): Undo, editing the route and its encounters, then More.
+    const foot = gm ? `<footer class="kgr-sh-foot"><button data-act="undo" title="Undo the last route change (Ctrl+Z)" aria-label="Undo" ${this.history?.length ? "" : "disabled"}><i class="fa-solid fa-rotate-left"></i></button><button data-act="edit" class="${this.mode === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> ${this.mode === "route" ? "Finish route" : "Edit route"}</button>
+      <button data-act="place-encounter" class="${this.mode === "encounter" ? "on" : ""}" ${r ? "" : "disabled"}><i class="fa-solid fa-triangle-exclamation"></i> ${this.mode === "encounter" ? "Finish adding" : "Add encounters"}</button>
+      <span class="kgr-sh-sp"></span><button data-act="more" class="more ${this.moreOpen ? "on" : ""}" aria-expanded="${this.moreOpen ? "true" : "false"}">More <i class="fa-solid fa-caret-${this.moreOpen ? "up" : "down"}"></i></button>
+      ${this.moreOpen ? `<div class="more-menu" role="menu"><button data-act="recalc" role="menuitem" ${this.stops().length > 1 ? "" : "disabled"} title="From the start through your stops to the end, along the roads"><i class="fa-solid fa-arrows-rotate"></i> Recalculate the route</button><button data-act="reset" role="menuitem" ${this.state.trip ? "" : "disabled"}><i class="fa-solid fa-backward-fast"></i> Back to the start</button><button data-act="clear" role="menuitem" class="danger"><i class="fa-solid fa-trash"></i> Clear the route</button></div>` : ""}</footer>` : "";
+    const rows = gm ? this.#encounterRows() : [];
+    const activeTab = !gm && this.tab === "enc" ? "route" : this.tab;
+    const tabs = `<nav class="kgr-tabs"><button data-tab="route" class="${activeTab === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> Route</button>${gm ? `<button data-tab="enc" class="${activeTab === "enc" ? "on" : ""}"><i class="fa-solid fa-triangle-exclamation"></i> Encounters <small>${rows.filter((x) => x.hour != null).length}</small></button>` : ""}<button data-tab="rules" class="${activeTab === "rules" ? "on" : ""}"><i class="fa-solid fa-book"></i> Rules</button></nav>`;
+    const offRoute = rows.filter((x) => x.hour == null).length;
+    const warn = offRoute ? `<p class="warn" data-tab="enc"><i class="fa-solid fa-circle-exclamation"></i> ${offRoute} encounter${offRoute === 1 ? " is" : "s are"} off the route and will not be met. See Encounters.</p>` : "";
+    // The route, as a section with its stop count (folds away; kept per panel).
+    const route = list || via || totals ? shellSection("Route", `${list}${via}${totals}`, { count: Math.max(0, sts.length - 1) ? `${sts.length - 1} stop${sts.length === 2 ? "" : "s"}` : null, open: !this.routeShut, key: "route" }) : "";
+    const failed = !gm || this.stops().length < 2 ? ""
+      : this.routeError ? `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> The route could not be worked out: ${esc(this.routeError)}. Try Recalculate the route (More); the console (F12) has the details.</p>`
+      : this.noRoute ? (() => { const w = this.noRouteWhy; return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> No way found${w ? ` from ${esc(w.from)} (on ${esc(w.fromOn)}) to ${esc(w.to)} (on ${esc(w.toOn)})` : " between these stops"}. Water is in the way and no boat route joins them${w && (w.fromOn === "water" || w.toOn === "water") ? `: ${esc(w.toOn === "water" ? w.to : w.from)} stands on water (the map's own, a shoreline's water side, or a painted biome)` : ""}. If that is wrong, check the shorelines: on the Waterways tab, Show the map's water, and look for a shoreline whose water leaks round an open end. The console (F12) has the details.</p>`; })() : "";
+    const main = gm && this.tab === "enc" ? `${hint}${this.#encounterTab(rows)}` : this.tab === "rules" ? this.#rulesTab() : `${settings}${hint}${failed}${route}${warn}`;
+    // The redraw keeps the panel where it was scrolled to.
+    const html = `${head}${tabs}<div class="body">${this.tab === "rules" ? "" : this.#nowBox()}${main}</div>${foot}`;
+    if (html !== this.panelHtml) { this.el.innerHTML = html; this.panelHtml = html; }
+    this.camp.decorate(this.el);
+    if (this.mode) editBar.update(this, this.#barState());
+    this.#place();
+    restoreScroll(this.el, scroll);
+  }
+  /**
+   * Encounters on this route in the order the party meets them (the journey's own and the map
+   * editor's within reach of the path), then the journey's own that the route no longer passes.
+   */
+  #encounterRows() {
+    const own = this.state.encounters ?? [], world = new Map(this.getEncounters().map((e) => [e.id, e]));
+    const on = (this.plan?.encounters ?? []).filter((e) => e.kind !== "town").map((e) => ({ ...e, ...(own.find((o) => o.id === e.id) ?? world.get(e.id) ?? {}), hour: e.hour, own: own.some((o) => o.id === e.id) }));
+    const seen = new Set(on.map((e) => e.id));
+    const off = own.filter((e) => !seen.has(e.id)).map((e) => ({ ...e, own: true, hour: null, at: lonLatToSource(e.lon, e.lat) }));
+    return [...on, ...off];
+  }
+
+  #encounterTab(rows) {
+    if (!rows.length) return `<p class="hint">${this.result ? "No encounters on this route. Click Add encounters below, then click the route to place one." : "Plan a route first."}</p>`;
+    const s = this.state, p = this.progress(), dayOf = (h) => this.#dayAt(h);
+    const resumed = s.trip?.resumed ?? {};
+    let n = 0;
+    const row = (e) => {
+      const state = e.hour == null ? "off" : p?.status === "encounter" && p.encounter?.id === e.id ? "now" : (resumed[e.id] != null || (p && e.hour < p.hour - 1e-6)) ? "done" : "";
+      const meta = e.hour == null ? "off the route" : e.rest ? `in camp, night ${e.rest.night ?? "?"} · ${hrs(e.rest.at ?? 0)} into the rest` : `${mi(this.#milesAt(e.hour))} mi · day ${dayOf(e.hour)}`;
+      return `<li class="enc-row ${state}" data-enc="${esc(e.id)}" data-own="${e.own ? 1 : ""}" title="Open its card">
+        <span class="n">${e.hour == null ? '<i class="fa-solid fa-circle-exclamation"></i>' : ++n}</span>
+        <span class="nm">${esc(e.name ?? "Encounter")}${e.own ? "" : ' <small title="Placed in the map editor">map</small>'}</span>
+        <span class="meta">${meta}${e.dc != null ? ` · DC ${e.dc}` : ""}</span>
+        <button data-act="goto" data-x="${e.at[0]}" data-y="${e.at[1]}" data-i="" title="Show on the map"><i class="fa-solid fa-location-crosshairs"></i></button>
+        <button data-act="enc-edit" data-id="${esc(e.id)}" data-own="${e.own ? 1 : ""}" title="Edit"><i class="fa-solid fa-pen"></i></button></li>`;
+    };
+    return `<ol class="encounters">${rows.map(row).join("")}</ol><p class="hint">Click an encounter for its card.</p>`;
+  }
+
+  /** A length of time as days and hours ("2 d 9 h"), or hours under a day. */
+  #span(h) {
+    if (h < 24) return hrs(h);
+    const d = Math.floor(h / 24), r = Math.round(h - d * 24);
+    return r ? `${d} d ${r} h` : `${d} d`;
+  }
+
+  /** The Rules tab: the travel rules at a glance, in the world's edition (the switch sets it). */
+  #rulesTab() {
+    const R = this.ruleText(), y = R.rules;
+    const row = (cells) => `<tr>${cells.map((c) => `<td>${c}</td>`).join("")}</tr>`;
+    const sec = (title, body, tag = "") => `<section class="rules-sec"><h4>${title}${tag ? ` <span class="tag">${tag}</span>` : ""}</h4>${body}</section>`;
+    return `<div class="rules-tab">
+      <div class="row"><span class="grow">${game.user.isGM ? "Rules from" : `Rules: ${esc(y)} (set by the GM)`}</span>${game.user.isGM ? `<div class="seg">${["2014", "2024"].map((k) => `<button data-act="rules" data-value="${k}" class="${y === k ? "on" : ""}">${k}</button>`).join("")}</div>` : ""}</div>
+      ${sec("Pace", `${["fast", "normal", "slow"].map((k) => ruleContent(R.pace[k])).join("")}`)}
+      ${sec("Terrain", `${ruleContent(R.terrain)}`)}
+      ${sec("Forced march", `${ruleContent(R.forced)}`)}
+      ${sec("Resting", `${ruleContent(R.rest)}${ruleContent(R.sleep)}`)}
+      ${sec("Keeping watch", `${ruleContent(R.watch)}${ruleContent(R.campRolls)}`)}
+      ${sec("Advanced watches", `${ruleContent(R.tasks)}${ruleContent(R.forage)}${ruleContent(R.conceal)}${ruleContent(R.alarm)}`, "Table rules")}
+      ${sec("Travelling by", `${Object.entries(METHODS).map(([k, m]) => `<b>${esc(m.short)}</b>: ${ruleContent(R.methods[k])}`).join("")}`)}
+      ${sec("Vessels", `<table class="rules-table"><tr><th>Vessel</th><th>mph</th><th>A day</th></tr>${Object.values(VESSELS).map((v) => row([esc(v.label), v.mph, `${mi(v.mph * (v.crewed ? 24 : 8))} mi${v.crewed ? "" : " (8 h)"}`])).join("")}</table>${ruleContent(R.sail)}`)}
+      ${sec("Waterways", `${ruleContent(R.water)}`, "Table rule")}
+      ${sec("Seasons at sea", `${ruleContent(R.seasons)}`, "Lore")}
+      ${sec("Fares", `${ruleContent(R.fares)}${this.priceScale !== 1 ? ` This world's prices: ${this.priceScale > 1 ? `×${this.priceScale}` : `÷${Math.round(1 / this.priceScale)}`} (the Prices setting).` : ""}`)}
+    </div>`;
+  }
+
+  /** One line: where the journey stands. */
+  #statusLine() {
+    const s = this.state, p = this.progress(), r = this.result;
+    if (!r) return "No route";
+    if (!p) return "Not set off";
+    const left = p.until ? hrs(Math.max(0, p.until - this.clock) / 3600) : "";
+    switch (p.status) {
+      case "moving": return `${p.sailing ? "At sea" : "On the road"}: ${mi(this.#milesAt(p.hour))} of ${mi(r.miles)} mi`;
+      case "halted": return p.away ? "Paused while the table is away" : "Stopped";
+      case "resting": return `${this.camp.phaseStatus(p)?.label ?? "Camped"}, ${left} until departure`;
+      case "stay": return `Staying, ${left} more`;
+      case "decide": return "End of the day: camp or push on";
+      // Players never learn an encounter's name (or that one is waiting): to them the party has stopped.
+      case "encounter": return p.encounter?.kind === "town" ? `Reached ${esc(p.encounter.name)}` : !game.user.isGM ? "Stopped" : `Encounter${p.encounter?.name ? `: ${esc(p.encounter.name)}` : ""}`;
+      case "arrived": return "Arrived";
+    }
+    return "";
+  }
+
+  /**
+   * The journey right now, first in the panel: the day, the distance, a progress bar with the stops on
+   * it, where the party is, and (GM) the one thing to do next as the gold button, with the other
+   * controls small beneath it. Players see the same box without the controls or encounter names.
+   */
+  #nowBox() {
+    const s = this.state, p = this.progress(), r = this.result, gm = game.user.isGM;
+    if (!r || this.stops().length < 2) return "";
+    const days = this.#dayAt(r.hours);
+    if (!p) {
+      if (!gm) return "";
+      return `<section class="nowbox"><div class="now-head"><b>Not set off</b><span class="sub">${mi(r.miles)} mi, about ${days} day${days === 1 ? "" : "s"}</span></div>
+        <p class="now-line">Start travel, then move time on (here or with the calendar) and the party travels with it.</p>
+        <div class="now-main one"><button data-act="start" class="primary"><i class="fa-solid fa-play"></i> Start travel</button></div></section>`;
+    }
+    const done = this.#milesAt(p.hour), pct = Math.max(0, Math.min(100, (done / Math.max(1e-9, r.miles)) * 100));
+    const ticks = (this.sheet?.nodes ?? []).filter((n) => n.stop > 0 && n.miles < r.miles - 1e-6).map((n) => `<i style="left:${((n.miles / r.miles) * 100).toFixed(1)}%"></i>`).join("");
+    const town = p.status === "encounter" && p.encounter?.kind === "town";
+    // Players never learn an encounter's name, or that one is waiting: to them the party has stopped.
+    const pill = { moving: [p.sailing ? "Sailing" : "On the road", ""], halted: [p.away ? "Paused: away" : "Stopped", ""], resting: [this.camp.phaseStatus(p)?.label ?? "Camped", ""], stay: ["Staying", ""], decide: ["End of the day", "ask"], arrived: ["Arrived", "ok"] }[p.status]
+      ?? (town ? [`Reached ${p.encounter.name}`, "ask"] : gm ? ["Encounter", "alert"] : ["Stopped", ""]);
+    const where = this.#near(this.#at(p.hour)), left = p.until ? hrs(Math.max(0, p.until - this.clock) / 3600) : "";
+    const next = (this.sheet?.nodes ?? []).find((n) => n.stop > 0 && n.hour > p.hour + 1e-6);
+    let line = `${where[0].toUpperCase()}${where.slice(1)}.`;
+    if (p.status === "moving") line += p.sailing ? " Aboard ship, sailing day and night." : ` ${hrs(p.dayHours ?? 0)} of ${s.hours} h on the road today.`;
+    if (left && ["resting", "stay"].includes(p.status)) line += ` ${left} more.`;
+    if (next && p.status !== "arrived") line += ` Next: <b>${esc(next.name)}</b>, day ${this.#dayAt(next.hour)}.`;
+    // Making camp and the night's watches (ui-camp.mjs): the GM's and the players' alike.
+    let body = this.camp.html(p);
+    if (gm) {
+      const ctl = this.#controls(p);
+      if (p.status === "decide") {
+        // The camp panel holds Begin the rest and Push on.
+      } else if (town) {
+        body += `<div class="now-main"><button data-act="town-stay" class="primary"><i class="fa-solid fa-door-open"></i> Stop in ${esc(p.encounter.name)}</button><button data-act="town-pass"><i class="fa-solid fa-play"></i> Carry on</button></div>`;
+      } else if (p.status === "encounter") {
+        const e = p.encounter, who = e.dc != null ? perceptionAgainst(this.party(), e.dc, s.pace) : [];
+        const col = (title, list, mark) => `<div><span class="cap">${title} (${list.length})</span>${list.map((c) => `<span class="${mark === "✓" ? "yes" : "no"}">${mark} ${esc(c.name)} ${c.adjusted}</span>`).join("") || '<span class="none">none</span>'}</div>`;
+        body += `<div class="now-enc"><b><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.name)}</b><span class="sub">${e.dc != null ? `Perception DC ${e.dc}` : "No Perception DC"}${e.notes ? ` · ${esc(e.notes)}` : ""}</span></div>
+          ${who.length ? `<div class="now-who">${col("Passive: notices", who.filter((c) => c.notices), "✓")}${col("Passive: misses", who.filter((c) => !c.notices), "✗")}</div>` : ""}
+          ${p.camp ? "" : e.dc != null && e.perception !== "passive" ? `<button data-act="ask-rolls" class="now-ask" title="The party was asked when the encounter began; ask again"><i class="fa-solid fa-dice-d20"></i> Ask for Perception rolls again</button>` : e.dc != null ? `<span class="sub">Passive Perception only: no rolls asked.</span>` : ""}
+          ${assetStrip({ actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] })}
+          <div class="now-main"><button data-act="carry-on" class="primary"><i class="fa-solid fa-play"></i> Conclude Encounter</button><button data-act="enc-card" data-id="${esc(e.id)}" data-own="${(s.encounters ?? []).some((o) => o.id === e.id) ? 1 : ""}"><i class="fa-solid fa-id-card"></i> Open card</button>${e.pinned ? `<button data-act="enc-journal" data-uuid="${esc(e.pinned)}" title="Its pinned journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}</div>`;
+      } else if (p.status === "halted") {
+        const escape = s.trip?.escape;
+        body += `${escape ? `<p class="now-line">Camp was abandoned without rest or packing. The party fled ${mi(escape.distance)} miles. The GM decides what was left behind.</p>` : ""}<div class="now-main one"><button data-act="start" class="primary"><i class="fa-solid fa-play"></i> ${escape ? `Rejoin route (${mi(escape.distance)} mi)` : "Resume travel"}</button></div>`;
+        if (s.trip?.townStop?.from === p.since) body += `<button data-act="town-enter"><i class="fa-solid fa-door-open"></i> Enter ${esc(s.trip.townStop.name)}: ${s.trip.townStop.arrival === 'sea' ? 'dock arrival' : 'choose entrance'}</button>`;
+      }
+      body += ctl;
+    }
+    return `<section class="nowbox">
+      <div class="now-head"><b>Day ${this.#dayAt(p.hour)} of ${days}</b><span class="sub">${mi(done)} of ${mi(r.miles)} mi</span><span class="pill ${pill[1]}">${esc(pill[0])}</span></div>
+      <div class="now-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-label="Journey progress"><span style="width:${pct.toFixed(1)}%"></span>${ticks}</div>
+      <p class="now-line">${line}</p>${body}</section>`;
+  }
+
+  /** The GM's smaller controls under the main button: stop (or resume), and the two skips. */
+  #controls(p) {
+    const st = p?.status, ahead = p && this.plan?.encounters.some((e) => !e.rest && e.hour > p.hour + 1e-6);
+    const blocked = !p || ["decide", "encounter", "arrived", "resting"].includes(st);
+    const stopBtn = st === "halted" || st === "arrived" ? "" : `<button data-act="stop"><i class="fa-solid fa-stop"></i> Stop travel</button>`;
+    return `<div class="now-ctl">${stopBtn}
+      <button data-act="skip-encounter" title="Move time on to the next encounter, making camp each night" ${blocked || !ahead ? "disabled" : ""}><i class="fa-solid fa-forward"></i> Next encounter</button>
+      <button data-act="skip-rest" title="Advance to the next camp decision, stopping at encounters on the way. Camp setup and sleep have not begun" ${blocked ? "disabled" : ""}><i class="fa-solid fa-campground"></i> Next camp</button></div>`;
+  }
+
+  /** Start/stop and the skips (GM), for the minimised panel. */
+  #buttons() {
+    if (!this.result) return "";
+    const p = this.progress(), st = p?.status;
+    const going = p && !["halted", "arrived"].includes(st);
+    const ahead = p && this.plan?.encounters.some((e) => !e.rest && e.hour > p.hour + 1e-6);
+    const blocked = !p || ["decide", "encounter", "arrived", "resting"].includes(st);
+    return `<div class="steps">
+      <button data-act="${going ? "stop" : "start"}" class="main" ${st === "arrived" ? "disabled" : ""}><i class="fa-solid fa-${going ? "stop" : "play"}"></i> ${going ? "Stop travel" : this.state.trip?.escape ? "Rejoin route" : p ? "Resume travel" : "Start travel"}</button>
+      <button data-act="skip-encounter" title="Move time on to the next encounter, making camp each night" ${blocked || !ahead ? "disabled" : ""}><i class="fa-solid fa-forward"></i> Next encounter</button>
+      <button data-act="skip-rest" title="Advance to the next camp decision, stopping at encounters on the way. Camp setup and sleep have not begun" ${blocked ? "disabled" : ""}><i class="fa-solid fa-campground"></i> Next camp</button>
+      <button data-act="reset" title="Back to the start" ${p ? "" : "disabled"}><i class="fa-solid fa-backward-fast"></i></button></div>`;
+  }
+
+  #near(at) {
+    if (!at) return "";
+    let best = null, bd = Infinity;
+    for (const p of this.getPlaces()) {
+      if (p.hidden || p.kind === "natural") continue;
+      const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - at[0], q[1] - at[1]);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (!best) return "in the wilds";
+    const m = bd * SOURCE_MAP.milesPerPixel;
+    return m < 1.5 ? `at ${best.name}` : `${mi(m)} mi from ${best.name}`;
+  }
+
+  /** The party's characters: the Party Token's group members, else the travelling tokens' actors, else the players' characters. */
+  members() {return [...new Map(this.partyTokens().flatMap(t=>groupMembers(t.actor)).map(a=>[a.id,a])).values()];}
+
+  /** Characters for Perception. */
+  party() { return this.members().map((a) => ({ name: a.name, passive: Number(a.system?.skills?.prc?.passive ?? 10) })); }
+
+  /** The slowest walking speed in the party: { feet, who, burden (the slowest's, else ""), burdened: [{ name, burden }] }. */
+  speed() {
+    let best = null;
+    const burdened = [];
+    for (const a of this.members()) {
+      const ft = Number(a.system?.attributes?.movement?.walk), burden = burdenOf(a);
+      if (burden) burdened.push({ name: a.name, burden });
+      if (Number.isFinite(ft) && ft > 0 && (!best || ft < best.feet)) best = { feet: ft, who: a.name, burden };
+    }
+    return { ...(best ?? { feet: 30, who: null, burden: "" }), burdened };
+  }
+
+  favoredTerrains() { return partyFavoredBiomes(this.members(), biomeTypes(this.getBiomes?.() ?? {})); }
+
+  /* ------------------------------------------------------------------ actions */
+
+  async #click(e) {
+    const focus=e.target.closest('[data-party-focus]')?.dataset.partyFocus;if(focus)return this.onPartyFocus?.(focus);
+    // The camp panel's own buttons (players use some of them too).
+    const campBtn = e.target.closest("button[data-camp]");
+    if (campBtn) return this.camp.click(campBtn);
+    const btn = e.target.closest("[data-act], [data-set], [data-tab]");
+    // A click on an encounter row (not its buttons): its card.
+    const row = !btn && e.target.closest("[data-enc]");
+    if (row) return this.showEncounterCard(row.dataset.enc, !!row.dataset.own);
+    if (!btn) return;
+    const act = btn.dataset.act, i = Number(btn.dataset.i);
+    if (btn.dataset.tab) { if (!game.user.isGM && btn.dataset.tab === "enc") return; this.tab = btn.dataset.tab; return this.render(); }
+    if (act === "collapse") return this.toggle();
+    if (act === "setup") { this.setupOpen = !this.setupOpen; return this.render(); }
+    if (act === "shaping") { this.shapingOpen = !this.shapingOpen; return this.render(); }
+    if (act === "leg-fold") { const g = Number(btn.dataset.g); this.openLegs ??= new Set(); this.openLegs.has(g) ? this.openLegs.delete(g) : this.openLegs.add(g); return this.render(); }
+    if (act === "more") { this.moreOpen = !this.moreOpen; return this.render(); }
+    if (act === "reset" || act === "clear") this.moreOpen = false;
+    if (act === "enc-card") return this.showEncounterCard(btn.dataset.id, !!btn.dataset.own);
+    // The encounter's assets in the encounter box: its journal, an actor, a picture.
+    if (act === "enc-journal") return openPinned(btn.dataset.uuid);
+    if (act === "actor-n" || act === "pic") {
+      const e = this.progress()?.encounter;
+      if (!e) return;
+      if (act === "pic") return new foundry.applications.apps.ImagePopout({ src: e.images?.[i], window: { title: e.name } }).render(true);
+      return openDoc((e.actors ?? (e.actor ? [e.actor] : []))[i]);
+    }
+    if (act === "lock") { await this.#set("travelHudLocked", !this.locked); return this.render(); }
+    if (act === "undo") return this.undo();
+    if (act === "goto") { const [lon, lat] = sourceToLonLat(Number(btn.dataset.x), Number(btn.dataset.y)), c = latLonToScene(this.getLayer().frame, lat, lon); canvas.animatePan({ x: c.x, y: c.y, duration: 400 }); if (btn.dataset.i !== "") { this.selected = i; this.draw(); this.render(); } return; }
+    if (!game.user.isGM) return;
+    if (!this.leader) return ui.notifications.info(`KG Realms: ${primaryGM()?.name ?? "the primary GM"} controls the journey.`);
+    const s = this.state, now = this.clock;
+    if (btn.dataset.set) return this.save({ [btn.dataset.set]: btn.dataset.value });
+    if (act === "edit") { this.extending = false; this.#setMode(this.mode === "route" ? null : "route"); return this.render(); }
+    // The end becomes a kept stop at the next click on the map, which sets the new end.
+    if (act === "extend") { this.extending = !this.extending; if (this.extending && this.mode !== "route") this.#setMode("route"); return this.render(); }
+    if (act === "place-encounter") { this.#setMode(this.mode === "encounter" ? null : "encounter"); return this.render(); }
+    if (act === "del") return this.#removeStop(i);
+    if (act === "stop-up" || act === "stop-down") return this.#moveStop(i, act === "stop-up" ? -1 : 1);
+    if (act === "recalc") {
+      // A clean route: the start, the numbered stops (with their stays) and the end, worked out afresh
+      // along the roads. Path shaping points and Direct legs are dropped.
+      this.moreOpen = false;
+      const nums = this.#numbers(), keep = s.waypoints.map((w, k) => k).filter((k) => nums[k] != null);
+      const dropped = s.waypoints.length - keep.length, direct = (s.legModes ?? []).filter((m) => m === "direct").length;
+      if (dropped || direct) {
+        const ok = await foundry.applications.api.DialogV2.confirm({
+          window: { title: "Recalculate route" },
+          content: `<p>Work the route out afresh from the start through your ${keep.length} stop${keep.length === 1 ? "" : "s"}, along the roads?</p><p>${[dropped ? `${dropped} path shaping point${dropped === 1 ? "" : "s"}` : "", direct ? `${direct} Direct leg${direct === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} will be dropped. Stops, stays and encounters stay.</p>`,
+          rejectClose: false
+        });
+        if (!ok) return this.render();
+      }
+      this.selected = null;
+      // Sea legs stay at sea; methods, ships and haggled fares stay with their stops.
+      const kept = (key) => keep.map((k) => s[key]?.[k] ?? null);
+      return this.save({ waypoints: keep.map((k) => s.waypoints[k]), stays: keep.map((k) => s.stays[k] ?? 0), legModes: keep.map((k) => (s.legModes?.[k] === "sea" ? "sea" : null)), legMethods: kept("legMethods"), legVessels: kept("legVessels"), legFares: kept("legFares") });
+    }
+    if (act === "rules") return this.#set("travelRules", btn.dataset.value);
+    if (act === "ship-take") { const h = this.shipHints?.[i], o = h?.options[Number(btn.dataset.o)]; return o && this.takeShip(h, o); }
+    if (act === "ship-skip") { const h = this.shipHints?.[i]; return h && this.save({ shipSkip: [...(s.shipSkip ?? []), ...h.options.map((o) => `${h.a.p.id}|${o.b.p.id}`)] }); }
+    if (act === "fare-reset") { const legFares = [...(s.legFares ?? [])]; legFares[i] = null; return this.save({ legFares }, { undoable: false }); }
+    if (act === "ask-rolls") { const p = this.progress(); if (p?.status === "encounter" && p.encounter) return this.requestPerception(p.encounter); return; }
+    if (act === "enc-edit") return this.showEncounterCard(btn.dataset.id, !!btn.dataset.own, { edit: true });
+    if (act === "way") {
+      const legModes = [...(s.legModes ?? [])];
+      legModes[i] = legModes[i] === "direct" ? null : "direct";
+      return this.save({ legModes });
+    }
+    if (act === "clear") {
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Clear route" }, content: "<p>Clear this route, its encounters and its progress?</p>", rejectClose: false });
+      if (!ok) return;
+      this.#setMode(null);
+      this.selected = null;
+      if (s.trip && s.now?.status !== "arrived") await this.#log("The route is cleared; the journey ends here.", { close: true, at: now });
+      await this.save({ waypoints: [], ...Object.fromEntries(LEG_KEYS.map((k) => [k, []])), encounters: [], name: "", start: null, trip: null, now: null, shipSkip: [] });
+      return;
+    }
+    if (act === "start") {
+      if(!this.partyTokens().length)return ui.notifications.warn("KG Realms: place or designate a group actor party token before starting travel.");
+      if (!s.trip) {
+        // A new trip's nights count from 1 again: the last trip's camps (made, their checks, the
+        // watcher's check, the camp scene) go; the party's watch order, hours, tasks and scenes stay.
+        const w = s.watch ?? {};
+        await this.save({ start: this.#partyStop(), trip: { departed: now, decisions: [], resumed: {}, halts: [], walking: { ...walkingHistory(null, this.speed().feet), favored: this.favoredTerrains() }, biomeTravel:freezeBiomeTravel(this.getBiomes?.()??{}) }, now: null, watch: { ...w, setup: null, campId: null, checks: null, asks: {}, scene: null, encWatch: {} } });
+        return this.#log(null);
+      }
+      if (s.trip.escape) await this.advanceClock(s.trip.escape.returnSeconds ?? 0);
+      const resumedAt = this.clock, halts = (this.state.trip.halts ?? []).map((h) => (h.to == null ? { ...h, to: resumedAt } : h));
+      this.motionDuration = 8000;
+      try { await this.save({ trip: { ...this.state.trip, escape: null, townStop: null, halts } }); await this.tick({ force: true }); }
+      finally { this.motionDuration = null; }
+      return this.#log(`Travel resumed ${this.#near(this.#at(this.progress()?.hour ?? 0))}.`, { at: resumedAt });
+    }
+    if (act === "stop") return this.save({ trip: { ...s.trip, halts: [...(s.trip.halts ?? []), { from: now, to: null }] } });
+    if (act === "reset") {
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Back to the start" }, content: "<p>Put the party back at the start? Game time is not changed.</p>", rejectClose: false });
+      if (!ok) return;
+      const start = s.start;
+      await this.#log("The journey is called off; the party goes back to the start.", { close: true, at: now });
+      await this.save({ trip: null, start: null, now: null });
+      if (start) await this.#moveTo(lonLatToSource(start.lon, start.lat));
+      return;
+    }
+    if (act === "town-stay" || act === "town-pass") return this.#townChoice(act === "town-stay");
+    if (act === 'town-enter') return this.#enterStoppedTown();
+    if (act === "camp") {
+      // The camp's encounters take their hour from the watch set for them (or wait on the watch
+      // dice), the rest begins, and the camp scene comes up for everyone.
+      const p = this.progress();
+      if (p?.status !== "decide") return;
+      await this.camp.settleEncounters(p.night);
+      await this.#decide({ rest: this.camp.plan().rest });
+      return this.camp.openScene(p.night);
+    }
+    if (act === "push") {
+      if (!this.leader || this.pushing) return;
+      const p = this.progress();
+      if (p?.status !== "decide") return;
+      this.pushing = true;
+      try {
+        await this.#decide({ push: true });
+        // A push is one travel hour. Stop the clock at an encounter or the route's end if either
+        // happens first, rather than moving past it before the GM can resolve it.
+        const next = this.progress(Infinity);
+        const dt = pushedHourAdvance(this.clock, p.since, next);
+        if (dt > 0) await this.advanceClock(dt);
+      } finally { this.pushing = false; }
+      return;
+    }
+    if (act === "carry-on") {
+      const p = this.progress();
+      if (p?.status !== "encounter") return;
+      if (p.camp) return this.camp.click({ dataset: { camp: "scene-carry" } });
+      return this.save({ trip: { ...s.trip, resumed: { ...(s.trip.resumed ?? {}), [p.encounter.id]: now } } });
+    }
+    if (act === "skip-rest" || act === "skip-encounter") {
+      if (this.state.trip?.escape) return ui.notifications.info("KG Realms: rejoin the route before fast-forwarding, or plan a new journey from the party's position.");
+      if (this.progress()?.status === "resting" || this.progress()?.camp) return;
+      const enc = act === "skip-encounter";
+      // Stopped: set off again first, from now.
+      if (this.progress()?.status === "halted") await this.save({ trip: { ...s.trip, halts: (s.trip.halts ?? []).map((h) => (h.to == null ? { ...h, to: now } : h)) } });
+      // Camp encounters are left to the camp scene's watches: Next encounter goes to the next on the road.
+      const p = this.progress(Infinity, enc ? { autoRest: s.rest, skipCamp: true } : {});
+      if (!p) return;
+      if (p.made?.length) {
+        const t = this.state.trip;
+        await this.save({ trip: { ...t, decisions: [...(t.decisions ?? []), ...p.made] } });
+        ChatMessage.create({ content: `<p><i class="fa-solid fa-campground"></i> The party makes camp ${p.made.length === 1 ? "one night" : `${p.made.length} nights`} on the way.</p>`, speaker: { alias: s.name || "Journey" } });
+        this.#log(`Time moves on: the party makes camp ${p.made.length === 1 ? "one night" : `${p.made.length} nights`} on the way.`, { at: now });
+      }
+      const dt = p.since - now;
+      if (dt > 0) await this.advanceClock(Math.ceil(dt));
+    }
+  }
+
+  async #drop(e) {
+    const zone = e.target.closest?.(".ship-drop");
+    if (!zone || !game.user.isGM) return;
+    e.preventDefault();
+    zone.classList.remove("over");
+    let data;
+    try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    const actor = data?.type === "Actor" && data.uuid ? await fromUuid(data.uuid) : null;
+    if (!actor) return ui.notifications.warn("KG Realms: drop an actor (a ship) here.");
+    const v = TravelHud.vehicleVessel(actor);
+    if (!v) return ui.notifications.warn(`KG Realms: ${actor.name} is not a water vehicle, so it cannot sail this leg.`);
+    const i = Number(zone.dataset.leg), s = this.state, legVessels = [...(s.legVessels ?? [])];
+    while (legVessels.length <= i) legVessels.push(null);
+    legVessels[i] = v.key;
+    await this.save({ legVessels });
+    ui.notifications.info(`KG Realms: sailing on ${actor.name}, ${mi(v.mph)} mph.`);
+  }
+
+  async #change(e) {
+    const t = e.target;
+    if (t.dataset?.camp) return this.camp.change(t);
+    if (!this.leader || !t.name) return;
+    if (t.name.startsWith("stay-")) {
+      const stays = [...this.state.stays];
+      stays[Number(t.name.slice(5))] = Math.max(0, Number(t.value) || 0);
+      return this.save({ stays });
+    }
+    if (t.name === "rest") return this.save({ rest: Math.max(16, Math.min(72, Number(t.value) || 16)) });
+    const s = this.state;
+    if (t.name === "methodMph") return this.save({ methodMph: Math.max(0.5, Math.min(30, Number(t.value) || 8)) });
+    if (t.name === "fare-ship" || t.name === "fare-coach") return this.save({ fares: { ...DEFAULT.fares, ...(s.fares ?? {}), [t.name.slice(5)]: Math.max(0, Number(t.value) || 0) } });
+    // A leg's price, haggled: kept until reset, whenever it is changed (before or during the journey).
+    if (t.name.startsWith("fare-")) {
+      const i = Number(t.name.slice(5)), legFares = [...(s.legFares ?? [])], v = t.value === "" ? null : Math.max(0, Number(t.value) || 0);
+      legFares[i] = v;
+      return this.save({ legFares }, { undoable: false });
+    }
+    // How a leg goes: the party's way, another method, or a boat (between ports).
+    if (t.name.startsWith("how-")) {
+      const i = Number(t.name.slice(4)), v = t.value;
+      const set = (key, val) => { const a = [...(s[key] ?? [])]; while (a.length <= i) a.push(null); a[i] = val; return a; };
+      if (v.startsWith("v:")) return this.save({ legModes: set("legModes", "sea"), legVessels: set("legVessels", v.slice(2)) });
+      return this.save({ legModes: set("legModes", s.legModes?.[i] === "sea" ? "road" : s.legModes?.[i] ?? null), legMethods: set("legMethods", v.startsWith("m:") ? v.slice(2) : null) });
+    }
+    const v = t.type === "number" ? Math.max(1, Math.min(16, Number(t.value) || 8)) : t.value;
+    await this.save({ [t.name]: v });
+  }
+
+  /** The tokens that travel: a token named "Party Token" if there is one, else every player-owned token. */
+  partyTokens(scene = this.scene) {
+    const grid = scene?.grid?.size ?? 100;
+    const all = scene === canvas.scene ? (canvas.tokens?.placeables ?? []) : Array.from(scene?.tokens ?? []).map((doc) => ({ id: doc.id, document: doc, actor: doc.actor, w: doc.width * grid, h: doc.height * grid, center: { x: doc.x + doc.width * grid / 2, y: doc.y + doc.height * grid / 2 } }));
+    return selectPartyTokens(scene, all, this.#get("partyActor"));
+  }
+
+  /** The party's position as a stop, or null. */
+  #partyStop() {
+    const t = this.partyTokens()[0], layer = this.getLayer();
+    if (!t || !layer?.frame) return null;
+    const d=t.document,g=this.scene?.grid?.size??100;
+    const center=Number.isFinite(d?.x)&&Number.isFinite(d?.y)?{x:d.x+(d.width??1)*g/2,y:d.y+(d.height??1)*g/2}:t.center;
+    const { lon, lat } = sceneToLatLon(layer.frame, center);
+    return { lon, lat, name: this.placeName(lon, lat) };
+  }
+
+  /**
+   * What to call a spot: a settlement within 5 miles (the party is in town), else the nearest
+   * other place within 60 miles ("near ..."), else Wilderness.
+   */
+  placeName(lon, lat) {
+    const here = lonLatToSource(lon, lat), mpp = SOURCE_MAP.milesPerPixel;
+    let town = null, td = 5, other = null, od = 60;
+    for (const p of this.getPlaces()) {
+      if (p.hidden || (p.unnamed && !p.edited)) continue;
+      const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - here[0], q[1] - here[1]) * mpp;
+      if (p.kind === "settlement") { if (d < td) { td = d; town = p; } }
+      else if (d < od && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class)) { od = d; other = p; }
+    }
+    return town ? town.name : other ? `near ${other.name}` : "Wilderness";
+  }
+
+  /** Move the party's tokens, keeping their spread, to a sheet point. Skips moves under a few pixels. */
+  async #moveTo(at, { scene = this.scene, duration = 800 } = {}) {
+    const frame = this.getLayer()?.frame;
+    if (!frame || !at) return;
+    const tokens = this.partyTokens(scene).map((t) => {
+      const doc = t.document, grid = scene.grid.size;
+      // Token's id/w/h are prototype getters, so spreading the placeable loses them.
+      return { id: doc.id, w: doc.width * grid, h: doc.height * grid, center: { x: doc.x + doc.width * grid / 2, y: doc.y + doc.height * grid / 2 } };
+    });
+    if (!tokens.length) return;
+    const [lon, lat] = sourceToLonLat(at[0], at[1]), c = latLonToScene(frame, lat, lon);
+    const cx = tokens.reduce((s, t) => s + t.center.x, 0) / tokens.length, cy = tokens.reduce((s, t) => s + t.center.y, 0) / tokens.length;
+    if (Math.hypot(c.x - cx, c.y - cy) < 2) return;
+    const g = scene.grid.size;
+    const updates = tokens.map((t, i) => {
+      let dx = t.center.x - cx, dy = t.center.y - cy;
+      const d = Math.hypot(dx, dy), cap = g * 1.5;
+      if (d > cap) { dx *= cap / d; dy *= cap / d; }
+      else if (d < 1 && tokens.length > 1) { dx = Math.cos(i * 2.4) * g * 0.6; dy = Math.sin(i * 2.4) * g * 0.6; }
+      return { _id: t.id, x: c.x + dx - t.w / 2, y: c.y + dy - t.h / 2 };
+    });
+    await scene.updateEmbeddedDocuments("Token", updates, { animation: { duration, easing: null }, kgRealmsTravel: true });
+  }
+
+  /* ------------------------------------------------------------------ editing on the map */
+
+  #setMode(mode) {
+    if (mode && !game.user.isGM) return;
+    const was = !!this.mode;
+    this.mode = mode;
+    this.drag = null;
+    this.encDrag = null;
+    if (mode) this.onEditStart?.();
+    if (mode && !was) {
+      this.offCanvas = onCanvas(this.handlers);
+      this.onKey = (e) => this.#key(e);
+      document.addEventListener("keydown", this.onKey, { capture: true });
+    }
+    if (!mode && was) {
+      this.offCanvas?.(); this.offCanvas = null;
+      document.removeEventListener("keydown", this.onKey, { capture: true });
+      this.selected = null;
+      this.draw();
+    }
+    if (mode) editBar.show(this, this.#barState());
+    else editBar.hide(this);
+  }
+
+  /** The editing bar while editing the route or adding encounters to it. */
+  #barState() {
+    const s = this.state, sts = this.stops(), route = this.mode === "route";
+    const title = s.name || (sts.length > 1 ? `${sts[0].name ?? "Start"} to ${sts.at(-1).name ?? "End"}` : "New route");
+    const sel = route && this.selected != null ? s.waypoints[this.selected] : null;
+    return {
+      title: route ? "Editing the route" : "Adding encounters", mode: title, undo: true,
+      hint: route
+        ? (sel ? `${sel.name ?? "Stop"} selected · drag it to move · Del removes it` : "Click the map to add a stop · click the route to add one there · drag a stop to move it")
+        : "Click the route to place an encounter · drag one to move it · right-click removes it",
+      esc: route ? "finishes the route" : "finishes adding",
+      tip: route ? (sel ? "" : "Click to add a stop") : "Click the route to place one", crosshair: !sel,
+      done: route ? "Finish route" : "Finish adding",
+      onDone: () => { this.#setMode(null); this.render(); }
+    };
+  }
+
+  /** Delete removes the selected stop; Ctrl+Z undoes a route edit; Esc finishes editing. Typing in a field is left alone. */
+  #key(e) {
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); this.#setMode(null); return this.render(); }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyZ") { e.preventDefault(); e.stopImmediatePropagation(); return this.undo(); }
+    if ((e.key === "Delete" || e.key === "Backspace") && this.mode === "route" && this.selected != null) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      this.#removeStop(this.selected);
+    }
+  }
+
+  /**
+   * Visit stop i (a waypoint index) one stop earlier (-1) or later (1): it trades places with that
+   * stop, with its stay. Each stop owns the points that shape the leg into it; the legs whose ends
+   * change (into the two stops, and into the stop after them) lose their shaping points and go back
+   * to roads, so the route is worked out afresh there instead of threading the old legs' points.
+   */
+  async #moveStop(i, dir) {
+    const s = this.state, w = s.waypoints, nums = this.#numbers();
+    const groups = [];
+    let shaping = [];
+    w.forEach((p, k) => { if (nums[k] == null) shaping.push(k); else { groups.push({ stop: k, shaping }); shaping = []; } });
+    const at = groups.findIndex((g) => g.stop === i), to = at + dir;
+    if (at < 0 || to < 0 || to >= groups.length) return;
+    [groups[at], groups[to]] = [groups[to], groups[at]];
+    const lo = Math.min(at, to), hi = Math.max(at, to), changed = new Set([lo, hi, hi + 1]);
+    const waypoints = [], lists = Object.fromEntries(LEG_KEYS.map((k) => [k, []]));
+    // A stop's own stay and method go with it; a leg whose ends changed goes by road again.
+    const take = (k, fresh) => { waypoints.push(w[k]); for (const key of LEG_KEYS) lists[key].push(fresh && ["legModes", "legVessels", "legFares"].includes(key) ? null : (s[key]?.[k] ?? (key === "stays" ? 0 : null))); };
+    groups.forEach((g, n) => {
+      if (!changed.has(n)) for (const k of g.shaping) take(k, false);
+      take(g.stop, changed.has(n));
+    });
+    for (const k of shaping) take(k, false);
+    this.selected = waypoints.indexOf(w[i]);
+    await this.save({ waypoints, ...lists });
+  }
+
+  async #removeStop(i) {
+    const s = this.state;
+    if (!(i >= 0 && i < s.waypoints.length)) return;
+    const cut = (a) => { const x = [...(a ?? [])]; x.splice(i, 1); return x; };
+    this.selected = null;
+    await this.save({ waypoints: cut(s.waypoints), ...Object.fromEntries(LEG_KEYS.map((k) => [k, cut(s[k])])) });
+  }
+
+  #global(e) { const r = canvas.app.view.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  #stop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+
+  #hit(list, g, px = HIT_PX) {
+    const layer = this.getLayer();
+    let bi = -1, bd = px;
+    list.forEach((w, i) => { const s = layer.toScreen(w.lon, w.lat), d = Math.hypot(s[0] - g[0], s[1] - g[1]); if (d < bd) { bd = d; bi = i; } });
+    return bi;
+  }
+  /** The encounter under a screen point (the journey's own or the map editor's), or null. */
+  #encounterAt(g, px = 14) {
+    const layer = this.getLayer(), own = this.state.encounters ?? [];
+    let best = null, bd = px;
+    for (const e of [...own.map((x) => ({ ...x, own: true })), ...this.getEncounters().map((x) => ({ ...x, own: false }))]) {
+      const [lon, lat] = e.own ? this.#placeOf(e) : [e.lon, e.lat];
+      const s = layer.toScreen(lon, lat), d = Math.hypot(s[0] - g[0], s[1] - g[1]);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  /** A stop at a screen point, snapped to a place close by, else onto a road close by. */
+  #snap(g) {
+    const layer = this.getLayer();
+    // A place whose name or marker is drawn under the pointer (clicking its name picks it).
+    const drawn = layer.placeAt?.(canvas.stage.worldTransform.applyInverse({ x: g[0], y: g[1] }), 6);
+    const named = typeof drawn === "string" && !drawn.includes(":") ? this.getPlaces().find((q) => q.id === drawn && !q.hidden) : null;
+    if (named) return { lon: named.lon, lat: named.lat, name: named.name };
+    let best = null, bd = SNAP_PX;
+    for (const p of this.getPlaces()) {
+      if (p.hidden) continue;
+      const s = layer.toScreen(p.lon, p.lat), d = Math.hypot(s[0] - g[0], s[1] - g[1]);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best) return { lon: best.lon, lat: best.lat, name: best.name };
+    let at = layer.fromScreen(...g), rd = SNAP_PX;
+    for (const f of this.getRoutes().features) {
+      const pts = f.geometry.coordinates.map((c) => layer.toScreen(...c));
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i], dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy || 1e-9;
+        const t = Math.max(0, Math.min(1, ((g[0] - ax) * dx + (g[1] - ay) * dy) / l)), qx = ax + t * dx, qy = ay + t * dy, d = Math.hypot(qx - g[0], qy - g[1]);
+        if (d < rd) { rd = d; at = layer.fromScreen(qx, qy); }
+      }
+    }
+    return { lon: at[0], lat: at[1], name: this.placeName(at[0], at[1]) };
+  }
+
+  /** Where one of the journey's encounters sits: at its night's camp (wherever that has moved), else where it was put. */
+  #placeOf(e) {
+    const hour = e.rest ? this.camps?.[(e.rest.night ?? 0) - 1] : null, p = hour != null ? this.#at(hour) : null;
+    return p ? sourceToLonLat(p[0], p[1]) : [e.lon, e.lat];
+  }
+
+  /** The camp (where a night's rest falls) nearest a screen point, within `px`: { night, hour, at: [lon, lat] }, or null. */
+  #campAt(g, px = 18) {
+    const layer = this.getLayer();
+    let best = null, bd = px;
+    (this.camps ?? []).forEach((hour, k) => {
+      const p = this.#at(hour);
+      if (!p) return;
+      const ll = sourceToLonLat(p[0], p[1]), sc = layer.toScreen(ll[0], ll[1]), d = Math.hypot(sc[0] - g[0], sc[1] - g[1]);
+      if (d < bd) { bd = d; best = { night: k + 1, hour, at: ll }; }
+    });
+    return best;
+  }
+
+  /**
+   * The journey's encounters set in camp, at their night's camp (camps: travel hours, night 1 first).
+   * One set before nights were counted goes to the camp nearest where it sits.
+   */
+  #withCamps(encounters, camps) {
+    const own = new Map((this.state.encounters ?? []).map((e) => [e.id, e]));
+    return encounters.map((e) => {
+      const o = own.get(e.id);
+      if (!o?.rest || !camps.length) return e;
+      const k = o.rest.night != null ? Math.min(camps.length, o.rest.night) - 1 : camps.reduce((b, c, i) => (Math.abs(c - e.hour) < Math.abs(camps[b] - e.hour) ? i : b), 0);
+      return { ...e, hour: camps[k], rest: { ...o.rest, night: o.rest.night ?? k + 1 } };
+    }).sort((a, b) => a.hour - b.hour);
+  }
+
+  /** The route point nearest a screen point, within `px`: { at: [lon, lat], leg }, or null. */
+  #onRoute(g, px = 20) {
+    const layer = this.getLayer(), track = this.result?.track ?? [];
+    let best = null, bd = px;
+    for (const q of track) {
+      const ll = sourceToLonLat(q.at[0], q.at[1]), s = layer.toScreen(ll[0], ll[1]), d = Math.hypot(s[0] - g[0], s[1] - g[1]);
+      if (d < bd) { bd = d; best = { at: ll, leg: q.leg }; }
+    }
+    return best;
+  }
+
+  async #down(e) {
+    if (!this.mode || canvas.tokens?.hover) return;
+    const g = this.#global(e), s = this.state;
+    if (this.mode === "encounter") {
+      const list = s.encounters ?? [], hit = this.#encounterAt(g);
+      // A right-click removes (on release, unmoved: a right-drag pans the map).
+      if (e.button === 2) {
+        if (hit?.own) this.right.down(e, () => this.save({ encounters: (this.state.encounters ?? []).filter((x) => x.id !== hit.id) }));
+        else if (hit) this.right.down(e, () => ui.notifications.info("KG Realms: that encounter was placed in the map editor; remove it there."));
+        return;
+      }
+      if (e.button !== 0) return;
+      this.#stop(e);
+      // On an encounter: drag to move it (it snaps onto the route), or click for its settings.
+      if (hit) { this.encDrag = { id: hit.id, own: hit.own, start: g, moved: false, lon: hit.lon, lat: hit.lat }; return; }
+      const spot = this.#onRoute(g);
+      if (!spot) return ui.notifications.info("Click on the route to place an encounter.");
+      // A new encounter, then its card to fill in.
+      const id = foundry.utils.randomID();
+      await this.save({ encounters: [...list, { id, lon: spot.at[0], lat: spot.at[1], name: "Encounter", dc: null, radius: ENCOUNTER_MI }] });
+      this.openEncounter?.(id, true, { edit: true });
+      return;
+    }
+    // Route: a stop under the pointer is picked up (and selected); on the route line, a new stop
+    // goes into that leg; anywhere else, a new stop goes on the end. Encounters are left alone.
+    const i = this.#hit(s.waypoints, g, 16);
+    if (i < 0 && e.button === 0 && this.#encounterAt(g, 10)) { this.#stop(e); return ui.notifications.info("KG Realms: to move an encounter, use Add encounters and drag it."); }
+    if (e.button === 2) { if (i >= 0) this.right.down(e, () => this.#removeStop(i)); return; }
+    if (e.button !== 0) return;
+    this.#stop(e);
+    if (i >= 0) { this.selected = i; this.drag = { i, moved: false }; this.draw(); this.render(); return; }
+    const hit = this.#onRoute(g, 10);
+    if (hit) {
+      const at = hit.leg, cut = (a, v) => { const x = [...(a ?? [])]; while (x.length < at) x.push(null); x.splice(at, 0, v); return x; };
+      this.selected = at;
+      this.drag = { i: at, moved: false };
+      // The new stop splits a leg: both halves keep its way of going (a sea leg stays at sea).
+      await this.save({ waypoints: cut(s.waypoints, this.#snap(g)), stays: cut(s.stays, 0), legModes: cut(s.legModes, s.legModes?.[at] ?? null), legMethods: cut(s.legMethods, s.legMethods?.[at] ?? null), legVessels: cut(s.legVessels, s.legVessels?.[at] ?? null), legFares: cut(s.legFares, null) });
+      return;
+    }
+    const spot = this.#snap(g), w = [...s.waypoints];
+    if (e.shiftKey && w.length && this.#onPlace(spot)) return this.#insertStop(spot);
+    if (!w.length || this.extending) {
+      if (this.extending && w.length) w[w.length - 1] = { ...w[w.length - 1], stop: true };
+      this.extending = false;
+      this.selected = w.length;
+      return this.save({ waypoints: [...w, spot] });
+    }
+    // The end moves here (stops in between stay); its stay goes with it.
+    this.selected = w.length - 1;
+    w[w.length - 1] = spot;
+    await this.save({ waypoints: w });
+  }
+
+  /** A place put into the journey as a stop, in the leg where it adds the least way. */
+  async #insertStop(spot) {
+    const s = this.state, sts = this.stops().map((w) => lonLatToSource(w.lon, w.lat)), p = lonLatToSource(spot.lon, spot.lat);
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    let at = 0, best = Infinity;
+    for (let i = 0; i < sts.length - 1; i++) { const extra = d(sts[i], p) + d(p, sts[i + 1]) - d(sts[i], sts[i + 1]); if (extra < best) { best = extra; at = i; } }
+    // stops() starts with the party: leg i ends at waypoint i.
+    const cut = (a, v) => { const x = [...(a ?? [])]; while (x.length < at) x.push(null); x.splice(at, 0, v); return x; };
+    this.selected = at;
+    await this.save({ waypoints: cut(s.waypoints, spot), stays: cut(s.stays, 0), legModes: cut(s.legModes, s.legModes?.[at] ?? null), legMethods: cut(s.legMethods, s.legMethods?.[at] ?? null), legVessels: cut(s.legVessels, s.legVessels?.[at] ?? null), legFares: cut(s.legFares, null) });
+  }
+  #move(e) {
+    if (this.mode === "encounter" && this.encDrag) {
+      this.#stop(e);
+      const g = this.#global(e), d = this.encDrag;
+      if (!d.moved && Math.hypot(g[0] - d.start[0], g[1] - d.start[1]) < 4) return;
+      d.moved = true;
+      // The journey's own encounters snap to a camp close by (an encounter in camp), else onto the route.
+      const camp = d.own ? this.#campAt(g) : null;
+      const on = camp ? null : this.#onRoute(g, 40), at = camp ? camp.at : on ? on.at : this.getLayer().fromScreen(...g);
+      d.camp = camp;
+      [d.lon, d.lat] = at;
+      if (d.own) this.draw();
+      else { const layer = this.getLayer(), all = layer.encounters ?? {}; if (all[d.id]) layer.setEncounters({ ...all, [d.id]: { ...all[d.id], lon: d.lon, lat: d.lat } }); }
+      return;
+    }
+    if (this.mode !== "route" || !this.drag) return;
+    this.#stop(e);
+    this.drag.moved = true;
+    this.drag.to = this.#snap(this.#global(e));
+    const w = [...this.state.waypoints]; w[this.drag.i] = this.drag.to;
+    this.getLayer()?.setJourney(null, w.map((p, k) => ({ at: [p.lon, p.lat], label: `${k + 1}`, name: p.name ?? "", kind: "stop", selected: k === this.drag.i })));
+  }
+
+  async #up(e) {
+    if (e.button === 2) return this.right.up(e);
+    if (this.mode === "encounter" && this.encDrag) {
+      this.#stop(e);
+      const d = this.encDrag;
+      this.encDrag = null;
+      if (!d.moved) return this.openEncounter?.(d.id, d.own, { edit: true });
+      if (d.own) {
+        // Dropped on a camp: the GM says which watch it comes in (or at random, with the watch
+        // dice), and an hour into the night for when that watch never happens (4, halfway, unless
+        // it had one). Dropped anywhere else: met on the way.
+        let rest = null, pick = null;
+        if (d.camp) {
+          const len = this.state.rest, window = Math.min(8, len), lead = len - window, pl = this.camp.plan(), members = this.camp.members();
+          const old = (this.state.encounters ?? []).find((x) => x.id === d.id)?.rest, was = this.state.watch?.encWatch?.[d.id];
+          const name = (id) => members.find((m) => m.id === id)?.name ?? "?";
+          const opts = [...pl.watches.map((w, i) => [String(i), `Watch ${i + 1}, ${name(w.id)}${w.with?.length ? ` and ${w.with.length} more` : ""}`]), ["random", "At random (the watch dice)"]];
+          const fallback = old?.at != null ? Math.max(0, Math.min(window, old.at - lead)) : window / 2;
+          const got = await foundry.applications.api.DialogV2.prompt({
+            window: { title: "Encounter in camp" },
+            content: `<p>This encounter comes during night ${d.camp.night}'s rest. Which watch?</p>
+              <label>Comes in <select name="watch">${opts.map(([v, l]) => `<option value="${v}" ${String(was ?? "random") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+              <label>If that watch never happens, <input type="number" name="at" min="0" max="${window}" step="0.5" value="${fallback}" style="width:4.5em"> hours into the night</label>
+              <p class="hint">${pl.watches.length ? "The watch order is the camp's; it can change before the rest begins, here or in the camp panel." : "No one keeps watch yet: it comes at random, or at the hour below."} The night is the rest's last ${window} hours.</p>`,
+            ok: { label: "Set", icon: "fa-solid fa-campground", callback: (ev, b) => ({ watch: b.form?.elements.watch?.value ?? "random", at: Number(b.form?.elements.at?.value) }) },
+            rejectClose: false
+          }).catch(() => null);
+          if (!got || !Number.isFinite(got.at)) { this.draw(); return; }
+          rest = { night: d.camp.night, at: lead + Math.max(0, Math.min(window, got.at)) };
+          pick = got.watch === "random" ? "random" : Number(got.watch);
+        }
+        const encounters = (this.state.encounters ?? []).map((x) => { if (x.id !== d.id) return x; const y = { ...x, lon: d.lon, lat: d.lat }; if (rest) y.rest = rest; else delete y.rest; return y; });
+        await this.save({ encounters, ...(pick != null ? { watch: { ...(this.state.watch ?? {}), encWatch: { ...(this.state.watch?.encWatch ?? {}), [d.id]: pick } } } : {}) });
+      }
+      else await this.saveWorldEncounter?.(d.id, { lon: d.lon, lat: d.lat });
+      return;
+    }
+    if (this.mode !== "route" || !this.drag) return;
+    this.#stop(e);
+    const { i, moved, to } = this.drag;
+    this.drag = null;
+    if (moved && to) { const w = [...this.state.waypoints]; w[i] = w[i]?.stop ? { ...to, stop: true } : to; await this.save({ waypoints: w }); }
+  }
+}

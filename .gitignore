@@ -1,0 +1,13 @@
+# Build caches and packages.
+.cache/
+node_modules/
+__pycache__/
+# Art and media are packaged into releases, not kept in git. In a dev checkout, assets/maps,
+# assets/poi-img and assets/terrain are links to the KG Realms: Faerûn checkout beside this one.
+assets/
+# Worlds ship in their own modules (KG Realms: Faerûn). In a dev checkout these are links to them.
+data/worlds/
+# Versioned module zips: published as GitHub releases.
+dist/
+# Local editor and assistant settings.
+.claude/

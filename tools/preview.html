@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<title>KG Realms Preview</title>
+<style>
+  html, body, #map { margin: 0; height: 100%; background: #000; }
+  #hud { position: absolute; top: 6px; left: 6px; z-index: 2; font: 12px sans-serif; color: #fff; background: #0008; padding: 3px 6px; }
+  #place-card { position:absolute; z-index:3; pointer-events:none; background:#f8f1de; color:#29251d; border:1px solid #786b4e; border-radius:5px; padding:10px 14px; font:14px sans-serif; box-shadow:0 2px 8px #0008; }
+  #place-card small { display:block; margin-top:4px; }
+</style>
+</head>
+<body>
+<div id="map"></div><div id="top" style="position:absolute;inset:0;pointer-events:none"></div><div id="hud">loading…</div>
+<div id="place-card" hidden></div>
+<script type="module">
+  import { installMapSymbols } from '../scripts/map-symbols.mjs';
+  // A world drawn as Foundry draws it (realm-layer.mjs), outside Foundry, from the module's own
+  // files: ?world=toril ?level=surface|underdark ?look=day|night ?lon ?lat ?z ?relief=0
+  import * as maplibregl from "../lib/maplibre/maplibre-gl.mjs";
+  import { Archive } from "../scripts/pmtiles.mjs";
+  import { buildStyle } from "../scripts/realm-style.mjs";
+  import { applyEdits, placesGeoJSON } from "../scripts/places.mjs";
+  import { TerrainDetail } from '../scripts/terrain/detail.mjs';
+  import {sourceToLonLat,lonLatToSource} from '../scripts/source-map.mjs';
+  import {labelHitIndex} from '../scripts/label-hits.mjs';
+  import {SatelliteDetail} from '../scripts/terrain/satellite-detail.mjs';
+  import {riverLabelFeatures,riverLabelLayer} from '../scripts/river-labels.mjs';
+  let close=null;const makeClose=()=>new SatelliteDetail(new URL(`../data/worlds/${new URLSearchParams(location.search).get('world')??'toril'}/tapestry.pmtiles`,location.href).href,{base:9});
+  const q = new URLSearchParams(location.search);
+  const hud = document.getElementById("hud");
+  const world = q.get("world") ?? "toril", level = q.get("level") ?? "surface";
+  const archives = {};
+  let detail;
+  maplibregl.addProtocol("kgrealms", async (params, abortController) => {
+    const [key, z, x, y] = params.url.slice("kgrealms://".length).split("/");
+    const file = key.slice(world.length + 1);
+    archives[file] ??= new Archive(new URL(`../data/worlds/${world}/${file}.pmtiles`, location.href).href);
+    const bytes = file==='tapestry'&&close&&+z>close.base ? await close.tile(+z,+x,+y) : detail && ['relief', 'tint'].includes(file) && (+z > detail.options.baseZoom || (['relief','tint'].includes(file) && +z > (detail.options.reliefBaseMaxZoom ?? detail.options.baseZoom)))
+      ? await detail.tile(+z, +x, +y, file, abortController?.signal)
+      : await archives[file].tile(+z, +x, +y).catch(() => null);
+    return { data: bytes ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : new ArrayBuffer(0) };
+  });
+  const index = await (await fetch(`../data/worlds/${world}/index.json`)).json();
+  if(index.sourceMap?.closeZoom)close=makeClose();
+  const base = new URL("..", location.href).href;
+  if (index.detail) { detail = new TerrainDetail(`${base}data/worlds/${world}/`, index.detail); await detail.archive.init(); }
+  const tile = (f) => `kgrealms://${world}-${f}/{z}/{x}/{y}`;
+  const terrain = null;
+  const style = buildStyle({
+    sourceMap:index.sourceMap,
+    terrain,
+    detail: index.detail,
+    borders: q.get('borders') === '1',
+    groundGeometry: index.ground ? Object.fromEntries(["land", "water", "cover", "rivers", "borders", "roads", "trails", "cliffs", "nature", "forests", "frame"].filter((k) => index.ground[k]).map((k) => [k, `${base}data/worlds/${world}/${index.ground[k]}`])) : null,
+    tiles: { routes:`${base}data/worlds/${world}/routes.geojson`, tapestry:tile('tapestry'),surface: tile("surface"), global: tile("global"), underdark: tile("underdark"), dem: tile("dem"), terrain: tile("terrain"), relief: tile('relief'), tint: tile('tint') },
+    glyphs: `${base}data/fonts/{fontstack}/{range}.pbf`, mapLights: true, look: q.get("look") ?? "day", ground:q.get('ground')??'tapestry',level, relief: q.get("relief") !== "0", regions: index.regions
+  });
+  // ?layer=places|realms|geo: the map's layer (map-layers.mjs), areas as the module builds them.
+  const { areasGeoJSON, outlinedIds } = await import("../scripts/map-layers.mjs");
+  const shown = applyEdits(index.places, { edits: { [index.places.find((p) => p.name === "Baldur's Gate")?.id]: { gold: true } } }, level);
+  style.sources.places.data = placesGeoJSON(shown, outlinedIds(shown, index.regions));
+  if (style.sources.areas) { const a = areasGeoJSON(shown, index.regions); style.sources.areas.data = a.areas; style.sources['area-labels'].data = a.labels; }
+  if (style.state?.mapLayer) style.state.mapLayer.default = q.get("layer") ?? "places";
+  const center=q.has('x')?sourceToLonLat(Number(q.get('x')),Number(q.get('y'))):[Number(q.get("lon") ?? -72.5), Number(q.get("lat") ?? 43.5)];
+  // ?split=1: drawn as in Foundry with Names above effects: the ground in one map, what goes above the
+  // scene's effects (onTop) in a second one stacked over it, following the first (realm-layer.mjs).
+  const split = q.get("split") === "1", { onTop } = await import("../scripts/realm-layer.mjs");
+  const topStyle = split ? { ...structuredClone(style), layers: style.layers.filter(onTop) } : null;
+  if (split) style.layers = style.layers.filter((l) => !onTop(l));
+  const map = new maplibregl.Map({ container: "map", style, center, zoom: Number(q.get("z") ?? 5), fadeDuration: 0, renderWorldCopies:false, dragRotate: false, pitchWithRotate: false, touchPitch: false });
+  if(index.sourceMap&&!q.has('z')){const b=index.sourceMap.bounds;map.fitBounds([[b.west,b.south],[b.east,b.north]],{padding:12,duration:0});}
+  installMapSymbols(map, { base }).preload(style.sources.places.data);
+  if (split) {
+    const top = new maplibregl.Map({ container: "top", style: topStyle, center, zoom: map.getZoom(), interactive: false, fadeDuration: 0, renderWorldCopies: false, attributionControl: false });
+    installMapSymbols(top, { base }).preload(topStyle.sources.places.data);
+    const follow = () => { top.jumpTo({ center: map.getCenter(), zoom: map.getZoom() }); for (const m of [map, top]) if (m.isStyleLoaded()) m.setGlobalStateProperty("settledZoom", map.getZoom()); };
+    map.on("move", follow); follow();
+    top.once("load", () => top.setGlobalStateProperty("editing", true));
+    window.top2 = top;
+  }
+  map.once("load", () => map.setGlobalStateProperty("editing", true));
+  window.map = map;
+  map.once("load", async () => {
+    try {
+      const r = await fetch(`${base}data/worlds/${world}/waterways.json`);
+      if (!r.ok) return;
+      const data = await r.json();
+      map.addSource("river-labels", {type:"geojson",data:riverLabelFeatures(data.waterways??{})});
+      map.addLayer(riverLabelLayer());
+    } catch(error) { console.warn("River labels:",error); }
+  });
+  // ?snow=<month 0-11>: seasonal snow as in Foundry, with the clock fixed to mid-month.
+  if (q.has("snow")) {
+    globalThis.game = { time: { components: { month: Number(q.get("snow")), dayOfMonth: 14 }, calendar: { monthsArray: Array.from({ length: 12 }, () => ({ days: 30 })) } } };
+    const { SnowCover } = await import("../scripts/snow.mjs");
+    window.snow = new SnowCover();
+    map.once("load", () => window.snow.attach({ map }, { terrainUrl: `${base}data/worlds/toril/terrain.png`, cell: 4, toSheet: lonLatToSource }));
+  }
+  const hits=labelHitIndex(style.sources.places.data.features),card=document.getElementById('place-card');
+  const byId=new Map(index.places.map(p=>[p.id,p]));
+  map.on('mousemove',e=>{
+    const layers=['poi-labels-overview','poi-labels-regional','poi-labels-local'].filter(id=>map.getLayer(id));
+    const feature=layers.length?map.queryRenderedFeatures(e.point,{layers})[0]:null;
+    const [x,y]=lonLatToSource(e.lngLat.lng,e.lngLat.lat),id=feature?.properties.id??hits(x,y,Math.min(6,3/2**(map.getZoom()-7))),p=byId.get(id);
+    card.hidden=!p;map.getCanvas().style.cursor=p?'pointer':'';
+    if(p){card.replaceChildren(Object.assign(document.createElement('strong'),{textContent:p.name}),Object.assign(document.createElement('small'),{textContent:p.class}));card.style.left=Math.min(e.point.x+16,innerWidth-240)+'px';card.style.top=Math.min(e.point.y+16,innerHeight-90)+'px';}
+  });
+  map.getCanvas().addEventListener('mouseleave',()=>{card.hidden=true;});
+  map.on("error", (e) => console.warn(e.error?.message ?? e));
+  const show = () => { const c = map.getCenter(); hud.textContent = `${world} ${level}  z ${map.getZoom().toFixed(2)}  ${c.lng.toFixed(3)}, ${c.lat.toFixed(3)}${q.has('review') ? `  ${map.areTilesLoaded() && map.isStyleLoaded() ? 'tiles ready' : 'loading tiles'}` : ''}`; };
+  map.on("move", show); map.on('idle', show); show();
+</script>
+</body>
+</html>

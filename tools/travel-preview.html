@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Travel panel preview</title>
+<link rel="stylesheet" href="../styles/realms.css">
+<style>
+  body { margin: 0; background: #2b2f2a; font: 14px "Signika", sans-serif; color: #eee; height: 100vh; }
+  #board { position: fixed; inset: 0; width: 100vw; height: 100vh; background: #46604a; }
+  .kgr-travel { position: fixed !important; }
+  #log { position: fixed; left: 8px; bottom: 8px; width: 520px; max-height: 40vh; overflow: auto; font: 11px monospace; background: #000a; padding: 6px; white-space: pre-wrap; }
+</style>
+</head>
+<body class="kgr-theme-travel">
+<canvas id="board"></canvas>
+<pre id="log"></pre>
+<script type="module">
+// A Foundry stand-in, just enough for the travel panel: one realm scene with a journey flag,
+// world settings, the party, and the world's places, routes and terrain from the module's data.
+const log = (...a) => { document.getElementById("log").textContent += a.join(" ") + "\n"; };
+window.onerror = (m, s, l, c, e) => log("ERROR", m, e?.stack ?? "");
+const settings = { travelRules: "2014", priceScale: "x1", travelHudX: 640, travelHudY: 10, travelHudLocked: false, waterways: {} };
+let flag = null;
+const params = new URLSearchParams(location.search);
+if (params.has("fresh")) { settings.travelHudX=-1; settings.travelHudY=-1; }
+window.previewSettings=settings;
+globalThis.foundry = { utils: { escapeHTML: (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]), deepClone: (o) => structuredClone(o), randomID: () => Math.random().toString(36).slice(2, 10) } };
+globalThis.ui = { notifications: { info: (m) => log("info:", m), warn: (m) => log("warn:", m), error: (m) => log("error:", m) } };
+globalThis.ChatMessage = { create: (m) => log("chat:", m.content.replace(/<[^>]+>/g, "")) };
+globalThis.Roll = class { constructor(formula) { this.sides = Number(formula.split("d")[1]); } async evaluate() { return { total: Math.min(this.sides, window.previewDie ?? 2) }; } };
+globalThis.fromUuidSync = () => null;
+globalThis.fromUuid = async () => null;
+const scene = { getFlag: (m, k) => (k === "journey" ? flag : null), setFlag: async (m, k, v) => { flag = structuredClone(v); await hud.refresh(); } };
+scene.id = "preview";
+scene.update = async (changes) => {
+  for (const [path, value] of Object.entries(changes)) {
+    const keys = path.replace(/^flags\.kg-realms\.journey\./, "").split(".");
+    let at = flag;
+    for (const key of keys.slice(0, -1)) at = at[key] ??= {};
+    const last = keys.at(-1);
+    if (last.startsWith("-=")) delete at[last.slice(2)]; else at[last] = value;
+  }
+  hud.tick();
+};
+globalThis.game = {
+  user: { id:"gm", active:true, isGM: params.get("player") ? false : true, isSelf: true },
+  users: [{id:"gm",isGM:true,active:true}],
+  system: { id: "dnd5e" }, modules: { get: () => null },
+  settings: { get: (m, k) => settings[k], set: async (m, k, v) => { settings[k] = v; hud.refresh(); } },
+  time: { worldTime: 0, components: { month: 6, dayOfMonth: 10 }, calendar: null },
+  i18n: { localize: (s) => s }
+};
+globalThis.canvas = { scene, app: { view: document.getElementById("board") }, tokens: { placeables: [] }, grid: { size: 100 } };
+const { TravelHud } = await import("../scripts/ui-hud.mjs");
+const { lonLatToSource } = await import("../scripts/source-map.mjs");
+const idx = await (await fetch("../data/worlds/toril/index.json")).json();
+const routes = await (await fetch("../data/worlds/toril/routes.geojson")).json();
+const bmp = await createImageBitmap(await (await fetch("../data/worlds/toril/terrain.png")).blob());
+const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext("2d");
+g.drawImage(bmp, 0, 0);
+const rgba = g.getImageData(0, 0, bmp.width, bmp.height).data, data = new Uint8Array(bmp.width * bmp.height);
+for (let i = 0; i < data.length; i++) data[i] = rgba[i * 4];
+const grid = { data, width: bmp.width, height: bmp.height, cell: idx.terrain.cell };
+const places = idx.places.filter((p) => (p.level ?? "surface") === "surface");
+const place = (n) => places.find((p) => p.name === n);
+const stop = (n) => { const p = place(n); return { lon: p.lon, lat: p.lat, name: p.name }; };
+const layer = { setJourney: () => {}, frame: null, toScreen: () => [0, 0] };
+// The module's shipped waterways, unless the page sets its own; ?season= picks the season.
+const shipped = (await (await fetch("../data/worlds/toril/waterways.json")).json()).waterways;
+const hud = new TravelHud({ getLayer: () => layer, getPlaces: () => places, getRoutes: () => routes, getEncounters: () => [], getTerrain: async () => grid, getWaterways: () => settings.waterways.toril ?? shipped, getSeason: () => params.get("season") ?? "summer", getTowns: () => [] });
+window.hud = hud;
+// The scene: a journey from Waterdeep up the coast to Luskan, by road (start is the first stop).
+const stops = (params.get("stops") ?? "Waterdeep,Neverwinter,Luskan").split(",").map(stop);
+flag = { waypoints: stops.slice(1), start: stops[0], trip: null, stays: [], legModes: [], method: params.get("method") ?? "foot" };
+hud.stops = () => [stops[0], ...(flag?.waypoints ?? [])];
+hud.mount();
+await hud.refresh();
+log("legs:", hud.result?.legs.map((l) => `${Math.round(l.miles)} mi ${l.sea ? "sea" : "land"}`).join(", "), "hints:", hud.shipHints?.length);
+</script>
+</body>
+</html>

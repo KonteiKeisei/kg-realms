@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>KG Realms snow test</title>
+<style>body{margin:0;background:#181614;color:#e8dcc4;font:13px system-ui}#bar{padding:6px 10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}#map{position:absolute;top:36px;left:0;right:0;bottom:0}</style>
+<div id="bar">Month <select id="month"></select>
+  <label><input type="checkbox" id="north" checked> North</label>
+  <label><input type="checkbox" id="south" checked> South</label>
+  <label><input type="checkbox" id="reversed" checked> South reversed</label>
+  <span id="info"></span></div>
+<div id="map"></div>
+<script type="module">
+// The realm map's seasonal snow (snow.mjs) on any picture, outside Foundry: the picture placed as a
+// made world places it (homebrew/plan.mjs), a lake marked by a shoreline loop (waterways.mjs).
+// ?src=/modules/...webp&miles=3776
+import * as maplibregl from "../lib/maplibre/maplibre-gl.mjs";
+import { SnowCover, snowConfig } from "../scripts/snow.mjs";
+import { homebrewSheet } from "../scripts/homebrew/plan.mjs";
+import { applySourceMap, lonLatToSource } from "../scripts/source-map.mjs";
+import { shoreWater } from "../scripts/waterways.mjs";
+const q = new URLSearchParams(location.search), $ = (id) => document.getElementById(id);
+const MONTHS = ["Hammer", "Alturiak", "Ches", "Tarsakh", "Mirtul", "Kythorn", "Flamerule", "Eleasis", "Eleint", "Marpenoth", "Uktar", "Nightal"];
+MONTHS.forEach((m, i) => $("month").add(new Option(m, i)));
+$("month").value = q.get("month") ?? 0;
+globalThis.game = { time: { components: { month: 0, dayOfMonth: 14 }, calendar: { monthsArray: MONTHS.map(() => ({ days: 30 })) } } };
+window.result = (async () => {
+  // A realm map picture (snow is drawn only on realm maps): Faerûn's, or any made world's.
+  const src = q.get("src") ?? "/modules/kg-realms-faerun/assets/master/faerun-tapestry-overview.webp";
+  const img = new Image(); img.src = src; await img.decode();
+  const sheet = homebrewSheet(img.naturalWidth, img.naturalHeight, Number(q.get("miles") ?? 3776));
+  applySourceMap(sheet);
+  const b = sheet.bounds;
+  const map = new maplibregl.Map({
+    container: "map", attributionControl: false, renderWorldCopies: false, fadeDuration: 0,
+    canvasContextAttributes: { preserveDrawingBuffer: true },
+    style: { version: 8, sources: { pic: { type: "image", url: new URL(src, location.href).href, coordinates: [[b.west, b.north], [b.east, b.north], [b.east, b.south], [b.west, b.south]] } },
+      layers: [{ id: "bg", type: "background", paint: { "background-color": "#000" } }, { id: "pic", type: "raster", source: "pic" }, { id: "after", type: "background", paint: { "background-opacity": 0 } }] },
+    bounds: [[b.west, b.south], [b.east, b.north]]
+  });
+  await new Promise((r) => map.once("load", r));
+  // A blank made-world grid with a lake in the middle (a shoreline loop, water inside).
+  const cell = Math.max(4, Math.ceil(Math.max(sheet.width, sheet.height) / 2048)), W = Math.ceil(sheet.width / cell), H = Math.ceil(sheet.height / cell);
+  const cx = sheet.width / 2, cy = sheet.height / 2, r = Math.min(sheet.width, sheet.height) * 0.12;
+  const loop = Array.from({ length: 33 }, (_, i) => [cx + Math.cos((i / 32) * Math.PI * 2) * r, cy + Math.sin((i / 32) * Math.PI * 2) * r * 0.7]);
+  const grid = shoreWater({ data: new Uint8Array(W * H).fill(1), width: W, height: H, cell }, [{ pts: loop, closed: true, water: "inside" }]);
+  const snow = new SnowCover();
+  const config = () => snowConfig({ north: { on: $("north").checked, winter: 0.45, summer: 0.05, band: 250 }, south: { on: $("south").checked, winter: 0.35, summer: 0.05, band: 250 }, reversed: $("reversed").checked });
+  await snow.attach({ map }, { grid, config: config(), sheet: { height: sheet.height, milesPerPixel: sheet.milesPerPixel }, toSheet: (lon, lat) => lonLatToSource(lon, lat) });
+  const view = () => {
+    game.time.components.month = Number($("month").value);
+    snow.setConfig(config());
+    const l = snow.lines;
+    $("info").textContent = `north ${l.north ? `full to y ${Math.round(l.north.full)}, bare from ${Math.round(l.north.bare)}` : "none"} · south ${l.south ? `full from y ${Math.round(l.south.full)}, bare to ${Math.round(l.south.bare)}` : "none"} · sheet ${sheet.width} x ${sheet.height}`;
+  };
+  for (const id of ["month", "north", "south", "reversed"]) $(id).onchange = view;
+  view();
+  await new Promise((r) => setTimeout(r, 500));
+  window.snow = snow; window.map = map;
+  return { lines: snow.lines, layer: !!map.getLayer("kgr-seasonal-snow"), lakeCells: grid.data.filter((c) => c === 8).length };
+})().catch((e) => ({ error: String(e?.stack ?? e) }));
+</script>

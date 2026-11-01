@@ -1,0 +1,428 @@
+[
+ {
+  "id": "shield-red",
+  "name": "Shield, red",
+  "file": "shield-red.png",
+  "group": "heraldry"
+ },
+ {
+  "id": "shield-green",
+  "name": "Shield, green",
+  "file": "shield-green.png",
+  "group": "heraldry"
+ },
+ {
+  "id": "shield-gold",
+  "name": "Shield, gold",
+  "file": "shield-gold.png",
+  "group": "heraldry"
+ },
+ {
+  "id": "shield-grey",
+  "name": "Shield, grey",
+  "file": "shield-grey.png",
+  "group": "heraldry"
+ },
+ {
+  "id": "cross-ring-small",
+  "name": "Waypoint",
+  "file": "cross-ring-small.png",
+  "group": "points"
+ },
+ {
+  "id": "hexagon-grey",
+  "name": "Hexagon, grey",
+  "file": "hexagon-grey.png",
+  "group": "shapes"
+ },
+ {
+  "id": "octagon",
+  "name": "Octagon",
+  "file": "octagon.png",
+  "group": "shapes"
+ },
+ {
+  "id": "dot-ringed",
+  "name": "Dot, ringed",
+  "file": "dot-ringed.png",
+  "group": "settlements"
+ },
+ {
+  "id": "ring-double",
+  "name": "Double ring",
+  "file": "ring-double.png",
+  "group": "settlements"
+ },
+ {
+  "id": "cross-ring",
+  "name": "Crossroads",
+  "file": "cross-ring.png",
+  "group": "points"
+ },
+ {
+  "id": "compass",
+  "name": "Compass rose",
+  "file": "compass.png",
+  "group": "points"
+ },
+ {
+  "id": "diamond-open",
+  "name": "Diamond, open",
+  "file": "diamond-open.png",
+  "group": "shapes"
+ },
+ {
+  "id": "compass-red",
+  "name": "Compass rose, red",
+  "file": "compass-red.png",
+  "group": "points"
+ },
+ {
+  "id": "diamond-red",
+  "name": "Diamond, red",
+  "file": "diamond-red.png",
+  "group": "shapes"
+ },
+ {
+  "id": "dot-red",
+  "name": "Dot, red",
+  "file": "dot-red.png",
+  "group": "settlements"
+ },
+ {
+  "id": "diamond-bold",
+  "name": "Diamond, bold",
+  "file": "diamond-bold.png",
+  "group": "shapes"
+ },
+ {
+  "id": "star-ringed",
+  "name": "Star, ringed (capital)",
+  "file": "star-ringed.png",
+  "group": "settlements"
+ },
+ {
+  "id": "hexagon-light",
+  "name": "Hexagon, light",
+  "file": "hexagon-light.png",
+  "group": "shapes"
+ },
+ {
+  "id": "shield-split",
+  "name": "Shield, split",
+  "file": "shield-split.png",
+  "group": "heraldry"
+ },
+ {
+  "id": "rhombus-split",
+  "name": "Rhombus, split",
+  "file": "rhombus-split.png",
+  "group": "shapes"
+ },
+ {
+  "id": "star",
+  "name": "Star",
+  "file": "star.png",
+  "group": "points"
+ },
+ {
+  "id": "diamond-red-bold",
+  "name": "Diamond, red, bold",
+  "file": "diamond-red-bold.png",
+  "group": "shapes"
+ },
+ {
+  "id": "star-red-ringed",
+  "name": "Star, red ringed",
+  "file": "star-red-ringed.png",
+  "group": "settlements"
+ },
+ {
+  "id": "sigil",
+  "name": "Sigil",
+  "file": "sigil.png",
+  "group": "points"
+ },
+ {
+  "id": "spark",
+  "name": "Spark",
+  "file": "spark.png",
+  "group": "points"
+ },
+ {
+  "id": "square-open",
+  "name": "Square, open",
+  "file": "square-open.png",
+  "group": "shapes"
+ },
+ {
+  "id": "ring-dot",
+  "name": "Ring with dot",
+  "file": "ring-dot.png",
+  "group": "settlements"
+ },
+ {
+  "id": "diamond-small",
+  "name": "Diamond, small",
+  "file": "diamond-small.png",
+  "group": "shapes"
+ },
+ {
+  "id": "cross",
+  "name": "Cross (site)",
+  "file": "cross.png",
+  "group": "points"
+ },
+ {
+  "id": "octagon-grey",
+  "name": "Octagon, grey",
+  "file": "octagon-grey.png",
+  "group": "shapes"
+ },
+ {
+  "id": "dot-black-ringed",
+  "name": "Dot, black ringed",
+  "file": "dot-black-ringed.png",
+  "group": "settlements"
+ },
+ {
+  "id": "rhombus-small",
+  "name": "Rhombus, small",
+  "file": "rhombus-small.png",
+  "group": "shapes"
+ },
+ {
+  "id": "anchor-ornate",
+  "name": "Anchor, ornate",
+  "file": "anchor-ornate.png",
+  "group": "ports"
+ },
+ {
+  "id": "anchor",
+  "name": "Anchor",
+  "file": "anchor.png",
+  "group": "ports"
+ },
+ {
+  "id": "ring-dot-small",
+  "name": "Ring with dot, small",
+  "file": "ring-dot-small.png",
+  "group": "settlements"
+ },
+ {
+  "id": "anchor-plain",
+  "name": "Anchor, plain",
+  "file": "anchor-plain.png",
+  "group": "ports"
+ },
+ {
+  "id": "anchor-light",
+  "name": "Anchor, light",
+  "file": "anchor-light.png",
+  "group": "ports"
+ },
+ {
+  "id": "anchor-bold",
+  "name": "Anchor, bold",
+  "file": "anchor-bold.png",
+  "group": "ports"
+ },
+ {
+  "id": "anchor-grey",
+  "name": "Anchor, grey",
+  "file": "anchor-grey.png",
+  "group": "ports"
+ },
+ {
+  "id": "anchor-ornate-grey",
+  "name": "Anchor, ornate grey",
+  "file": "anchor-ornate-grey.png",
+  "group": "ports"
+ },
+ {
+  "id": "spark-small",
+  "name": "Spark, small",
+  "file": "spark-small.png",
+  "group": "points"
+ },
+ {
+  "id": "diamond-grey",
+  "name": "Diamond, grey",
+  "file": "diamond-grey.png",
+  "group": "shapes"
+ },
+ {
+  "id": "gate",
+  "name": "Gatehouse",
+  "file": "gate.png",
+  "group": "buildings"
+ },
+ {
+  "id": "gate-light",
+  "name": "Gatehouse, light",
+  "file": "gate-light.png",
+  "group": "buildings"
+ },
+ {
+  "id": "temple",
+  "name": "Temple",
+  "file": "temple.png",
+  "group": "buildings"
+ },
+ {
+  "id": "skull-grey",
+  "name": "Skull, grey",
+  "file": "skull-grey.png",
+  "group": "danger"
+ },
+ {
+  "id": "tower-ruin",
+  "name": "Ruined tower",
+  "file": "tower-ruin.png",
+  "group": "buildings"
+ },
+ {
+  "id": "castle",
+  "name": "Castle",
+  "file": "castle.png",
+  "group": "buildings"
+ },
+ {
+  "id": "keep",
+  "name": "Keep",
+  "file": "keep.png",
+  "group": "buildings"
+ },
+ {
+  "id": "temple-small",
+  "name": "Temple, small",
+  "file": "temple-small.png",
+  "group": "buildings"
+ },
+ {
+  "id": "square-grey",
+  "name": "Square, grey",
+  "file": "square-grey.png",
+  "group": "shapes"
+ },
+ {
+  "id": "cave",
+  "name": "Cave",
+  "file": "cave.png",
+  "group": "points"
+ },
+ {
+  "id": "tower-ruin-small",
+  "name": "Ruined tower, small",
+  "file": "tower-ruin-small.png",
+  "group": "buildings"
+ },
+ {
+  "id": "skull",
+  "name": "Skull",
+  "file": "skull.png",
+  "group": "danger"
+ },
+ {
+  "id": "swords",
+  "name": "Crossed swords (battle)",
+  "file": "swords.png",
+  "group": "danger"
+ },
+ {
+  "id": "cave-small",
+  "name": "Cave, small",
+  "file": "cave-small.png",
+  "group": "points"
+ },
+ {
+  "id": "swords-small",
+  "name": "Crossed swords, small",
+  "file": "swords-small.png",
+  "group": "danger"
+ },
+ {
+  "id": "fortress",
+  "name": "Fortress",
+  "file": "fortress.png",
+  "group": "buildings"
+ },
+ {
+  "id": "keep-small",
+  "name": "Keep, small",
+  "file": "keep-small.png",
+  "group": "buildings"
+ },
+ {
+  "id": "chest-open",
+  "name": "Treasure, open",
+  "file": "chest-open.png",
+  "group": "treasure"
+ },
+ {
+  "id": "chest",
+  "name": "Treasure chest",
+  "file": "chest.png",
+  "group": "treasure"
+ },
+ {
+  "id": "chest-tall",
+  "name": "Treasure chest, tall",
+  "file": "chest-tall.png",
+  "group": "treasure"
+ },
+ {
+  "id": "chest-tall-color",
+  "name": "Treasure chest, tall (colour)",
+  "file": "chest-tall-color.png",
+  "group": "treasure"
+ },
+ {
+  "id": "gem",
+  "name": "Gem",
+  "file": "gem.png",
+  "group": "treasure"
+ },
+ {
+  "id": "swords-curved",
+  "name": "Crossed swords, curved",
+  "file": "swords-curved.png",
+  "group": "danger"
+ },
+ {
+  "id": "chest-open-color",
+  "name": "Treasure, open (colour)",
+  "file": "chest-open-color.png",
+  "group": "treasure"
+ },
+ {
+  "id": "chest-color",
+  "name": "Treasure chest (colour)",
+  "file": "chest-color.png",
+  "group": "treasure"
+ },
+ {
+  "id": "gem-gold",
+  "name": "Gem, gold",
+  "file": "gem-gold.png",
+  "group": "treasure"
+ },
+ {
+  "id": "swords-colour",
+  "name": "Crossed swords (colour)",
+  "file": "swords-colour.png",
+  "group": "danger"
+ },
+ {
+  "id": "swords-long",
+  "name": "Crossed swords, long",
+  "file": "swords-long.png",
+  "group": "danger"
+ },
+ {
+  "id": "swords-ornate",
+  "name": "Crossed swords, ornate",
+  "file": "swords-ornate.png",
+  "group": "danger"
+ }
+]

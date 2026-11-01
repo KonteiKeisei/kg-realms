@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>KG Realms: Waterdeep and settlement travel</title>
+<link rel="stylesheet" href="../styles/realms.css">
+<style>
+html,body{margin:0;width:100%;height:100%;background:#12171b;font:14px Arial,sans-serif;color:#eee;overflow:hidden}
+#scene-navigation{position:fixed;top:0;left:0;right:0;z-index:1000;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#15191fee}
+#scene-navigation button,#scene-navigation select{font:inherit;border:1px solid #53616b;background:#242e36;color:#fff;border-radius:4px;padding:6px 10px;cursor:pointer;min-height:32px}
+#scene-navigation strong{margin-right:10px}#proof-status{position:fixed;bottom:8px;left:8px;z-index:1000;background:#111c;padding:6px 10px;max-width:95vw;pointer-events:none;font-size:12px}
+.kgr-city-roads{right:18px}.kgr-editframe{pointer-events:none}
+</style>
+<body class="kgr-theme-iron">
+<nav id="scene-navigation"><strong>Waterdeep: local test</strong><button data-demo="overview">Overview</button><button data-demo="regional">District</button><button data-demo="detail">Street detail</button><button data-demo="plan">Plan trip</button><button data-demo="roads">Edit roads</button><button data-demo="ride">Carriage preview</button><button data-demo="webp">WebP tiles</button><button data-demo="ktx2">KTX2 tiles</button><select id="theme" aria-label="Preview theme"><option>iron</option><option>travel</option><option>royal</option><option>amethyst</option><option>emerald</option><option>oxblood</option><option>holy</option></select></nav>
+<div id="proof-status">Loading Waterdeep. Demonstration roads and riders are temporary fixture data.</div>
+<script src="../.cache/foundry-ktx-runtime/scripts/pixi.min.js"></script>
+<script src="../.cache/foundry-ktx-runtime/scripts/ktx2/pixi-ktx2.min.js"></script>
+<script type="module" src="./settlement-preview.mjs"></script>
+</body></html>

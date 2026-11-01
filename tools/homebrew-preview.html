@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>KG Realms: homebrew tiles</title>
+<style>
+  body { background: #14110e; color: #f2e6cc; font: 14px/1.4 Signika, "Segoe UI", sans-serif; margin: 16px; }
+  #log { white-space: pre-wrap; font: 12.5px/1.4 Consolas, monospace; }
+  canvas { max-width: 100%; border: 1px solid #3d3326; background: #000; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+</style>
+<p>Runs the Make realm world tile pipeline (plan, cut, encode) on a picture: <code>?src=/modules/...webp&amp;miles=40</code>. The left mosaic is the cut tiles laid out by their frames; the right is the picture.</p>
+<div class="row"><canvas id="mosaic"></canvas><canvas id="original"></canvas></div>
+<div id="log"></div>
+<script type="module">
+import { homebrewSheet, planTiles, MAX_PICTURE } from "../scripts/homebrew/plan.mjs";
+import { TileEncoder, cutTile, ktx2Header } from "../scripts/homebrew/tiles.mjs";
+const params = new URLSearchParams(location.search), log = (s) => { document.getElementById("log").textContent += s + "\n"; };
+const src = params.get("src") ?? "/modules/kg-realms-faerun/assets/maps/helms-hold-summer.webp", miles = Number(params.get("miles") ?? 40);
+window.result = (async () => {
+  const blob = await (await fetch(src)).blob();
+  let bitmap = await createImageBitmap(blob);
+  if (Math.max(bitmap.width, bitmap.height) > MAX_PICTURE) { const k = MAX_PICTURE / Math.max(bitmap.width, bitmap.height); bitmap = await createImageBitmap(blob, { resizeWidth: Math.round(bitmap.width * k), resizeHeight: Math.round(bitmap.height * k), resizeQuality: "high" }); }
+  const sheet = homebrewSheet(bitmap.width, bitmap.height, miles), lods = planTiles(sheet), tiles = lods.flatMap((l) => l.tiles);
+  log(`picture ${bitmap.width} x ${bitmap.height}, native zoom ${sheet.nativeZoom}, levels ${lods.map((l) => `z${l.z}: ${l.tiles.length}`).join(", ")}`);
+  const mosaic = document.getElementById("mosaic"), k = 600 / Math.max(sheet.width, sheet.height);
+  mosaic.width = Math.round(sheet.width * k); mosaic.height = Math.round(sheet.height * k);
+  const original = document.getElementById("original"); original.width = mosaic.width; original.height = mosaic.height;
+  original.getContext("2d").drawImage(bitmap, 0, 0, original.width, original.height);
+  const mctx = mosaic.getContext("2d"), base = new URL("..", location.href).href.replace(/\/$/, "");
+  const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 2) - 1)), encoder = new TileEncoder(count, base);
+  await encoder.ready;
+  const started = performance.now(); let next = 0, bytes = 0, bad = [];
+  await Promise.all(Array.from({ length: count }, async (_, worker) => {
+    while (next < tiles.length) {
+      const tile = tiles[next++], rgba = cutTile(bitmap, tile);
+      if (tile.lod === lods[0].z) {
+        // Draw the cut frame back where the plan says it goes.
+        const img = new ImageData(new Uint8ClampedArray(rgba.slice(0)), tile.textureWidth, tile.textureHeight), c = new OffscreenCanvas(tile.textureWidth, tile.textureHeight);
+        c.getContext("2d").putImageData(img, 0, 0);
+        mctx.drawImage(c, tile.frameX, tile.frameY, tile.frameWidth, tile.frameHeight, tile.x * k, tile.y * k, tile.width * k, tile.height * k);
+      }
+      const out = await encoder.encode(worker, rgba, tile.textureWidth, tile.textureHeight), h = ktx2Header(out);
+      if (!h.magic || h.width !== tile.textureWidth || h.height !== tile.textureHeight || h.levels !== 1 || h.scheme !== 1) bad.push(tile.id);
+      bytes += out.byteLength;
+    }
+  }));
+  encoder.stop();
+  const seconds = (performance.now() - started) / 1000;
+  log(`${tiles.length} tiles encoded with ${count} workers in ${seconds.toFixed(1)} s, ${(bytes / 1048576).toFixed(2)} MiB, bad headers: ${bad.length ? bad.join(", ") : "none"}`);
+  return { tiles: tiles.length, seconds: Number(seconds.toFixed(1)), mib: Number((bytes / 1048576).toFixed(2)), bad, width: sheet.width, height: sheet.height, workers: count };
+})().catch((e) => { log("FAILED: " + (e?.stack ?? e)); return { error: String(e?.message ?? e) }; });
+</script>
