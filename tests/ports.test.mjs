@@ -76,7 +76,7 @@ test("the panel names the port and never says a port cannot sail", () => {
   assert.ok(!hud.includes("No water joins")); assert.ok(!hud.includes("seaFailed")); assert.ok(!go.includes("seaFailed"));
   assert.ok(hud.includes("Port of ${p.name}: sea travel available"));
   assert.ok(hud.includes("port of ${p.name}"));
-  assert.ok(hud.includes("portVoyage(this.sea, from, to, opts)"));
+  assert.ok(hud.includes("portVoyage(this.sea, from, to, { ...opts,"));
 });
 
 const oban = { kind: "river", name: "Oban", pts: [[0, 0], [100, 0]] };

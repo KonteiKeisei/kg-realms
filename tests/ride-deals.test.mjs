@@ -44,9 +44,9 @@ test("a journey's title uses the short name; the route keeps the whole line", ()
   assert.equal(at([]), "Wilderness");
 });
 
-test("the panel: Go on from here only while editing; Stay stays; titles and deals are wired in", () => {
+test("the panel: Stay stays; titles and deals are wired in", () => {
   const hud = readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8");
-  assert.ok(hud.includes('const onward = gm && isEnd && this.mode === "route" ?'));
+  assert.ok(!hud.includes("Go on from here"));
   assert.ok(hud.includes('<label class="stay" title="Days to stay here">'));
   assert.ok(!hud.includes('${sts[0].name ?? "Start"}'));
   assert.ok(hud.includes("Paid as escort")); assert.ok(hud.includes("Paid to guard")); assert.ok(hud.includes('name="term-'));

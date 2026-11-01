@@ -1912,3 +1912,39 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 
 /* The domain and territory a stop is in (0.88.2). */
 .kgr-travel ol.stops .stop-where { font-size: 11px; line-height: 1.35; color: var(--kgr-muted); font-weight: 400; overflow-wrap: anywhere; }
+
+/* The route: choose the end first, add stops, drag to reorder, choose how each leg goes (0.89.0). */
+.kgr-travel ol.stops .stop-grip { flex: 0 0 22px; width: 22px; min-height: 30px; margin: 0; padding: 0; border: 0; background: none; color: var(--kgr-muted); cursor: grab; touch-action: none; }
+.kgr-travel ol.stops .stop-grip:hover, .kgr-travel ol.stops .stop-grip:focus-visible { color: var(--kgr-accent); }
+.kgr-travel ol.stops li.dragging { opacity: 0.55; }
+.kgr-travel ol.stops li.drop-above { box-shadow: 0 -3px 0 var(--kgr-accent); }
+.kgr-travel ol.stops li.drop-below { box-shadow: 0 3px 0 var(--kgr-accent); }
+.kgr-travel ol.stops .stop-tools button.bypass { flex: 1 0 100%; width: auto; height: auto; min-height: 28px; margin: 0; padding: 3px 8px; font-size: 12px; line-height: 1.25; white-space: normal; background: var(--kgr-surface-2); border: 1px solid var(--kgr-line-2); border-radius: 6px; color: var(--kgr-text-2); }
+.kgr-travel ol.stops .stop-tools button.bypass:hover { border-color: var(--kgr-accent); color: var(--kgr-accent); }
+.kgr-travel ol.stops li.bypassed { background: none; border-style: dashed; }
+.kgr-travel ol.stops li.bypassed small { font-size: 11px; color: var(--kgr-muted); }
+.kgr-travel ol.stops li.bypassed b { color: var(--kgr-text-2); font-weight: 600; }
+.kgr-travel ol.stops li.bypassed button { flex: 0 0 auto; width: auto; height: 26px; margin: 0; padding: 0 9px; font-size: 12px; }
+.kgr-travel .leg-q { font-size: 13px; font-weight: 600; color: var(--kgr-text); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.kgr-travel .leg-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.kgr-travel .leg-ways button { display: flex; flex-direction: column; align-items: center; justify-content: center; width: auto; height: auto; min-height: 42px; margin: 0; padding: 3px 4px; line-height: 1.2; font-size: 13px; font-weight: 600; white-space: normal; background: var(--kgr-input); border: 1px solid var(--kgr-line-2); border-radius: 6px; color: var(--kgr-text); }
+.kgr-travel .leg-ways button small { font-size: 11px; font-weight: 400; color: var(--kgr-muted-2); }
+.kgr-travel .leg-ways button.on { background: var(--kgr-accent); border-color: var(--kgr-accent); color: var(--kgr-gold-ink); }
+.kgr-travel .leg-ways button.on small { color: var(--kgr-gold-ink); }
+.kgr-travel .leg-ways button:hover:not(:disabled):not(.on) { border-color: var(--kgr-accent); }
+.kgr-travel .leg-ways button:disabled:not(.on) { opacity: 0.5; }
+.kgr-travel .leg-explain { font-size: 12px; line-height: 1.35; color: var(--kgr-text-2); }
+.kgr-travel .leg-explain b { color: var(--kgr-text); }
+.kgr-travel .leg-ship { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; color: var(--kgr-muted-2); }
+.kgr-travel .leg-part { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; padding: 4px 8px; font-size: 12px; background: var(--kgr-surface); border: 1px solid var(--kgr-line); border-radius: 6px; color: var(--kgr-text-2); }
+.kgr-travel .leg-part small { grid-column: 1 / -1; color: var(--kgr-muted-2); }
+.kgr-travel .river-offer { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; font-size: 12px; line-height: 1.35; border: 1px solid rgba(74, 208, 255, 0.5); border-radius: 8px; background: rgba(74, 208, 255, 0.08); color: var(--kgr-text-2); }
+.kgr-travel .river-offer b { font-size: 13px; color: var(--kgr-haven-text); }
+.kgr-travel .river-offer .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.kgr-travel .river-offer .row button { flex: 1 1 auto; width: auto; height: auto; min-height: 26px; margin: 0; padding: 3px 8px; white-space: normal; }
+.kgr-travel .where-to, .kgr-travel .add-stop { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; font-size: 12px; color: var(--kgr-text-2); }
+.kgr-travel .where-to { padding: 10px; background: var(--kgr-accent-soft); border: 2px solid var(--kgr-accent); border-radius: 8px; }
+.kgr-travel .where-to label { font-size: 16px; font-weight: 600; color: var(--kgr-gold-text); }
+.kgr-travel .add-stop label { font-size: 13px; font-weight: 600; color: var(--kgr-text); }
+.kgr-travel .where-to input, .kgr-travel .add-stop input { width: 100%; height: 28px; }
+.kgr-travel .where-to button, .kgr-travel .add-stop button { width: 100%; height: auto; min-height: 30px; margin: 0; }

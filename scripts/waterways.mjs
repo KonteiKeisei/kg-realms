@@ -26,6 +26,8 @@ export const WATERWAY_KINDS = {
   lane: { label: "Sea route", icon: "fa-anchor", color: "#e8d9b0" }
 };
 export const SEASONS = ["spring", "summer", "autumn", "winter"];
+/** How much a through voyage shuns the map's land: it goes the least way over it. */
+const LAND_COST = 25;
 export const TRADE_WIND = 1.5;
 export const RIVER_CURRENT = 3;
 /**
@@ -307,7 +309,7 @@ function clear(sea, a, b, off = Infinity) {
  * end the water may start, in px. Returns { legs: [{ kind: "sea" | "river" | "wind" | "lane",
  * name, pts, miles, mph }], miles, hours } or null when no water joins the two.
  */
-export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40, debug = false, toWater = false, through = false } = {}) {
+export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40, debug = false, toWater = false, through = false, ways = "all" } = {}) {
   if (!sea) return null;
   const { W, H, cs, water, offshore, nodes, lines, links, N, milesPerPixel: mpp } = sea;
   // Ships keep to the coast where no wind or current carries them: open water within about 14
@@ -341,12 +343,14 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
   for (const l of lines) top = Math.max(top, l.kind === "river" ? (mph + (l.current ?? RIVER_CURRENT)) / mph : 1);
   for (const { wind: l } of sea.reachOf) top = Math.max(top, l.factor ?? TRADE_WIND);
   const vmax = mph * top;
+  // ways: "all", "sea" (no river), or "river" (rivers alone, no open water).
+  const lineOn = (li) => ways === "all" || (lines[li].kind === "river") === (ways === "river");
   // The ends: water cells and line nodes close by.
   const START = N + nodes.length, GOAL = START + 1;
   const goalLinks = new Map();
   const ends = (p) => {
-    const out = sea.nearWater(p, r).map((w) => ({ id: w.c, miles: w.px * mpp }));
-    nodes.forEach((n, i) => { const d = Math.hypot(n.at[0] - p[0], n.at[1] - p[1]); if (d <= reach) out.push({ id: N + i, miles: d * mpp }); });
+    const out = ways === "river" ? [] : sea.nearWater(p, r).map((w) => ({ id: w.c, miles: w.px * mpp }));
+    nodes.forEach((n, i) => { const d = Math.hypot(n.at[0] - p[0], n.at[1] - p[1]); if (d <= reach && lineOn(n.line)) out.push({ id: N + i, miles: d * mpp }); });
     // A port with no water or river at hand: a straight line to the nearest water.
     if (toWater && !out.length) for (let rad = r * 2; rad <= 2 * Math.max(W, H); rad *= 2) {
       const found = sea.nearWater(p, rad);
@@ -375,7 +379,7 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
     if (f - (k === GOAL ? 0 : h(k)) > (g.get(k) ?? Infinity) + 1e-9) continue;
     const gl = goalLinks.get(k);
     if (gl !== undefined) relax(k, GOAL, gl / mph, { kind: "sea" });
-    if (k < N) {
+    if (k < N && ways !== "river") {
       const x = k % W, y = Math.floor(k / W);
       for (const [dx, dy] of D8) {
         const nx = x + dx, ny = y + dy;
@@ -389,7 +393,10 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
         relax(k, k2, (w ? miles / (mph * w.mult) * (w.mult > 1 ? 1 : offshoreCost(k2)) : miles / mph * offshoreCost(k2)) * (wet ? 1 : LAND_COST), w ? { kind: "wind", ...w } : { kind: "sea" });
       }
     }
-    for (const e of links.get(k) ?? []) relax(k, e.to, e.miles / speed(e), e);
+    for (const e of links.get(k) ?? []) {
+      if (e.to < N ? ways === "river" : !lineOn(nodes[e.to - N].line)) continue;
+      relax(k, e.to, e.miles / speed(e), e);
+    }
   }
   if (!prev.has(GOAL)) return null;
   // Back from the goal: each step, its kind and line.
@@ -442,20 +449,64 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
   return { legs: legs.filter((l) => l.miles > 0.01), miles, hours, ...(debug ? { steps } : {}) };
 }
 
-/** How much a through voyage shuns the map's land: it goes the least way over it. */
-const LAND_COST = 25;
 /**
  * The voyage between two ports, which always exists. A ship heads out from the port: into the water
  * it is on, else down a river there, else in a straight line to the nearest water. If the map's water
  * is in two parts (a strait narrower than the grid, a shoreline drawn across a bay), it goes the least
  * way between them. With no water on the map at all, a straight line from port to port.
  */
-export function portVoyage(sea, from, to, { mph = 2, season = "summer", reach = 40, milesPerPixel } = {}) {
-  const opts = { mph, season, reach, toWater: true };
+export function portVoyage(sea, from, to, { mph = 2, season = "summer", reach = 40, milesPerPixel, ways = "all" } = {}) {
+  const opts = { mph, season, reach, toWater: true, ways };
   const plan = planSea(sea, from, to, opts) ?? planSea(sea, from, to, { ...opts, through: true });
   if (plan) return plan;
   const miles = Math.hypot(to[0] - from[0], to[1] - from[1]) * (milesPerPixel ?? sea?.milesPerPixel ?? 1), hours = miles / mph;
   return { legs: [{ kind: "sea", name: null, mph, pts: [from, to], miles, hours }], miles, hours };
+}
+
+/** What each way by water is called. */
+export const WAY_LABELS = { sea: "Sea route", river: "River route", both: "River and sea" };
+/**
+ * A voyage as its river and sea parts: [{ kind: "river" | "sea", miles, hours, names }]. The short way
+ * between a town and the river beside it (up to harbourMi) counts as part of the river.
+ */
+export function voyageParts(plan, harbourMi = 18) {
+  const parts = [];
+  for (const l of plan?.legs ?? []) {
+    const kind = l.kind === "river" ? "river" : "sea", last = parts.at(-1);
+    if (last?.kind === kind) { last.miles += l.miles; last.hours += l.hours; if (l.name && !last.names.includes(l.name)) last.names.push(l.name); }
+    else parts.push({ kind, miles: l.miles, hours: l.hours, names: l.name ? [l.name] : [] });
+  }
+  const fold = (i, j) => { if (parts.length > 1 && parts[i].kind === "sea" && parts[i].miles <= harbourMi) { parts[j].miles += parts[i].miles; parts[j].hours += parts[i].hours; parts.splice(i, 1); } };
+  fold(0, 1);
+  fold(parts.length - 1, parts.length - 2);
+  return parts;
+}
+/**
+ * The ways a boat can go between two boarding points, each its own choice: { key, plan }. "sea" between
+ * two ports, "river" when rivers alone join them, "both" when the best voyage uses both.
+ */
+export function boatOptions(sea, from, to, { mph = 2, season = "summer", reach = 40, milesPerPixel, ports = false } = {}) {
+  const mpp = milesPerPixel ?? sea?.milesPerPixel ?? 1, opts = { mph, season, reach, milesPerPixel: mpp }, out = [];
+  if (ports) out.push({ key: "sea", plan: portVoyage(sea, from, to, { ...opts, ways: "sea" }) });
+  const river = planSea(sea, from, to, { mph, season, reach, ways: "river" });
+  if (river) out.push({ key: "river", plan: river });
+  const best = portVoyage(sea, from, to, opts);
+  if (new Set(voyageParts(best, reach * mpp).map((p) => p.kind)).size > 1) out.push({ key: "both", plan: best });
+  if (!out.length) out.push({ key: "sea", plan: best });
+  return out;
+}
+/** Where a path first crosses a line (both [[x, y]]): { at, index } (the path's point before it), or null. */
+export function pathCrossing(path, line) {
+  for (let i = 1; i < path.length; i++) {
+    const [ax, ay] = path[i - 1], rx = path[i][0] - ax, ry = path[i][1] - ay;
+    for (let j = 1; j < line.length; j++) {
+      const [bx, by] = line[j - 1], sx = line[j][0] - bx, sy = line[j][1] - by, d = rx * sy - ry * sx;
+      if (!d) continue;
+      const t = ((bx - ax) * sy - (by - ay) * sx) / d, u = ((bx - ax) * ry - (by - ay) * rx) / d;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return { at: [ax + rx * t, ay + ry * t], index: i - 1 };
+    }
+  }
+  return null;
 }
 
 /**

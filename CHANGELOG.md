@@ -1,5 +1,15 @@
 # KG Realms changelog
 
+## 0.89.0: the new route panel
+
+- **New route flow:** pick where the journey ends first, by searching or clicking the map. After that, every click on a place adds a stop, or use the Add stop button, which also has a search box.
+- **Reorder by dragging:** each stop not yet reached has a handle. Drag it up or down the list, or press the up and down arrows on it. This replaces Earlier and Later. Go on from here and Shift+click are gone.
+- **Land, Sea route, River route, River and sea:** each leg between boarding points shows the options that exist, with miles and days on each. River and sea lists its two parts underneath.
+- **It says where you board and land:** "The party boards at the port of Arine and lands at the port of Wakeflow, the next stop."
+- **Bypass a stop:** when a boat goes to a stop and can go on, Bypass keeps the party aboard to the next stop. The bypassed stop stays in the list with a Stop here button to undo it.
+- **Road crossing a river:** when the road crosses a drawn river that reaches the next stop and the boat is sooner, the leg offers the river route from the crossing, or Stay on the road.
+- The Rules tab has a new By water section, with a ? on each leg's question.
+
 ## 0.88.5: boats on rivers
 
 - **Fixed:** a stop on a drawn river can take a boat. A stop within 3 miles of a river boats can use says "On the river Oban: boat travel available", and its legs offer By boat, to a port or to another stop on a river.
