@@ -307,7 +307,7 @@ function clear(sea, a, b, off = Infinity) {
  * end the water may start, in px. Returns { legs: [{ kind: "sea" | "river" | "wind" | "lane",
  * name, pts, miles, mph }], miles, hours } or null when no water joins the two.
  */
-export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40, debug = false } = {}) {
+export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40, debug = false, toWater = false, through = false } = {}) {
   if (!sea) return null;
   const { W, H, cs, water, offshore, nodes, lines, links, N, milesPerPixel: mpp } = sea;
   // Ships keep to the coast where no wind or current carries them: open water within about 14
@@ -347,6 +347,14 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
   const ends = (p) => {
     const out = sea.nearWater(p, r).map((w) => ({ id: w.c, miles: w.px * mpp }));
     nodes.forEach((n, i) => { const d = Math.hypot(n.at[0] - p[0], n.at[1] - p[1]); if (d <= reach) out.push({ id: N + i, miles: d * mpp }); });
+    // A port with no water or river at hand: a straight line to the nearest water.
+    if (toWater && !out.length) for (let rad = r * 2; rad <= 2 * Math.max(W, H); rad *= 2) {
+      const found = sea.nearWater(p, rad);
+      if (!found.length) continue;
+      const best = found.reduce((a, b) => (b.px < a.px ? b : a));
+      out.push({ id: best.c, miles: best.px * mpp });
+      break;
+    }
     return out;
   };
   const starts = ends(from);
@@ -371,12 +379,14 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
       const x = k % W, y = Math.floor(k / W);
       for (const [dx, dy] of D8) {
         const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !water[ny * W + nx]) continue;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const wet = water[ny * W + nx];
+        if (!wet && !through) continue;
         // No cutting a corner of land.
-        if (dx && dy && (!water[y * W + nx] || !water[ny * W + x])) continue;
+        if (!through && dx && dy && (!water[y * W + nx] || !water[ny * W + x])) continue;
         // A wind carries a ship out to sea: no keeping to the coast while it is behind her.
         const k2 = ny * W + nx, w = windOn(k2, dx, dy), miles = (dx && dy ? Math.SQRT2 : 1) * cs * mpp;
-        relax(k, k2, w ? miles / (mph * w.mult) * (w.mult > 1 ? 1 : offshoreCost(k2)) : miles / mph * offshoreCost(k2), w ? { kind: "wind", ...w } : { kind: "sea" });
+        relax(k, k2, (w ? miles / (mph * w.mult) * (w.mult > 1 ? 1 : offshoreCost(k2)) : miles / mph * offshoreCost(k2)) * (wet ? 1 : LAND_COST), w ? { kind: "wind", ...w } : { kind: "sea" });
       }
     }
     for (const e of links.get(k) ?? []) relax(k, e.to, e.miles / speed(e), e);
@@ -432,6 +442,22 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
   return { legs: legs.filter((l) => l.miles > 0.01), miles, hours, ...(debug ? { steps } : {}) };
 }
 
+/** How much a through voyage shuns the map's land: it goes the least way over it. */
+const LAND_COST = 25;
+/**
+ * The voyage between two ports, which always exists. A ship heads out from the port: into the water
+ * it is on, else down a river there, else in a straight line to the nearest water. If the map's water
+ * is in two parts (a strait narrower than the grid, a shoreline drawn across a bay), it goes the least
+ * way between them. With no water on the map at all, a straight line from port to port.
+ */
+export function portVoyage(sea, from, to, { mph = 2, season = "summer", reach = 40, milesPerPixel } = {}) {
+  const opts = { mph, season, reach, toWater: true };
+  const plan = planSea(sea, from, to, opts) ?? planSea(sea, from, to, { ...opts, through: true });
+  if (plan) return plan;
+  const miles = Math.hypot(to[0] - from[0], to[1] - from[1]) * (milesPerPixel ?? sea?.milesPerPixel ?? 1), hours = miles / mph;
+  return { legs: [{ kind: "sea", name: null, mph, pts: [from, to], miles, hours }], miles, hours };
+}
+
 /**
  * The edge of the water the route finder uses (the map's sea less the shorelines' walls), as line
  * segments in sheet px: each run of cell edges between water and land along a row or column is
@@ -472,8 +498,6 @@ export function nearSea(sea, p, px = 12) {
 /** Shared settlement port rule, used by travel and by local-map entrance setup. */
 /** How near a port a stop can be and still sail from it: as near as counts as being in that town. */
 export const PORT_STOP_MI = 5;
-/** How far a port the GM has marked can be from the water: a marked port always works. */
-export const MARKED_PORT_REACH_MI = 100;
 /**
  * The port a stop is at: the one of its name wherever it stands (a stop keeps the spot it was made at,
  * and a place can move since), else the nearest within PORT_STOP_MI. spot: { lon, lat, name? }.

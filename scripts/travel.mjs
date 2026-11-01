@@ -436,16 +436,16 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
   let clock = 0;
   for (let i = 0; i + 1 < waypoints.length; i++) {
     const from = waypoints[i], to = waypoints[i + 1], h = how[i] ?? {};
-    let plan = null, sched = null, seaFailed = false, perDay = hoursPerDay;
+    let plan = null, sched = null, perDay = hoursPerDay;
     if (h.sea && seaPlan) {
       plan = seaPlan(from, to, h.sea.vessel);
       if (plan) {
         if (h.sea.vessel?.crewed) perDay = 24;
         sched = schedule(plan, { pace, hoursPerDay: perDay, terrainAt, milesPerPixel, encounters });
-      } else seaFailed = true;
+      }
     }
     const flying = h.method?.key === "flying";
-    // legModes: "direct" across country; null, "road" (the ship turned down) or "sea" (no water found): the roads.
+    // legModes: "direct" across country; null, "road" (the ship turned down) or "sea" (not port to port): the roads.
     const m = METHODS[h.method?.key]?.roadsOnly ? "roadsOnly" : flying || legModes[i] === "direct" ? "direct" : mode;
     let bySea = !!plan, autoSea = false;
     if (!plan) {
@@ -476,7 +476,7 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
     legEnds.push(clock);
     for (const l of plan.legs) ground[WATER_KINDS.has(l.kind) ? "water" : l.kind] += l.miles;
     for (let k = 0; k < (stays[i] ?? 0); k++) days.push({ day: days.length + 1, type: "stay", leg: i, miles: 0, hours: 0, start: to, end: to, encounters: [] });
-    legs.push({ from, to, plan, sched, days: sched.days.length, miles: plan.miles, hours: sched.hours, start: startHour, mode: m, method: h.method?.key ?? "foot", sea: bySea, autoSea, seaFailed, crewed: perDay >= 24 });
+    legs.push({ from, to, plan, sched, days: sched.days.length, miles: plan.miles, hours: sched.hours, start: startHour, mode: m, method: h.method?.key ?? "foot", sea: bySea, autoSea, crewed: perDay >= 24 });
   }
   path.push({ at: waypoints.at(-1), day: days.length });
   track.push({ at: waypoints.at(-1), hour: clock, leg: legs.length - 1 });

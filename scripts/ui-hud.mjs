@@ -9,7 +9,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
 import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
-import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, MARKED_PORT_REACH_MI } from "./waterways.mjs";
+import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, portVoyage } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
 import { CampPanel, showDC } from "./ui-camp.mjs";
 import { onCanvas, RightClick } from "./canvas-input.mjs";
@@ -407,7 +407,7 @@ export class TravelHud {
     // Port availability is independent of whether sailing would beat the road. Cache it with
     // the route sheet, so clock updates and camp redraws do not rescan the world's ports.
     const nodes = this.sheet?.nodes ?? this.stops().slice(0, 1).map((w) => ({ at: lonLatToSource(w.lon, w.lat) }));
-    this.seaNodes = new Set(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at); return this.portAt({ lon, lat, name: n.name }) ? [i] : []; }));
+    this.seaNodes = new Map(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at), p = this.portAt({ lon, lat, name: n.name }); return p ? [[i, p.name]] : []; }));
     // The GM is told when a change to the route leaves encounters placed for it behind.
     if (game.user.isGM) {
       const met = new Set((this.plan?.encounters ?? []).map((e) => e.id));
@@ -478,13 +478,12 @@ export class TravelHud {
 
   /** The way by water between two sheet points for a vessel, in this season (remembered). */
   seaPlan(from, to, vessel) {
-    if (!this.sea) return null;
     const season = this.getSeason?.() ?? "summer", key = `${from.map(Math.round)}|${to.map(Math.round)}|${vessel.mph}|${season}`;
+    this.seaCache ??= new Map();
     if (!this.seaCache.has(key)) {
-      // A port the GM marked works, however far inland it was placed: a ship finds the nearest water.
-      const mpp = SOURCE_MAP.milesPerPixel, marked = (q) => { const [lon, lat] = sourceToLonLat(q[0], q[1]), p = this.portAt({ lon, lat }); return p?.port === true; };
-      const reach = (marked(from) || marked(to) ? MARKED_PORT_REACH_MI : HARBOUR_MI) / mpp;
-      this.seaCache.set(key, planSea(this.sea, from, to, { mph: vessel.mph, season, reach }));
+      // Port to port always sails. Anywhere else needs the water to be there.
+      const mpp = SOURCE_MAP.milesPerPixel, opts = { mph: vessel.mph, season, reach: HARBOUR_MI / mpp, milesPerPixel: mpp };
+      this.seaCache.set(key, this.portAtPoint(from) && this.portAtPoint(to) ? portVoyage(this.sea, from, to, opts) : planSea(this.sea, from, to, opts));
     }
     return this.seaCache.get(key);
   }
@@ -539,8 +538,19 @@ export class TravelHud {
   portAt(w) {
     return portForStop(w, this.getPlaces().filter((p) => (!p.hidden || game.user?.isGM) && this.isPort(p)), lonLatToSource, SOURCE_MAP.milesPerPixel);
   }
+  /** The port at a sheet point: a stop standing there counts by its name. */
+  portAtPoint(q) {
+    const [lon, lat] = sourceToLonLat(q[0], q[1]);
+    const stop = this.stops().find((w) => { const at = lonLatToSource(w.lon, w.lat); return Math.hypot(at[0] - q[0], at[1] - q[1]) < 1; });
+    return this.portAt(stop ?? { lon, lat });
+  }
   /** Whether leg i (from stop i to stop i + 1) runs port to port. */
   legByWater(i) { const sts = this.stops(); return !!(this.portAt(sts[i]) && this.portAt(sts[i + 1])); }
+  /** "port of Arine to port of Wakeflow" for leg i, or "" when it does not run port to port. */
+  legPorts(i) {
+    const sts = this.stops(), a = this.portAt(sts[i]), b = this.portAt(sts[i + 1]);
+    return a && b ? `port of ${a.name} to port of ${b.name}` : "";
+  }
 
   /** The world's prices against the book's (the Prices setting): ×1 to ×10, or ÷2 to ÷10. */
   get priceScale() {
@@ -1090,7 +1100,7 @@ export class TravelHud {
       const isEnd = k != null && k - 1 === s.waypoints.length - 1;
       const onward = gm && isEnd && this.mode === "route" ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
       const tools = gm && k != null && k > 0 ? `<span class="stop-tools">${onward}${move}<label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button></span>` : "";
-      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${(first || k != null) && !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), around = spotRealms(lon, lat, this.getPlaces()); return around ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })() : ""}${this.seaNodes?.has(i) ? '<small class="sea-available">Sea travel available</small>' : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
+      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${(first || k != null) && !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), around = spotRealms(lon, lat, this.getPlaces()); return around ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })() : ""}${this.seaNodes?.has(i) ? `<small class="sea-available">Port of ${esc(this.seaNodes.get(i))}: sea travel available</small>` : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
     };
     // Where the party is: a marker after the last point passed.
     const pr = this.progress(), partyAt = pr && pr.status !== "arrived" && sh ? sh.nodes.findLastIndex((n) => n.hour <= pr.hour + 1e-6) : -1;
@@ -1106,16 +1116,15 @@ export class TravelHud {
       const toggle = gm && first && !L?.sea && !flying && !roadsOnly && !done ? `<button data-act="way" data-i="${leg}" class="way ${direct ? "direct" : ""}" title="${direct ? "Going straight across country. Click to use roads." : "Using roads where they save time. Click to go straight across country."}">${direct ? '<i class="fa-solid fa-tree"></i> Direct' : '<i class="fa-solid fa-road"></i> Road'}</button>` : "";
       let how = "";
       if (gm && first && L) {
-        const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, byWater = this.legByWater(leg);
+        const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, byWater = this.legByWater(leg), ports = this.legPorts(leg);
         const opt = (value, label, on) => `<option value="${esc(value)}" ${on ? "selected" : ""}>${esc(label)}</option>`;
         const sel = `<select name="how-${leg}" ${done ? "disabled" : ""} aria-label="How this leg goes">
           <optgroup label="Overland">${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !L.sea && !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, !L.sea && legMethod === k)).join("")}</optgroup>
-          ${byWater ? `<optgroup label="By boat">${Object.entries(VESSELS).map(([k, x]) => opt(`v:${k}`, `${x.label}, ${x.mph} mph`, L.sea && v.key === k)).join("")}${v?.actor ? opt(`v:${v.key}`, v.label, true) : ""}</optgroup>` : ""}</select>`;
+          ${byWater ? `<optgroup label="By boat, ${esc(ports)}">${Object.entries(VESSELS).map(([k, x]) => opt(`v:${k}`, `${x.label}, ${x.mph} mph`, L.sea && v.key === k)).join("")}${v?.actor ? opt(`v:${v.key}`, v.label, true) : ""}</optgroup>` : ""}</select>`;
         const fare = this.fareOf(leg);
         const fareRow = fare ? `<span class="fare"><label>${fare.paid ? "Pay" : "Fare"} <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
-        const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"} ${rule(this.ruleText().vessels)}</span>` : "";
-        const warn = L.seaFailed ? `<span class="warn-line"><i class="fa-solid fa-circle-exclamation"></i> No water joins these ports: going overland.</span>`
-          : L.autoSea ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland (water is in the way): going by boat.</span>` : "";
+        const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${ports ? `${esc(ports[0].toUpperCase() + ports.slice(1))}: ` : ""}${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"} ${rule(this.ruleText().vessels)}</span>` : "";
+        const warn = L.autoSea ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland: going by boat${ports ? `, ${esc(ports)}` : ""}.</span>` : "";
         how = `<span class="leg-how">${sel}${drop}${fareRow}${warn}</span>`;
       }
       return `<li class="going ${g.kind}"><span class="via">${esc(g.via)}</span><span class="meta">${mi(g.miles)} mi · ${hrs(g.hours)}</span>${toggle}${how}</li>`;

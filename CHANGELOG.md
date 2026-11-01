@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.88.4: a port is a port
+
+- **Fixed:** a port is a port. Any leg between two ports can go by boat, every time. The "No water joins these ports" message is gone.
+- A ship heads out from the port: into the water if the port is on it, down a river if one runs through it, otherwise in a straight line to the nearest water.
+- A strait too narrow for the route finder, or a shoreline drawn across a bay, no longer stops a voyage. The ship goes through by the shortest way.
+- **Changed:** the panel names the port wherever sea travel comes up: "Port of Arine: sea travel available" on the stop, "By boat, port of Arine to port of Wakeflow" in the leg's list and on the ship line.
+
 ## 0.88.3: ports work
 
 - **Fixed:** a settlement marked as a port now works as one. A ship finds the nearest water even if the port was placed well inland (up to 100 miles).

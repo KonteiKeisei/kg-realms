@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { portForStop, PORT_STOP_MI, MARKED_PORT_REACH_MI } from "../scripts/waterways.mjs";
+import { portForStop, PORT_STOP_MI, portVoyage, planSea, buildSea, shoreWater } from "../scripts/waterways.mjs";
 
 const toSheet = (lon, lat) => [lon, lat];
 const arine = { id: "a", name: "Arine", lon: 0, lat: 0, port: true }, wakeflow = { id: "w", name: "Wakeflow", lon: 500, lat: 0, port: true };
@@ -26,9 +26,55 @@ test("the nearest wins, and no stop means no port", () => {
   assert.equal(portForStop({ lon: 0, lat: 0 }, [], toSheet, 1), null);
 });
 
-test("a marked port reaches water from well inland; the panel uses all this", () => {
-  assert.ok(MARKED_PORT_REACH_MI >= 100);
+// A sheet of 2000 x 1600 px. mpp 0.5.
+const blank = () => ({ data: new Uint8Array(500 * 400).fill(1), width: 500, height: 400, cell: 4 });
+const seaOf = (shores) => { const list = shores.map((s) => ({ kind: "shore", ...s })); return buildSea(shoreWater(blank(), list.filter((s) => s.kind === "shore")), list, { milesPerPixel: 0.5 }); };
+const voyage = (sea, a, b) => portVoyage(sea, a, b, { mph: 2, reach: 36, milesPerPixel: 0.5 });
+// Land in the middle of the sheet, water all round.
+const island = { id: "c", closed: true, water: "outside", pts: [[400, 300], [1600, 300], [1600, 1300], [400, 1300]] };
+
+test("a port on the coast heads straight out and sails round", () => {
+  const p = voyage(seaOf([island]), [1000, 300], [1000, 1300]);
+  assert.ok(p.miles > 500 && p.miles < 1200, String(p.miles));
+  assert.ok(p.legs.every((l) => l.kind === "sea" || l.kind === "wind"));
+});
+
+test("a port inland with no river goes in a straight line to the nearest water", () => {
+  const sea = seaOf([island]), from = [1000, 500], p = voyage(sea, from, [1000, 1300]);
+  assert.equal(planSea(sea, from, [1000, 1300], { mph: 2, reach: 36 }), null, "not by the ordinary rule");
+  assert.deepEqual(p.legs[0].pts[0], from);
+  const out = p.legs[0].pts[1];
+  assert.ok(out[1] < 300, "north: the nearest coast, " + out);
+  assert.ok(Math.abs(out[0] - 1000) < 40, "straight up, " + out);
+});
+
+test("a port inland on a river goes down the river", () => {
+  const river = { id: "r", kind: "river", name: "Oban", pts: [[1000, 700], [1000, 280]] };
+  const p = voyage(seaOf([island, river]), [1000, 700], [1000, 1300]);
+  assert.ok(p.legs.some((l) => l.kind === "river" && l.name === "Oban"), JSON.stringify(p.legs.map((l) => l.kind)));
+});
+
+test("water cut in two still sails, the least way over the land between", () => {
+  const shores = [{ id: "n", water: "left", pts: [[0, 700], [2000, 700]] }, { id: "s", water: "left", pts: [[2000, 800], [0, 800]] }];
+  const sea = seaOf(shores), a = [1000, 700], b = [1000, 800];
+  assert.equal(planSea(sea, a, b, { mph: 2, reach: 8 }), null);
+  const p = voyage(sea, a, b);
+  assert.ok(p.miles < 100, "straight over the thin land, not round it: " + p.miles);
+});
+
+test("no water on the map at all: still a voyage, port to port", () => {
+  const sea = buildSea(blank(), [], { milesPerPixel: 0.5 });
+  const p = voyage(sea, [100, 100], [500, 100]);
+  assert.equal(Math.round(p.miles), 200);
+  assert.equal(p.hours, 100);
+  assert.equal(voyage(null, [100, 100], [500, 100]).miles, 200, "or no terrain at all");
+});
+
+test("the panel names the port and never says a port cannot sail", () => {
   const hud = readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8");
-  assert.ok(hud.includes("p?.port === true")); assert.ok(hud.includes("MARKED_PORT_REACH_MI : HARBOUR_MI"));
-  assert.ok(hud.includes("this.portAt({ lon, lat, name: n.name })"));
+  const go = readFileSync(new URL("../scripts/travel.mjs", import.meta.url), "utf8");
+  assert.ok(!hud.includes("No water joins")); assert.ok(!hud.includes("seaFailed")); assert.ok(!go.includes("seaFailed"));
+  assert.ok(hud.includes("Port of ${esc(this.seaNodes.get(i))}: sea travel available"));
+  assert.ok(hud.includes("port of ${a.name} to port of ${b.name}"));
+  assert.ok(hud.includes("portVoyage(this.sea, from, to, opts)"));
 });
