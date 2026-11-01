@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.78.0: made worlds move to KG Realms Data
+
+- **Made worlds are saved outside the worlds folder.** Make realm world now saves a map's files in Data/KG Realms Data/World/<world id>/, not in the game world's folder.
+- **Worlds already made move by themselves.** The next time a GM loads the game world, each one is copied to the new folder, every file read back and compared, and only then does the world switch to it. If anything fails, it says so, keeps working from its old folder, and tries again next load.
+- Foundry cannot delete files, so the old folder (Data/worlds/<game world>/kg-realms/) stays until you delete it. A message names it when the move is done.
+- Two game worlds with a map of the same name get a folder each.
+- Places, roads, rivers, biomes and snow settings are still saved in the game world's own settings, as before.
+- Include Data/KG Realms Data in your backups: Foundry's world backups do not cover it.
+
 ## 0.77.3: original picture markers
 
 - **New picture markers.** All 71 picture markers (buildings, ports, danger, treasure, heraldry, shapes and points) are redrawn as original art, made entirely by code (tools/markers/draw-icons.py). Their names and ids are the same, so places keep the marker chosen for them.

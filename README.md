@@ -22,7 +22,7 @@ Or download `kg-realms.zip` from the [latest release](https://github.com/KonteiK
 4. Wait while KG Realms backs up the scene, cuts the picture into compressed map tiles and saves the world. A map 12,000 px wide takes a few minutes. Foundry stays usable meanwhile.
 5. Open the scene. It is now a realm map with nothing on it yet. Add places, roads, rivers, regions and biomes with the editors, and set a party token travelling.
 
-The world is saved in your game world's data folder (`worlds/<your world>/kg-realms/<world id>/`). Right-click the scene again for:
+The map's files are saved in Foundry's Data folder (`KG Realms Data/World/<world id>/`), outside every game world, so include that folder in your backups. Places, roads and other edits are saved in the game world itself. Right-click the scene again for:
 
 - **Realm world settings**: its name and width in miles.
 - **Revert to backup**: the scene's picture and grid come back. The world and its tiles stay saved, so making it a realm world again is quick.

@@ -95,6 +95,50 @@ export function packManifest(id, sheet, lods, fingerprint) {
 /** The world's routes file. Foundry refuses to upload .geojson files, so homebrew worlds use .json. */
 export const ROUTES_FILE = "routes.json";
 
+/** Where made worlds are saved (0.78), in Foundry's Data folder and outside every game world. */
+export const DATA_HOME = "KG Realms Data/World";
+export const dataFolder = (folder) => `${DATA_HOME}/${folder}`;
+/** A world made before 0.78, still saved inside its game world's folder. */
+export const inGameWorld = (def) => /^worlds\//.test(def?.root ?? "");
+/** A folder name not yet used under DATA_HOME: game worlds share it, and may each have a "trorune". */
+export function freeFolder(id, taken = []) {
+  const used = new Set(taken);
+  if (!used.has(id)) return id;
+  let n = 2;
+  while (used.has(`${id}-${n}`)) n++;
+  return `${id}-${n}`;
+}
+/** Every file of a world to move: its pack, index and tiles must all arrive; the rest move if they exist. */
+export function filesToMove(pack, listed = [], routes = ROUTES_FILE) {
+  const required = new Set(["terrain-pack.json", "index.json", ...pack.lods.flatMap((l) => l.tiles.map((t) => t.path))]);
+  const all = new Set([...required, routes, "waterways.json", "biomes.json", "encounters.json", "local/index.json", ...listed.filter((rel) => !/(^|\/)probe\./.test(rel))]);
+  return [...all].map((path) => ({ path, required: required.has(path) }));
+}
+/**
+ * Copy files, each read back and compared before it counts. read(path): its bytes, or null when it
+ * is not there. write(path, bytes): saves it and returns the bytes read back. Throws on the first
+ * required file missing or any file that comes back changed, so nothing half-moved is ever used.
+ */
+export async function copyFiles(files, { read, write, concurrency = 4, onFile = () => {} }) {
+  let next = 0, done = 0, failed = null;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (next < files.length && !failed) {
+      const file = files[next++];
+      try {
+        const bytes = await read(file.path);
+        if (!bytes) { if (file.required) throw Error(`${file.path} is missing`); }
+        else {
+          const back = await write(file.path, bytes);
+          if (back?.length !== bytes.length || back.some((b, i) => b !== bytes[i])) throw Error(`${file.path} changed when saved`);
+        }
+        onFile(++done, files.length);
+      } catch (err) { failed ??= err; }
+    }
+  }));
+  if (failed) throw failed;
+  return done;
+}
+
 /** The world's index.json: the sheet and nothing on it yet. */
 export function emptyIndex(id, name, sheet) {
   return { world: id, name, source: "", notice: "", homebrew: true, regions: [], places: [], mainMap: { bounds: sheet.bounds }, sourceMap: sheet, routes: ROUTES_FILE };

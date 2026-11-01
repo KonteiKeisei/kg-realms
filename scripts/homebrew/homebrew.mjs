@@ -1,13 +1,13 @@
 // Homebrew realm worlds (0.74): the GM right-clicks a scene with a map picture and chooses "Make
 // realm world". The scene is backed up, the picture is cut into KTX2 tiles in the browser (Basis
-// Universal, lib/basis), and a world with nothing on it yet is saved in this game world's data
-// folder (worlds/<game world>/kg-realms/<id>/) and registered on every load from a world setting.
+// Universal, lib/basis), and a world with nothing on it yet is saved in Foundry's Data folder
+// (KG Realms Data/World/<id>/) and registered on every load from a world setting.
 // The scene then draws as a realm map. Afterwards: settings, revert to the backup, export as module.
 import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
-import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, zipStore, moduleIdFrom, moduleScript, ROUTES_FILE, milesFromGrid, resheet } from "./plan.mjs";
+import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, zipStore, moduleIdFrom, moduleScript, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
 
 const ID = "kg-realms";
 const SETTING = "homebrewWorlds";
@@ -28,9 +28,70 @@ export function registerHomebrew() {
   for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (app, options) => contextOptions(options));
   Hooks.once("ready", async () => {
     if (game.user !== game.users.activeGM) return;
+    await moveWorlds();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
   });
+}
+
+/** The folders in a folder of the Data folder, by name; none when it is not there yet. */
+async function foldersIn(dir) {
+  const listing = await FilePickerImpl().browse("data", dir).catch(() => null);
+  return (listing?.dirs ?? []).map((d) => decodeURIComponent(d).split("/").pop());
+}
+/** Every file under a folder, relative to it; none if it cannot be listed (the pack still names the tiles). */
+async function filesIn(root, at = root) {
+  const listing = await FilePickerImpl().browse("data", at).catch(() => null);
+  const here = (listing?.files ?? []).map((f) => decodeURIComponent(f).slice(root.length + 1));
+  const below = await Promise.all((listing?.dirs ?? []).map((d) => filesIn(root, decodeURIComponent(d))));
+  return [...here, ...below.flat()];
+}
+const readBytes = async (path) => {
+  const res = await fetch(foundry.utils.getRoute(path), { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw Error(`${path}: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+};
+
+/**
+ * 0.78: worlds made earlier move out of their game world's folder. Every file is read back before
+ * the world switches to the new folder, and a failure leaves it reading the old one (and says so),
+ * to try again next load. Foundry cannot delete files, so the old folder is left for the GM.
+ */
+async function moveWorlds() {
+  for (const def of Object.values(saved())) {
+    if (!inGameWorld(def) || !worldDef(def.id)) continue;
+    let note = null;
+    try {
+      const pack = JSON.parse(new TextDecoder().decode(await readBytes(`${def.root}/terrain-pack.json`)));
+      const routes = JSON.parse(new TextDecoder().decode(await readBytes(`${def.root}/index.json`))).routes ?? ROUTES_FILE;
+      // A folder holding this same map is an earlier move that stopped: carry on in it.
+      const taken = await foldersIn(DATA_HOME);
+      const same = taken.includes(def.id) && await readBytes(`${dataFolder(def.id)}/terrain-pack.json`).then((b) => b && JSON.parse(new TextDecoder().decode(b)).fingerprint === pack.fingerprint).catch(() => false);
+      const to = dataFolder(same ? def.id : freeFolder(def.id, taken));
+      const files = filesToMove(pack, await filesIn(def.root), routes);
+      note = ui.notifications.info(`KG Realms: moving ${def.title} to Data/${to}. Leave this window open.`, { permanent: true });
+      for (const dir of new Set(files.map((f) => f.path.split("/").slice(0, -1).join("/")))) await ensureDir(dir ? `${to}/${dir}` : to);
+      await copyFiles(files, {
+        read: (rel) => readBytes(`${def.root}/${rel}`),
+        write: async (rel, bytes) => {
+          const parts = rel.split("/"), name = parts.pop(), dir = [to, ...parts].join("/");
+          const path = await upload(dir, name, bytes, name.endsWith(".json") ? "application/json" : "application/octet-stream");
+          return readBytes(path);
+        }
+      });
+      const all = saved(); all[def.id] = { ...all[def.id], root: to, assetBase: to, movedFrom: def.root };
+      await game.settings.set(ID, SETTING, all);
+      registerWorld(all[def.id]); forgetWorld(def.id);
+      ui.notifications.info(`KG Realms: ${def.title} now lives in Data/${to}. Check it, then you can delete the old folder, Data/${def.root}.`, { permanent: true });
+      if (canvas.scene?.getFlag(ID, "world") === def.id) canvas.draw();
+    } catch (err) {
+      console.error(`${ID} | moving ${def.id}`, err);
+      ui.notifications.error(`KG Realms: could not move ${def.title} to Data/${DATA_HOME}: ${err?.message ?? err}. It keeps working from its old folder, and the move will try again next time you load.`, { permanent: true });
+    } finally {
+      if (note) ui.notifications.remove?.(note);
+    }
+  }
 }
 
 /** A made world's optional files, empty: KG Realms reads none as none, but the browser logs every missing file. */
@@ -165,7 +226,7 @@ async function makeRealmWorld(scene) {
       <div class="form-group"><label>World name</label><input name="name" type="text" value="${esc(again?.title ?? scene.name)}" required></div>
       <div class="form-group"><label>Map width in miles ${q("How far it is from the left edge of the picture to the right. Travel times and the day's distance on the route sheet use it. You can change it later in the world's settings.")}</label><input name="miles" type="number" min="1" step="any" value="${again?.miles ?? milesFromGrid(scene.width, scene.grid) ?? 1000}" required></div>
       ${again ? `<div class="form-group"><label class="checkbox"><input name="reuse" type="checkbox" checked> Use the map tiles already made for ${esc(again.title)}</label></div>` : ""}
-      <p class="notes">Nothing is read from the picture: the realm starts empty and you add places, roads, rivers and regions with the editors. The scene is copied to the "${BACKUPS}" folder first. The world is saved in this game world's data folder.</p>
+      <p class="notes">Nothing is read from the picture: the realm starts empty and you add places, roads, rivers and regions with the editors. The scene is copied to the "${BACKUPS}" folder first. The map's files are saved in Data/${DATA_HOME}.</p>
       <p class="notes">Pictures over ${MAX_PICTURE.toLocaleString()} px on a side are shrunk to fit (a browser limit); the picture file is never changed.</p>
     </div>`,
     buttons: [{ action: "make", label: "Make realm world", icon: "fa-solid fa-earth-europe", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
@@ -197,8 +258,8 @@ async function build(scene, name, miles) {
     win.set("read", "done", `${bitmap.width.toLocaleString()} x ${bitmap.height.toLocaleString()}`);
 
     step = "tiles"; halt();
-    const id = worldIdFrom(name, [...allWorlds().map((w) => w.id), ...Object.keys(saved())]);
-    const root = `worlds/${game.world.id}/kg-realms/${id}`, tileDir = `${root}/assets/terrain`;
+    const id = worldIdFrom(name, [...allWorlds().map((w) => w.id), ...Object.keys(saved()), ...await foldersIn(DATA_HOME)]);
+    const root = dataFolder(id), tileDir = `${root}/assets/terrain`;
     await ensureDir(tileDir);
     await checkUploads(tileDir);
     const sheet = homebrewSheet(bitmap.width, bitmap.height, miles), lods = planTiles(sheet), tiles = lods.flatMap((l) => l.tiles);
@@ -322,7 +383,7 @@ async function exportModule(def) {
       <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
       <div class="form-group"><label>Version</label><input name="version" type="text" value="1.0.0"></div>
       <p class="notes">The zip holds the world's map, its tiles and its files. Places, roads, rivers and biomes added with the editors are saved in this game world and keep working here; they are not in the zip yet.</p>
-      <p class="notes">Once the module is installed and enabled, the world reads from it instead of this game world's data folder.</p>`,
+      <p class="notes">Once the module is installed and enabled, the world reads from it instead of Data/${DATA_HOME}.</p>`,
     buttons: [{ action: "go", label: "Download zip", icon: "fa-solid fa-download", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
   });
   if (!values || typeof values !== "object") return;

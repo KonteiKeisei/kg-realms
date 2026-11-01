@@ -6,8 +6,8 @@
 //  - id: the world's id, as stored in scenes and flags ("toril");
 //  - module: the module that ships it; its data is at modules/<module>/data/worlds/<id>/ unless root;
 //  - root: another folder for its data (a path under modules/ or the user data folder);
-//  - assetBase: the folder its terrain tiles' paths start from (default modules/<module>; a homebrew
-//    world made in a game world keeps them beside its data);
+//  - assetBase: the folder its terrain tiles' paths start from (default modules/<module>; a made
+//    world keeps them beside its data);
 //  - anything else is the world's own settings (its map sheet, defaults), read where they are used.
 
 const ENGINE = "kg-realms";
