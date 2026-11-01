@@ -638,6 +638,9 @@ const pins = new PinEditor({
   getRegions: () => current?.world?.regions ?? [],
   // A place selected in the editor: the map shows its layer.
   showLayer: (name) => layersRail.setLayer(name),
+  // A geography area can be a biome zone (0.82).
+  getBiomes: () => (current ? biomesOf(current.region.world) : null),
+  saveBiomes: (fn) => current && saveBiomes(current.region.world, fn),
   openCard: (id, options) => current && openCard({ kind: "realm", world: current.region.world, id }, options),
   getEdits: () => (current ? editsOf(current.region.world) : null),
   saveEdits: (fn) => saveEdits(current.region.world, fn),

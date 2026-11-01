@@ -1895,3 +1895,9 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-ui .kgr-seg-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .kgr-ui .kgr-seg-row > button { min-height: 32px !important; padding: 4px 6px !important; }
 .kgr-ui .kgr-seg-row > button.on { border-color: var(--kgr-accent); background: var(--kgr-accent-soft); color: var(--kgr-text); }
+
+/* A shoreline's water side, once set (0.82). */
+.kgr-tab button.kgr-water-set, button.kgr-water-set { border-color: var(--kgr-ok, #70d270); background: color-mix(in srgb, var(--kgr-ok, #70d270) 24%, transparent); color: var(--kgr-ok, #70d270); }
+
+/* A stop's name may be long ("In Thay, in Rawlinswood near Arine"): two tidy lines at most, the rest in its tooltip (0.82). */
+.kgr-travel ol.stops .location-title button.nm { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow: hidden; overflow-wrap: anywhere; text-wrap: balance; line-height: 1.25; }

@@ -95,6 +95,12 @@ export function biomeLookup(config = {}, terrainAt = () => TERRAIN[1], project =
   return at;
 }
 
+/** The biome type a land area's class means: a forest is forest. Null where it says nothing about the going (a coast, a valley). */
+const CLASS_BIOME = { forest: "forest", wood: "forest", woods: "forest", jungle: "forest", mountains: "mountains", range: "mountains", hills: "hills", highlands: "hills", desert: "desert", wastes: "desert", badlands: "desert", marsh: "wetlands", swamp: "wetlands", bog: "wetlands", fen: "wetlands", moor: "wetlands", glacier: "glacier", ice: "glacier", tundra: "tundra", taiga: "taiga", steppe: "plains", plain: "plains", plains: "plains", grassland: "plains" };
+export const biomeForClass = (cls) => CLASS_BIOME[String(cls ?? "").toLowerCase()] ?? null;
+/** A biome zone made from a place's closed border, tied to it by place id. */
+export const zoneForPlace = (place, type, pts) => ({ name: place.name ?? "Biome", type, pts: structuredClone(pts), overrides: {}, place: place.id });
+
 /** Biome replication alone cannot change movement speed. Effects reacting to it still can. */
 export function onlyBiomeFlagChanged(changes) {
   const paths=[];

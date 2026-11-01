@@ -128,6 +128,40 @@ export function areasGeoJSON(places, regions = []) {
   return { areas: { type: "FeatureCollection", features: areas }, labels: { type: "FeatureCollection", features: labels } };
 }
 
+const ringSize = (ring) => Math.abs(ring.reduce((sum, a, i) => { const b = ring[(i + 1) % ring.length]; return sum + a[0] * b[1] - a[1] * b[0]; }, 0));
+/**
+ * What to call a spot, from what the GM has drawn and placed: "In Thay, in Rawlinswood near Arine",
+ * "On Turquoise Bay near Wakeflow". What is not there is left out, with nothing in its place. In a
+ * town it is that town and its realm. Only borders the GM drew count (a world's rectangles are too
+ * rough to say which side of a coast a party is on); where they nest, the smallest wins. A settlement
+ * takes "near" before any other place. milesTo(place) gives its distance from the spot.
+ */
+export function spotName(lon, lat, places, milesTo) {
+  let town = null, td = 5, settlement = null, sd = 60, poi = null, pd = 60, realm = null, geo = null;
+  for (const p of places ?? []) {
+    if (p.hidden || (p.unnamed && !p.edited)) continue;
+    const layer = placeLayer(p);
+    if (!layer) continue;
+    if (layer !== "places") {
+      const o = placeOutline(p);
+      if (!o?.closed || !insideRing(o.pts, [lon, lat])) continue;
+      const size = ringSize(o.pts), best = layer === "realms" ? realm : geo, found = { p, size };
+      if (!best || size < best.size) { if (layer === "realms") realm = found; else geo = found; }
+      continue;
+    }
+    const d = milesTo(p);
+    if (p.kind === "settlement") {
+      if (d < td) { td = d; town = p; }
+      if (d < sd) { sd = d; settlement = p; }
+    } else if (d < pd) { pd = d; poi = p; }
+  }
+  if (town) return realm ? `In ${town.name}, ${realm.p.name}` : `In ${town.name}`;
+  const where = [realm && `in ${realm.p.name}`, geo && `${areaKind(geo.p) === "water" ? "on" : "in"} ${geo.p.name}`].filter(Boolean).join(", ");
+  const near = (settlement ?? poi)?.name;
+  const text = where && near ? `${where} near ${near}` : where || (near ? `near ${near}` : "Wilderness");
+  return text[0].toUpperCase() + text.slice(1);
+}
+
 /** Which places have an outline drawn on the map (their names come from the areas, not the places source). */
 export function outlinedIds(places, regions = []) {
   const records = recordIndex(regions);

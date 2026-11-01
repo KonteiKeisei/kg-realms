@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerWorld } from "../scripts/worlds.mjs";
-import { calendarForExport, calendarAction, calendarLabel, fileRef, exportReport } from "../scripts/homebrew/export-plan.mjs";
+import { calendarForExport, calendarAction, calendarLabel, keepsOwnCalendar, startingDate, fileRef, exportReport } from "../scripts/homebrew/export-plan.mjs";
 import { moduleScript } from "../scripts/homebrew/plan.mjs";
 import { applyModuleCalendars } from "../scripts/homebrew/export.mjs";
 
@@ -133,4 +133,82 @@ test("only the first GM sets it", async () => {
   game.users.activeGM = {};
   await applyModuleCalendars();
   assert.equal(calls.length, 0);
+});
+
+test("the date goes with the calendar, and is used only where the clock has not started", () => {
+  assert.equal(calendarForExport(cal("harptos"), manager(), null, 5000).worldTime, 5000);
+  assert.equal(calendarForExport(cal("harptos"), manager(), null, 0).worldTime, undefined);
+  assert.deepEqual(startingDate({ worldTime: 5000 }, 0), { worldTime: 5000 });
+  assert.deepEqual(startingDate({ startYear: 1497 }, 0), { year: 1497 });
+  assert.equal(startingDate({ startYear: 1497 }, 86400), null, "a date already set stays");
+  assert.equal(startingDate({ worldTime: 5000 }, 86400), null);
+  assert.equal(startingDate({}, 0), null);
+});
+
+test("a campaign running on another calendar keeps it; Calendaria's default gives way", () => {
+  assert.equal(keepsOwnCalendar("custom-mine", "harptos", 86400), true);
+  assert.equal(keepsOwnCalendar("harptos", "harptos", 86400), false, "already on it");
+  assert.equal(keepsOwnCalendar("gregorian", "harptos", 86400), false, "the default was never chosen");
+  assert.equal(keepsOwnCalendar("custom-mine", "harptos", 0), false, "nothing has happened on it yet");
+});
+
+function faerun({ active = "gregorian", worldTime = 0, year = -4, yearZero = 1501 } = {}) {
+  const made = install();
+  game.time = { worldTime, components: { year }, set: async (t) => { made.calls.push(["time", t]); game.time.worldTime = t; } };
+  CALENDARIA.managers.CalendarManager.getActiveCalendar = () => ({ metadata: { id: active }, years: { yearZero } });
+  CALENDARIA.api.jumpToDate = async (d) => { made.calls.push(["jump", d]); };
+  return made;
+}
+const harptos = () => world({ id: "harptos", name: "Harptos", startYear: 1497 });
+
+test("Faerun on a new game world: Harptos, year 1497", async () => {
+  const { calls, notes } = faerun();
+  harptos();
+  await applyModuleCalendars();
+  assert.ok(calls.some(([k, v]) => k === "switch" && v === "harptos"));
+  const jump = calls.find(([k]) => k === "jump");
+  assert.deepEqual(jump[1], { year: 1497, month: 1, day: 1 });
+  assert.ok(calls.some(([k]) => k === "reload"));
+  assert.ok(notes.info.some((m) => m.includes("Harptos, year 1497")));
+  assert.equal(notes.warn.length, 0);
+});
+
+test("Faerun on a legacy install: its date and calendar stay, with no reload", async () => {
+  const { calls, notes } = faerun({ active: "harptos", worldTime: 86400, year: -2 });
+  const id = harptos();
+  await applyModuleCalendars();
+  const own = calls.filter(([k]) => ["switch", "jump", "time", "reload"].includes(k) );
+  assert.deepEqual(own.filter(([k, v]) => k !== "switch" || v === "harptos"), [], "the date is set already");
+  assert.ok(!notes.info.some((m) => m.includes(id.toUpperCase()) && m.includes("now")));
+});
+
+test("Faerun already on Harptos with the clock at zero gets year 1497, with no reload", async () => {
+  const { calls } = faerun({ active: "harptos" });
+  harptos();
+  await applyModuleCalendars();
+  assert.ok(calls.some(([k]) => k === "jump"));
+});
+
+test("a campaign already running on its own calendar is left alone, and told", async () => {
+  const { calls, notes, settings } = faerun({ active: "custom-mine", worldTime: 86400 });
+  const id = harptos();
+  await applyModuleCalendars();
+  assert.ok(!calls.some(([k, v]) => k === "switch" && v === "harptos"));
+  assert.ok(notes.info.some((m) => m.includes(id.toUpperCase()) && m.includes("already running")));
+  assert.equal(settings.get("calendarsApplied")[id], "harptos");
+});
+
+test("an exported date is set on a new game world", async () => {
+  const { calls, files } = faerun();
+  const id = world({ file: "calendar.json", name: "T", signature: 11 });
+  files.set(`modules/${id}/w/calendar.json`, JSON.stringify({ id: "custom-z", name: "T", kind: "custom", data: {}, worldTime: 777 }));
+  await applyModuleCalendars();
+  assert.ok(calls.some(([k, v]) => k === "time" && v === 777));
+});
+
+test("a year Calendaria does not land on is reported, not silently wrong", async () => {
+  const { notes } = faerun({ year: 0 });
+  const id = harptos();
+  await applyModuleCalendars();
+  assert.ok(notes.warn.some((m) => m.includes(id.toUpperCase()) && m.includes("1497") && m.includes("1501")));
 });

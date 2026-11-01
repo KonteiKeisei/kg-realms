@@ -8,7 +8,8 @@
 import { onCanvas } from "./canvas-input.mjs";
 import { markerCatalog, iconFor } from "./map-symbols.mjs";
 import { latLonToScene } from "./geo.mjs";
-import { placeLayer, placeShape, placeOutline, recordIndex, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { placeLayer, placeShape, placeOutline, recordIndex, areaKind, MAP_LAYERS, LAYER_NAMES, SHAPES, insideRing, interiorPoint } from "./map-layers.mjs";
+import { biomeTypes, biomeForClass, zoneForPlace } from "./biomes.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
 // Drawing an area's border (0.77): how near (screen px) a click to the first corner closes it, and
 // how near a click must be to a corner or an edge to take it.
@@ -240,7 +241,32 @@ export class PinEditor {
     const fields = { area: pts.map(([lon, lat]) => [+lon.toFixed(6), +lat.toFixed(6)]), areaClosed: !!closed, shape: closed ? "area" : shape };
     if (closed && pts.length > 2 && !insideRing(pts, [p.lon, p.lat])) { const [lon, lat] = interiorPoint(pts); Object.assign(fields, { lon: +lon.toFixed(6), lat: +lat.toFixed(6) }); }
     await this.#save(id, fields);
+    await this.#followBorder(id, closed ? fields.area : null);
     this.#render(); this.#overlay();
+  }
+  /** A biome zone made from this place keeps to its border, and goes when the border stops closing. */
+  async #followBorder(id, pts) {
+    const zoneId = this.getPlace(id)?.biomeZone;
+    if (!zoneId || !this.getBiomes?.()?.zones?.[zoneId]) return;
+    if (pts) return this.saveBiomes((c) => ({ ...c, zones: { ...c.zones, [zoneId]: { ...c.zones[zoneId], pts: structuredClone(pts) } } }));
+    await this.#dropZone(id);
+    ui.notifications.info("KG Realms: its biome zone was removed, because a biome needs a closed border.");
+  }
+  async #dropZone(id) {
+    const zoneId = this.getPlace(id)?.biomeZone;
+    if (zoneId) await this.saveBiomes((c) => { const zones = { ...c.zones }; delete zones[zoneId]; return { ...c, zones }; });
+    await this.#save(id, { biomeZone: null });
+  }
+  /** The Biome row: a closed border on land can drive travel and camps, as a biome zone that follows it. */
+  #biomeRow(p, o) {
+    if (placeLayer(p) !== "geo" || areaKind(p) !== "land" || !this.getBiomes) return "";
+    const rule = ruleTooltip("<p><strong>Biome zone</strong> Makes this area count as a biome: travel speed off road, on roads and on trails, and the Forage, Conceal and Alarm DCs for camps.</p><p><strong>Border</strong> The zone follows this place's border as you reshape it, and takes its name.</p><p><strong>Biomes tab</strong> Set its speeds and DCs there. Its corners are this border's: reshape them here.</p><p><strong>When</strong> Journeys already under way keep the settings they left with.</p>");
+    if (!p.area || !o?.closed) return `<div class="row"><span>Biome ${rule}</span></div><p class="hint">Draw and close a border to make this area a biome zone.</p>`;
+    const config = this.getBiomes(), zone = p.biomeZone ? config.zones?.[p.biomeZone] : null, types = biomeTypes(config);
+    if (zone && zone.name !== p.name) queueMicrotask(() => this.saveBiomes((c) => (c.zones?.[p.biomeZone] ? { ...c, zones: { ...c.zones, [p.biomeZone]: { ...c.zones[p.biomeZone], name: p.name } } } : c)));
+    const on = zone?.type ?? (this.biomeChoice?.id === p.id ? this.biomeChoice.type : null) ?? biomeForClass(p.class) ?? "plains";
+    const pick = `<select name="area-biome" aria-label="Biome type">${Object.entries(types).map(([k, t]) => `<option value="${esc(k)}" ${k === on ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>`;
+    return `<div class="row"><span>Biome ${rule}</span></div><div class="row">${pick}${zone ? `<button data-act="biome-drop" class="danger"><i class="fa-solid fa-trash"></i> Remove biome zone</button>` : `<button data-act="biome-make"><i class="fa-solid fa-seedling"></i> Make biome zone</button>`}</div>${zone ? `<p class="hint">This area is a biome zone. It follows the border.</p>` : ""}`;
   }
   /** What the map shows for the selected place's border: the one being drawn, edited, or kept. */
   #overlay() {
@@ -367,7 +393,7 @@ export class PinEditor {
       : `<p class="hint">${o ? `${o.pts.length} corners, ${o.closed ? "closed" : "ends apart"}${o.fromRecord ? " (the world's rectangle: draw or reshape it)" : ""}.` : "No border yet: its name shows at its point on its layer."}</p>
         <div class="row"><button data-act="border-draw"><i class="fa-solid fa-draw-polygon"></i> ${o && !o.fromRecord ? "Redraw border" : "Draw border"}</button>${o && !o.fromRecord && shape === "area" ? `<button data-act="border-toggle">${o.closed ? "Open the shape" : "Close the shape"}</button>` : ""}${p.area ? `<button data-act="border-remove" class="danger">Remove border</button>` : ""}</div>`;
     return `<div class="kgr-area-rows"><div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}
-      <div class="row"><span>Layer ${layerRule}</span></div>${seg("layer", MAP_LAYERS.map((k) => [k, LAYER_NAMES[k]]), layer ?? "places")}${border}</div>`;
+      <div class="row"><span>Layer ${layerRule}</span></div>${seg("layer", MAP_LAYERS.map((k) => [k, LAYER_NAMES[k]]), layer ?? "places")}${border}${this.drawing ? "" : this.#biomeRow(p, o)}</div>`;
   }
 
   /** The places removed from this world (the world has moved on), to bring one back. */
@@ -396,7 +422,16 @@ export class PinEditor {
     if (act === "border-finish") return this.#finishBorder(false);
     if (act === "border-cancel") { this.drawing = null; this.#render(); return this.#overlay(); }
     if (act === "border-toggle") { const o = this.#editPts(); if (!o.closed && o.pts.length < 3) return ui.notifications.warn("KG Realms: a closed border needs at least three corners."); return this.#saveOutline(id, o.pts, !o.closed); }
-    if (act === "border-remove") { await this.#save(id, { area: null, areaClosed: null }); this.#render(); return this.#overlay(); }
+    if (act === "border-remove") { await this.#save(id, { area: null, areaClosed: null }); await this.#followBorder(id, null); this.#render(); return this.#overlay(); }
+    if (act === "biome-make") {
+      const p = this.getPlace(id), o = this.#outline(p), type = this.panel?.querySelector('[name="area-biome"]')?.value ?? "plains";
+      if (!p?.area || !o?.closed) return;
+      const zoneId = `bio-${foundry.utils.randomID()}`;
+      await this.saveBiomes((c) => ({ ...c, zones: { ...c.zones, [zoneId]: zoneForPlace(p, type, p.area) } }));
+      await this.#save(id, { biomeZone: zoneId });
+      return this.#render();
+    }
+    if (act === "biome-drop") { await this.#dropZone(id); return this.#render(); }
     if (act === "list-pick") { const pick = e.target.closest("[data-id]").dataset.id; this.select(pick); return this.#locate(pick); }
     if (act === "list-locate") return this.#locate(e.target.closest("[data-id]").dataset.id);
     if (act === "remove-place") {
@@ -463,6 +498,11 @@ export class PinEditor {
     if (t.name === "new-kind") { this.newKind = t.value; return; }
     if (!id || !t.name) return;
     if (t.name === "kind") await this.#save(id, { kind: t.value });
+    if (t.name === "area-biome") {
+      const zoneId = this.getPlace(id)?.biomeZone;
+      this.biomeChoice = { id, type: t.value };
+      if (zoneId) await this.saveBiomes((c) => (c.zones?.[zoneId] ? { ...c, zones: { ...c.zones, [zoneId]: { ...c.zones[zoneId], type: t.value } } } : c));
+    }
   }
 
   #thumb(icon) {

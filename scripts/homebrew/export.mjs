@@ -10,7 +10,7 @@
 import { worldUrl, allWorlds } from "../worlds.mjs";
 import { applyRouteEdits } from "../routes.mjs";
 import { TILE_SUFFIX, moduleIdFrom, moduleScript, ROUTES_FILE, zipEntry, zipParts, crc32, zipFits } from "./plan.mjs";
-import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction } from "./export-plan.mjs";
+import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -34,7 +34,7 @@ function currentCalendar() {
   if (!game.modules.get("calendaria")?.active || !C?.api?.getActiveCalendar) return null;
   let formats = null;
   try { formats = game.settings.get("calendaria", "displayFormats"); } catch { /* an older Calendaria */ }
-  return calendarForExport(C.api.getActiveCalendar(), C.managers.CalendarManager, formats);
+  return calendarForExport(C.api.getActiveCalendar(), C.managers.CalendarManager, formats, game.time?.worldTime ?? 0);
 }
 
 /**
@@ -202,7 +202,7 @@ export async function exportModule(def) {
       <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
       <div class="form-group"><label>Version</label><input name="version" type="text" value="1.0.0"></div>
       <p class="notes">The zip holds the whole world: its map, places, roads, rivers, biomes, encounters, trade and snow with every edit, each scene it links to, every actor, journal and item those link to, and all their pictures, moved into the module and linked up. ${q("Pictures on cards and markers go to assets/poi-img, scene maps to assets/maps, and actor, journal and item art to their own folders. Links into your game system's own compendiums stay as they are. Your players' tokens stay out of the scenes.")}</p>
-      <p class="notes">Calendar: ${esc(here ? calendarLabel(here) : "none, Calendaria is not active")}. ${q("The calendar this game world uses now, complete, whether built in, edited or your own. When a GM first loads the module, it is added if need be and set as the active calendar. Your in-game date is not part of it.")}</p>
+      <p class="notes">Calendar: ${esc(here ? calendarLabel(here) : "none, Calendaria is not active")}. ${q("The calendar this game world uses now, complete, whether built in, edited or your own, and today's in-game date. When a GM first loads the module, the calendar is added if need be and set as active. The date is used only where the clock has not started. A campaign already running on another calendar keeps its own.")}</p>
       <p class="notes">Afterwards you get a report of anything that could not be carried. It is also in the zip, as export-report.txt.</p>
       <p class="notes">When a GM first loads the module, KG Realms fills its compendiums. ${q("Compendiums are GM only, because scenes and journals hold secrets. Updating a module replaces its compendiums, so they are filled again and any edits made inside them are lost: import a document to your game world to change it.")} Drag the realm map in from them and its settlements come with it.</p>`,
     buttons: [{ action: "go", label: "Download zip", icon: "fa-solid fa-download", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
@@ -288,17 +288,32 @@ export async function applyModuleCalendars() {
         if (!res.ok) throw Error(`${want.file}: HTTP ${res.status}`);
         calendar = await res.json();
       }
-      const M = C.managers.CalendarManager, id = calendar.id;
+      const M = C.managers.CalendarManager, id = calendar.id, worldTime = game.time?.worldTime ?? 0, activeId = M.getActiveCalendar?.()?.metadata?.id;
+      if (keepsOwnCalendar(activeId, id, worldTime)) {
+        ui.notifications.info(`KG Realms: ${world.title} uses the calendar ${calendar.name ?? id}. This game world's campaign is already running on another, so it is left as it is. Calendaria's settings can change it.`, { permanent: true });
+        applied[world.id] = signature; changed = true;
+        continue;
+      }
       const action = calendarAction(calendar, { known: !!M.getCalendar(id), custom: M.isCustomCalendar(id), override: M.hasDefaultOverride(id) });
       let target = id;
       if (action === "unknown") throw Error(`this copy of Calendaria has no calendar "${id}"`);
       if (action === "create") { const made = await M.createCustomCalendar(id, foundry.utils.deepClone(calendar.data)); if (!made) throw Error("Calendaria could not add it"); target = made.metadata?.id ?? (id.startsWith("custom-") ? id : `custom-${id}`); }
       if (action === "update" && !await M.updateCustomCalendar(id, foundry.utils.deepClone(calendar.data))) throw Error("Calendaria could not update it");
       if (action === "override" && !await M.saveDefaultOverride(id, foundry.utils.deepClone(calendar.data))) throw Error("Calendaria could not save it");
-      if (!await C.api.switchCalendar(target)) throw Error("Calendaria could not switch to it");
-      if (calendar.displayFormats) await game.settings.set("calendaria", "displayFormats", calendar.displayFormats);
-      applied[world.id] = signature; changed = true; needReload = true;
-      ui.notifications.info(`KG Realms: the calendar is now ${calendar.name ?? id}, for ${world.title}. You can change it in Calendaria's settings; this will not set it again.`, { permanent: true });
+      // Already there, as it should be: nothing to change, and nothing to reload for.
+      const moved = action !== "switch" || activeId !== target;
+      if (moved && !await C.api.switchCalendar(target)) throw Error("Calendaria could not switch to it");
+      if (moved && calendar.displayFormats) await game.settings.set("calendaria", "displayFormats", calendar.displayFormats);
+      if (moved) needReload = true;
+      const date = startingDate(calendar, worldTime);
+      if (date?.worldTime) await game.time.set(date.worldTime);
+      if (date?.year != null) {
+        await C.api.jumpToDate({ year: date.year, month: 1, day: 1 });
+        const year = (game.time?.components?.year ?? NaN) + (M.getActiveCalendar?.()?.years?.yearZero ?? 0);
+        if (year !== date.year) ui.notifications.warn(`KG Realms: ${world.title} should start in year ${date.year}, but Calendaria shows ${year}. Set the date in Calendaria.`, { permanent: true });
+      }
+      applied[world.id] = signature; changed = true;
+      if (moved || date) ui.notifications.info(`KG Realms: the calendar is now ${calendar.name ?? id}${date?.year != null ? `, year ${date.year}` : date ? ", at the date it was exported" : ""}, for ${world.title}. You can change it in Calendaria's settings; this will not set it again.`, { permanent: true });
     } catch (err) {
       console.error(`${ID} | calendar of ${world.id}`, err);
       ui.notifications.error(`KG Realms: could not set the calendar of ${world.title}: ${err?.message ?? err}. It will try again next load.`, { permanent: true });

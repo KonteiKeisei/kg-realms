@@ -1,3 +1,4 @@
+import { spotName } from "./map-layers.mjs";
 import {groupMembers,sceneParties,partyLabel} from './party-groups.mjs';
 import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-rules.mjs";
 // The travel panel on a realm map, for everyone. The GM plans the route (stops on the map, pace,
@@ -1083,7 +1084,7 @@ export class TravelHud {
       const isEnd = k != null && k - 1 === s.waypoints.length - 1;
       const onward = gm && isEnd ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
       const tools = gm && k != null && k > 0 ? `<span class="stop-tools">${onward}${move}<label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button></span>` : "";
-      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="Show on the map">${esc(n.name)}</button>${this.seaNodes?.has(i) ? '<small class="sea-available">Sea travel available</small>' : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
+      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${this.seaNodes?.has(i) ? '<small class="sea-available">Sea travel available</small>' : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
     };
     // Where the party is: a marker after the last point passed.
     const pr = this.progress(), partyAt = pr && pr.status !== "arrived" && sh ? sh.nodes.findLastIndex((n) => n.hour <= pr.hour + 1e-6) : -1;
@@ -1590,20 +1591,10 @@ export class TravelHud {
     return { lon, lat, name: this.placeName(lon, lat) };
   }
 
-  /**
-   * What to call a spot: a settlement within 5 miles (the party is in town), else the nearest
-   * other place within 60 miles ("near ..."), else Wilderness.
-   */
+  /** What to call a spot (map-layers.mjs): its realm, its geography, and what it is near. */
   placeName(lon, lat) {
     const here = lonLatToSource(lon, lat), mpp = SOURCE_MAP.milesPerPixel;
-    let town = null, td = 5, other = null, od = 60;
-    for (const p of this.getPlaces()) {
-      if (p.hidden || (p.unnamed && !p.edited)) continue;
-      const q = lonLatToSource(p.lon, p.lat), d = Math.hypot(q[0] - here[0], q[1] - here[1]) * mpp;
-      if (p.kind === "settlement") { if (d < td) { td = d; town = p; } }
-      else if (d < od && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class)) { od = d; other = p; }
-    }
-    return town ? town.name : other ? `near ${other.name}` : "Wilderness";
+    return spotName(lon, lat, this.getPlaces(), (p) => { const q = lonLatToSource(p.lon, p.lat); return Math.hypot(q[0] - here[0], q[1] - here[1]) * mpp; });
   }
 
   /** Move the party's tokens, keeping their spread, to a sheet point. Skips moves under a few pixels. */

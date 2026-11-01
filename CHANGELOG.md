@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.82.0: geography as biomes, and where the party is
+
+- **A geography area can be a biome.** A land area with a closed border (map editor, Places tab) gets a Biome row: choose the type, already suggested from its class (a Forest is forest, a Swamp is wetlands), and press Make biome zone. The zone takes the area's name and follows its border as you reshape it, and goes if the border is opened or removed. Set its speeds and DCs in the Biomes tab.
+- **Where the party is reads in full.** "In Thay, in Rawlinswood near Arine", "On Turquoise Bay near Wakeflow", "In Arine, Thay". In for land, on for water. Anything missing is left out with no gap, and a settlement within 60 miles comes before a closer landmark. Only borders you have drawn count. Hidden places never show. A long name wraps to two lines at most, with the whole of it in the tooltip.
+- **The in-game date goes with an exported calendar.** It is used only where the clock has not started.
+- **A world module can set a starting year:** calendar: { id, name, startYear }. Where the clock has already moved, the date stays. If Calendaria does not land on that year, the GM is told.
+- **A campaign already running on another calendar keeps it.** A module's calendar is not forced onto a game world whose clock has moved on a calendar the GM chose. The GM is told. Calendaria's untouched default gives way.
+- **Water side set:** a shoreline whose water side is set shows a green Water side set button. Click again to change it.
+
 ## 0.81.0: exported modules carry their calendar
 
 - **Exported modules carry their Calendaria calendar.** The export captures the calendar the game world uses, complete, with its date display formats, whether it is built in, a built-in one you edited, or your own. The export window names it, and so does the report. Pictures it uses, such as custom moon phases, go to assets/calendar. Calendaria's own stay linked.

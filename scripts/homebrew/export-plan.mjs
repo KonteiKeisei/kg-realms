@@ -176,13 +176,27 @@ export function markersUsed(markers, value) {
  * The game world's Calendaria calendar as a module ships it: always the whole calendar, whichever
  * kind it is, so it can be set anywhere. kind: "built-in", "edited" (built in, changed by the GM) or "custom".
  */
-export function calendarForExport(active, manager, displayFormats) {
+export function calendarForExport(active, manager, displayFormats, worldTime = 0) {
   const data = active?.toObject?.(), id = data?.metadata?.id;
   if (!id) return null;
   const kind = manager.isCustomCalendar(id) ? "custom" : manager.hasDefaultOverride(id) ? "edited" : "built-in";
-  return { id, name: data.name ?? id, kind, data, ...(displayFormats ? { displayFormats } : {}) };
+  return { id, name: data.name ?? id, kind, data, ...(displayFormats ? { displayFormats } : {}), ...(worldTime ? { worldTime } : {}) };
 }
 export const calendarLabel = (c) => `${c.name} (${c.kind})`;
+/**
+ * Whether a module may leave a game world's calendar be: its campaign is running (its clock has moved)
+ * on another calendar the GM chose, and changing that now would change every date in it.
+ */
+export const keepsOwnCalendar = (activeId, wantId, worldTime) => !!worldTime && !!activeId && activeId !== wantId && activeId !== "gregorian";
+/**
+ * The date a module sets, only where the clock has not moved: { worldTime } (the moment it was
+ * exported on the same calendar) or { year } (a module's starting year), or null to leave it.
+ */
+export function startingDate(calendar, worldTime) {
+  if (worldTime) return null;
+  if (calendar.worldTime) return { worldTime: calendar.worldTime };
+  return Number.isFinite(calendar.startYear) ? { year: calendar.startYear } : null;
+}
 /**
  * What setting a calendar takes in a game world, given what is there: "switch" (it is there as it
  * should be), "override" (a built-in one, edited), "create" or "update" (a custom one).
