@@ -7,7 +7,8 @@ import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
-import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, zipStore, moduleIdFrom, moduleScript, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
+import { exportModule, importModuleScenes } from "./export.mjs";
+import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
 
 const ID = "kg-realms";
 const SETTING = "homebrewWorlds";
@@ -22,6 +23,7 @@ const isVideo = (src) => /\.(webm|mp4|m4v|ogv)(\?|$)/i.test(src ?? "");
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
+  game.settings.register(ID, "moduleScenesDone", { scope: "world", config: false, type: Array, default: [] });
   for (const def of Object.values(game.settings.get(ID, SETTING) ?? {})) {
     try { registerWorld(def); } catch (err) { console.warn(`${ID} | homebrew world ${def?.id}:`, err); }
   }
@@ -29,6 +31,7 @@ export function registerHomebrew() {
   Hooks.once("ready", async () => {
     if (game.user !== game.users.activeGM) return;
     await moveWorlds();
+    await importModuleScenes();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
   });
@@ -373,44 +376,4 @@ async function worldSettings(scene) {
   }
   ui.notifications.info(`KG Realms: ${name} saved.`);
   if (canvas.scene?.getFlag(ID, "world") === def.id) canvas.draw();
-}
-
-async function exportModule(def) {
-  if (!def) return;
-  const values = await foundry.applications.api.DialogV2.wait({
-    window: { title: "Export as module", icon: "fa-solid fa-file-export" }, position: { width: 440 }, rejectClose: false,
-    content: `<div class="form-group"><label>Module title</label><input name="title" type="text" value="KG Realms: ${esc(def.title)}"></div>
-      <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
-      <div class="form-group"><label>Version</label><input name="version" type="text" value="1.0.0"></div>
-      <p class="notes">The zip holds the world's map, its tiles and its files. Places, roads, rivers and biomes added with the editors are saved in this game world and keep working here; they are not in the zip yet.</p>
-      <p class="notes">Once the module is installed and enabled, the world reads from it instead of Data/${DATA_HOME}.</p>`,
-    buttons: [{ action: "go", label: "Download zip", icon: "fa-solid fa-download", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
-  });
-  if (!values || typeof values !== "object") return;
-  const moduleId = /^[a-z0-9-]+$/.test(values.id ?? "") ? values.id : moduleIdFrom(def.title), title = String(values.title || `KG Realms: ${def.title}`), version = String(values.version || "1.0.0");
-  const note = ui.notifications.info(`KG Realms: building ${title}...`, { permanent: true });
-  try {
-    const get = async (rel) => { const r = await fetch(worldUrl(def.id, rel), { cache: "no-store" }); if (!r.ok) throw Error(`${rel}: HTTP ${r.status}`); return new Uint8Array(await r.arrayBuffer()); };
-    const json = async (rel) => JSON.parse(new TextDecoder().decode(await get(rel)));
-    const pack = await json("terrain-pack.json"), dir = `${moduleId}/data/worlds/${def.id}`, files = [];
-    const kg = game.modules.get(ID);
-    files.push({ name: `${moduleId}/module.json`, bytes: JSON.stringify({ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: "14" }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum: kg?.version ?? "0.74.0" } }] }, esmodules: ["scripts/main.mjs"] }, null, 2) });
-    files.push({ name: `${moduleId}/scripts/main.mjs`, bytes: moduleScript(moduleId, def, { snow: (game.settings.get(ID, "snow") ?? {})[def.id] }) });
-    const routes = (await json("index.json").catch(() => null))?.routes ?? ROUTES_FILE;
-    for (const rel of ["index.json", routes, "waterways.json", "biomes.json"]) files.push({ name: `${dir}/${rel}`, bytes: await get(rel).catch(() => new TextEncoder().encode(rel === routes ? '{"type":"FeatureCollection","features":[]}' : "{}")) });
-    for (const lod of pack.lods) for (const t of lod.tiles) {
-      const bytes = new Uint8Array(await (await fetch(foundry.utils.getRoute(`${def.assetBase}/${t.path}`))).arrayBuffer());
-      t.path = t.path.replace(TILE_SUFFIX, ".ktx2");
-      files.push({ name: `${moduleId}/${t.path}`, bytes });
-    }
-    pack.fingerprint = await sha256(new TextEncoder().encode(JSON.stringify(pack.lods)));
-    files.push({ name: `${dir}/terrain-pack.json`, bytes: JSON.stringify(pack) });
-    foundry.utils.saveDataToFile(zipStore(files), "application/zip", `${moduleId} v${version}.zip`);
-    ui.notifications.info(`KG Realms: ${title} is downloading. Extract it into Data/modules and enable it.`);
-  } catch (err) {
-    console.error(`${ID} | export`, err);
-    ui.notifications.error(`KG Realms: could not export ${def.title}: ${err.message ?? err}`);
-  } finally {
-    ui.notifications.remove?.(note);
-  }
 }

@@ -1,5 +1,16 @@
 # KG Realms changelog
 
+## 0.79.0: the whole world in a module export
+
+- **Export as module now holds the whole world.** The zip works in any game world, with nothing left in this one:
+  - **Its data, with every edit applied:** places (with borders, shapes and layers), roads, rivers and shores, biomes, encounters, trade, snow, custom markers and sea lore.
+  - **Its scenes:** the realm map, every settlement map, and every scene its places and pins link to, and theirs. Each keeps its pins, lights, walls, regions and settlement roads. Tokens stay out, because their actors stay in this game world.
+  - **Its art:** every picture and sound named anywhere in that data (card art, card galleries, pictures in card text, markers, scene maps and tiles) is copied in and its links changed. Card art and markers go to assets/poi-img, scene maps to assets/maps, sound to assets/audio. Two different files of one name are kept apart.
+- **A report after every export**, also in the zip as export-report.txt: what went in, and anything that could not be carried (files that could not be read, linked scenes that no longer exist, actors and journals linked on cards).
+- **A world module's scenes come in by themselves:** the first GM to load a game world with the module gets them in a Scenes folder of the world's name, keeping their ids so links hold. A scene already there is left as it is, and one you delete stays deleted.
+- A large world no longer has to fit in the browser's memory all at once to be zipped. A world over 4 GB says so.
+- A world module can ship its own trade prices, under any the GM sets.
+
 ## 0.78.0: made worlds move to KG Realms Data
 
 - **Made worlds are saved outside the worlds folder.** Make realm world now saves a map's files in Data/KG Realms Data/World/<world id>/, not in the game world's folder.

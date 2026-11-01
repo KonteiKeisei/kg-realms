@@ -66,9 +66,9 @@ export class TradeMarkets {
     return { profile: profile.id, rows, houses: (profile.houses ?? []).map(id => data.housesById?.get(id)?.name).filter(Boolean) };
   }
   async get(world, place) {
-    const data = await this.data(world), own = this.getEdits?.(world)?.[place.id] ?? null;
+    const data = await this.data(world), mine = this.getEdits?.(world)?.[place.id] ?? null, own = mine ?? data.edits?.[place.id] ?? null;
     const market = own ? cleanTrade(own) : this.defaults(data, this.profile(data, place));
-    return { ...market, scale: economyScale(this.getScale?.()), revision: JSON.stringify(own), overridden: !!own, data };
+    return { ...market, scale: economyScale(this.getScale?.()), revision: JSON.stringify(mine), overridden: !!own, data };
   }
   async save(world, id, value, revision) {
     if (!game.user.isGM) throw Error("Only a GM can edit trade.");

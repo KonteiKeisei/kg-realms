@@ -1,6 +1,7 @@
 import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
 import { registerHomebrew } from "./homebrew/homebrew.mjs";
+import { setExportData } from "./homebrew/export.mjs";
 // The worlds first (worlds.mjs), before anything that loads one: the GM's homebrew worlds saved in
 // this game world (homebrew/), then each world module's on the kgRealmsRegisterWorlds hook (KG Realms:
 // Faerûn registers Toril). A module registering the same id replaces the homebrew copy.
@@ -281,6 +282,17 @@ function saveEncounters(world, fn) {
   });
   return encounterWrites;
 }
+// A world module export (homebrew/export.mjs): the world as this game world has it, every edit applied.
+setExportData(async (world) => {
+  await loadShippedWaterways(world); await loadShippedBiomes(world);
+  const index = await loadWorld(world), edits = editsOf(world);
+  const levels = new Set([...index.places, ...Object.values(edits.added ?? {})].map((p) => p.level ?? "surface"));
+  return {
+    places: [...levels].flatMap((level) => applyEdits(index.places, edits, level)),
+    routeEdits: routeEditsOf(world), waterways: waterwaysOf(world), biomes: biomesOf(world), encounters: encountersOf(world),
+    tradeEdits: (setting("tradeEdits") ?? {})[world] ?? {}, snow: (setting("snow") ?? {})[world], markers: setting("customMarkers") ?? {}
+  };
+});
 /** Each world's shipped encounters (its encounters.json, if it has one), adopted once (the primary GM). */
 async function installEncounterDefaults() {
   if (!isPrimaryGM()) return;
