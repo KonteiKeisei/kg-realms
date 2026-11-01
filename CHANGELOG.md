@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.87.3: Go on from here fits
+
+- **Fixed:** on a route's last stop, Go on from here broke across three lines and pushed Earlier off the edge. It now stays on one line, and a stop's tools wrap when the panel is narrow.
+
 ## 0.87.2: where a place sits, on its card
 
 - **Place cards say where a place sits, in a sentence**, under its name: "A settlement in Empiria, a territory of the Salvae Empire". A natural feature adds what it crosses. A place that is part of nothing says nothing. This replaces the Part of and Crosses rows from 0.87.0. Players never see a hidden domain or territory in it.

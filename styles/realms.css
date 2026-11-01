@@ -1901,3 +1901,11 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 
 /* A stop's name may be long ("In Thay, in Rawlinswood near Arine"): two tidy lines at most, the rest in its tooltip (0.82). */
 .kgr-travel ol.stops .location-title button.nm { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow: hidden; overflow-wrap: anywhere; text-wrap: balance; line-height: 1.25; }
+
+/* A stop's tools wrap when the panel is narrow, each button on one line (0.87.3). */
+.kgr-travel ol.stops .stop-tools { flex-wrap: wrap; min-width: 0; }
+.kgr-travel ol.stops .stop-tools > button[data-act="extend"] { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; width: auto; height: 22px; margin: 0; padding: 0 7px; line-height: 20px; font-size: 11px; white-space: nowrap; background: var(--kgr-surface-2); border: 1px solid var(--kgr-line-2); border-radius: 4px; color: var(--kgr-text-2); }
+.kgr-travel ol.stops .stop-tools > button[data-act="extend"]:hover { border-color: var(--kgr-accent); color: var(--kgr-accent); }
+.kgr-travel ol.stops .stop-tools > button[data-act="extend"].on { border-color: var(--kgr-accent); background: var(--kgr-accent-soft); color: var(--kgr-text); }
+.kgr-travel ol.stops .order { flex: 0 0 auto; }
+.kgr-travel ol.stops .order button { white-space: nowrap; }
