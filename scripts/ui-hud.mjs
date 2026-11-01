@@ -9,7 +9,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
 import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
-import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, portVoyage } from "./waterways.mjs";
+import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, portVoyage, riverAt, riverLabel } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
 import { CampPanel, showDC } from "./ui-camp.mjs";
 import { onCanvas, RightClick } from "./canvas-input.mjs";
@@ -407,7 +407,14 @@ export class TravelHud {
     // Port availability is independent of whether sailing would beat the road. Cache it with
     // the route sheet, so clock updates and camp redraws do not rescan the world's ports.
     const nodes = this.sheet?.nodes ?? this.stops().slice(0, 1).map((w) => ({ at: lonLatToSource(w.lon, w.lat) }));
-    this.seaNodes = new Map(nodes.flatMap((n, i) => { const [lon, lat] = sourceToLonLat(...n.at), p = this.portAt({ lon, lat, name: n.name }); return p ? [[i, p.name]] : []; }));
+    this.seaNodes = new Map(nodes.flatMap((n, i) => {
+      const [lon, lat] = sourceToLonLat(...n.at), p = this.portAt({ lon, lat, name: n.name });
+      if (p) return [[i, `Port of ${p.name}: sea travel available`]];
+      const river = n.stop != null ? riverAt({ lon, lat }, this.getWaterways?.(), lonLatToSource, SOURCE_MAP.milesPerPixel) : null;
+      if (!river) return [];
+      const label = riverLabel(river);
+      return [[i, `On ${label}: boat travel available`]];
+    }));
     // The GM is told when a change to the route leaves encounters placed for it behind.
     if (game.user.isGM) {
       const met = new Set((this.plan?.encounters ?? []).map((e) => e.id));
@@ -483,7 +490,7 @@ export class TravelHud {
     if (!this.seaCache.has(key)) {
       // Port to port always sails. Anywhere else needs the water to be there.
       const mpp = SOURCE_MAP.milesPerPixel, opts = { mph: vessel.mph, season, reach: HARBOUR_MI / mpp, milesPerPixel: mpp };
-      this.seaCache.set(key, this.portAtPoint(from) && this.portAtPoint(to) ? portVoyage(this.sea, from, to, opts) : planSea(this.sea, from, to, opts));
+      this.seaCache.set(key, this.boatAtPoint(from) && this.boatAtPoint(to) ? portVoyage(this.sea, from, to, opts) : planSea(this.sea, from, to, opts));
     }
     return this.seaCache.get(key);
   }
@@ -538,18 +545,25 @@ export class TravelHud {
   portAt(w) {
     return portForStop(w, this.getPlaces().filter((p) => (!p.hidden || game.user?.isGM) && this.isPort(p)), lonLatToSource, SOURCE_MAP.milesPerPixel);
   }
-  /** The port at a sheet point: a stop standing there counts by its name. */
-  portAtPoint(q) {
+  /** Where a boat can be boarded at a stop, in words: "port of Arine", "the river Oban", or "". */
+  boatAt(w) {
+    const p = this.portAt(w);
+    if (p) return `port of ${p.name}`;
+    const river = riverAt(w, this.getWaterways?.(), lonLatToSource, SOURCE_MAP.milesPerPixel);
+    return river ? riverLabel(river) : "";
+  }
+  /** The same at a sheet point: a stop standing there counts by its name. */
+  boatAtPoint(q) {
     const [lon, lat] = sourceToLonLat(q[0], q[1]);
     const stop = this.stops().find((w) => { const at = lonLatToSource(w.lon, w.lat); return Math.hypot(at[0] - q[0], at[1] - q[1]) < 1; });
-    return this.portAt(stop ?? { lon, lat });
+    return this.boatAt(stop ?? { lon, lat });
   }
-  /** Whether leg i (from stop i to stop i + 1) runs port to port. */
-  legByWater(i) { const sts = this.stops(); return !!(this.portAt(sts[i]) && this.portAt(sts[i + 1])); }
-  /** "port of Arine to port of Wakeflow" for leg i, or "" when it does not run port to port. */
+  /** Whether leg i (from stop i to stop i + 1) can go by boat: a port or a drawn river at both ends. */
+  legByWater(i) { return !!this.legPorts(i); }
+  /** "port of Arine to the river Oban" for leg i, or "" when a boat cannot do it. */
   legPorts(i) {
-    const sts = this.stops(), a = this.portAt(sts[i]), b = this.portAt(sts[i + 1]);
-    return a && b ? `port of ${a.name} to port of ${b.name}` : "";
+    const sts = this.stops(), a = this.boatAt(sts[i]), b = this.boatAt(sts[i + 1]);
+    return a && b ? `${a} to ${b}` : "";
   }
 
   /** The world's prices against the book's (the Prices setting): ×1 to ×10, or ÷2 to ÷10. */
@@ -1100,7 +1114,7 @@ export class TravelHud {
       const isEnd = k != null && k - 1 === s.waypoints.length - 1;
       const onward = gm && isEnd && this.mode === "route" ? `<button data-act="extend" class="${this.extending ? "on" : ""}" title="Keep this as a stop and set a new end beyond it: your next click on the map"><i class="fa-solid fa-forward"></i> Go on from here</button>` : "";
       const tools = gm && k != null && k > 0 ? `<span class="stop-tools">${onward}${move}<label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button></span>` : "";
-      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${(first || k != null) && !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), around = spotRealms(lon, lat, this.getPlaces()); return around ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })() : ""}${this.seaNodes?.has(i) ? `<small class="sea-available">Port of ${esc(this.seaNodes.get(i))}: sea travel available</small>` : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
+      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}"><span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${(first || k != null) && !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), around = spotRealms(lon, lat, this.getPlaces()); return around ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })() : ""}${this.seaNodes?.has(i) ? `<small class="sea-available">${esc(this.seaNodes.get(i))}</small>` : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
     };
     // Where the party is: a marker after the last point passed.
     const pr = this.progress(), partyAt = pr && pr.status !== "arrived" && sh ? sh.nodes.findLastIndex((n) => n.hour <= pr.hour + 1e-6) : -1;

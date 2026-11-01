@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.88.5: boats on rivers
+
+- **Fixed:** a stop on a drawn river can take a boat. A stop within 3 miles of a river boats can use says "On the river Oban: boat travel available", and its legs offer By boat, to a port or to another stop on a river.
+- The leg's list and ship line name both ends: "By boat, the river Oban to port of Karackas".
+
 ## 0.88.4: a port is a port
 
 - **Fixed:** a port is a port. Any leg between two ports can go by boat, every time. The "No water joins these ports" message is gone.

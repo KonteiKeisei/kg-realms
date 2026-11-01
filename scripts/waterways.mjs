@@ -512,6 +512,33 @@ export function portForStop(spot, ports, toSheet, milesPerPixel) {
   return best;
 }
 
+/** How near a drawn river a stop can be and still board a boat on it. */
+export const RIVER_STOP_MI = 3;
+/**
+ * The drawn river a stop stands on, or null: the nearest within RIVER_STOP_MI that boats can use.
+ * waterways: { id: { kind, name, navigable, pts: [[lon, lat]] } }.
+ */
+export function riverAt(spot, waterways, toSheet, milesPerPixel) {
+  if (!spot) return null;
+  const p = toSheet(spot.lon, spot.lat);
+  let best = null, bd = RIVER_STOP_MI / milesPerPixel;
+  for (const w of Object.values(waterways ?? {})) {
+    if (w?.kind !== "river" || w.navigable === false || !(w.pts?.length > 1)) continue;
+    for (let i = 1; i < w.pts.length; i++) {
+      const a = toSheet(w.pts[i - 1][0], w.pts[i - 1][1]), b = toSheet(w.pts[i][0], w.pts[i][1]), dx = b[0] - a[0], dy = b[1] - a[1], len = dx * dx + dy * dy;
+      const t = len ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len)) : 0;
+      const d = Math.hypot(a[0] + dx * t - p[0], a[1] + dy * t - p[1]);
+      if (d < bd) { bd = d; best = w; }
+    }
+  }
+  return best;
+}
+/** A river by name for a sentence: "the Oban River", "the river Oban", "the river". */
+export function riverLabel(w) {
+  const name = w?.name?.trim();
+  return !name ? "the river" : /\briver\b/i.test(name) ? `the ${name.replace(/^the\s+/i, "")}` : `the river ${name}`;
+}
+
 export function automaticPort(place, sea, toSheet, milesPerPixel) {
   if (!place || place.kind !== 'settlement' || !sea) return false;
   const at = toSheet(place.lon, place.lat);

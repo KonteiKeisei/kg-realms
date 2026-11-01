@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { portForStop, PORT_STOP_MI, portVoyage, planSea, buildSea, shoreWater } from "../scripts/waterways.mjs";
+import { portForStop, PORT_STOP_MI, portVoyage, planSea, buildSea, shoreWater, riverAt, riverLabel, RIVER_STOP_MI } from "../scripts/waterways.mjs";
 
 const toSheet = (lon, lat) => [lon, lat];
 const arine = { id: "a", name: "Arine", lon: 0, lat: 0, port: true }, wakeflow = { id: "w", name: "Wakeflow", lon: 500, lat: 0, port: true };
@@ -74,7 +74,31 @@ test("the panel names the port and never says a port cannot sail", () => {
   const hud = readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8");
   const go = readFileSync(new URL("../scripts/travel.mjs", import.meta.url), "utf8");
   assert.ok(!hud.includes("No water joins")); assert.ok(!hud.includes("seaFailed")); assert.ok(!go.includes("seaFailed"));
-  assert.ok(hud.includes("Port of ${esc(this.seaNodes.get(i))}: sea travel available"));
-  assert.ok(hud.includes("port of ${a.name} to port of ${b.name}"));
+  assert.ok(hud.includes("Port of ${p.name}: sea travel available"));
+  assert.ok(hud.includes("port of ${p.name}"));
   assert.ok(hud.includes("portVoyage(this.sea, from, to, opts)"));
+});
+
+const oban = { kind: "river", name: "Oban", pts: [[0, 0], [100, 0]] };
+test("a stop on a drawn river can board a boat on it", () => {
+  assert.equal(RIVER_STOP_MI, 3);
+  assert.equal(riverAt({ lon: 50, lat: 2 }, { oban }, toSheet, 1), oban, "beside the middle of a stretch, not only at its points");
+  assert.equal(riverAt({ lon: 50, lat: 4 }, { oban }, toSheet, 1), null);
+  assert.equal(riverAt({ lon: 50, lat: 0 }, { oban: { ...oban, navigable: false } }, toSheet, 1), null, "a torrent takes no boat");
+  assert.equal(riverAt({ lon: 50, lat: 0 }, { s: { ...oban, kind: "shore" } }, toSheet, 1), null, "only rivers");
+  assert.equal(riverAt(null, { oban }, toSheet, 1), null);
+});
+
+test("a river reads as a river", () => {
+  assert.equal(riverLabel(oban), "the river Oban");
+  assert.equal(riverLabel({ name: "Oban River" }), "the Oban River");
+  assert.equal(riverLabel({ name: "The River Oban" }), "the River Oban");
+  assert.equal(riverLabel({}), "the river");
+});
+
+test("from a stop on the river a boat goes down it to the port it runs through", () => {
+  const river = { id: "r", kind: "river", name: "Oban", pts: [[1000, 700], [1000, 300]] };
+  const p = voyage(seaOf([island, river]), [1000, 500], [1000, 300]);
+  assert.ok(p.legs.some((l) => l.kind === "river" && l.name === "Oban"));
+  assert.ok(p.miles < 120, String(p.miles));
 });
