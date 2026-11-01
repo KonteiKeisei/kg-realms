@@ -229,6 +229,32 @@ export function hierarchyOf(place, places, { showHidden = false } = {}) {
   const some = new Map(sets.flat().filter((t) => !every.some((u) => u.id === t.id)).map((t) => [t.id, t]));
   return result(every, [...some.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))));
 }
+const KIND_WORDS = { settlement: "settlement", site: "site", natural: "natural feature", territory: "territory", domain: "domain" };
+/** A realm's name as it reads in a sentence: the Salvae Empire, the Heartlands, Empiria. */
+function realmName(t) {
+  const name = String(t.name ?? "").trim();
+  if (/^the\s/i.test(name)) return `the ${name.slice(4).trim()}`;
+  const type = String(t.class ?? "").trim();
+  return type && new RegExp(`\\b${type.replace(/[^\w\s-]/g, "")}\\b`, "i").test(name) ? `the ${name}` : name;
+}
+const andList = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+/**
+ * A place's line on its card: "A settlement in Empiria, a territory of the Salvae Empire". Null when
+ * it is part of nothing, so a card says nothing rather than only what kind it is.
+ */
+export function hierarchyLine(place, { within = [], crosses = [] } = {}) {
+  if (!within.length && !crosses.length) return null;
+  const noun = KIND_WORDS[place?.kind] ?? "place", article = /^[aeiou]/i.test(noun) ? "An" : "A";
+  const isRealm = place?.kind === "territory" || place?.kind === "domain";
+  let line = `${article} ${noun}`;
+  within.forEach((t, i) => {
+    if (i === 0) line += ` ${isRealm ? "of" : "in"} ${realmName(t)}`;
+    else line += `, ${/^[aeiou]/i.test(KIND_WORDS[within[i - 1].kind] ?? "territory") ? "an" : "a"} ${KIND_WORDS[within[i - 1].kind] ?? "territory"} of ${realmName(t)}`;
+  });
+  if (crosses.length) line += `${within.length ? "," : ""} crossing ${andList(crosses.map(realmName))}`;
+  return line;
+}
+
 /**
  * The domains and territories as a tree: [{ place, children }], domains first, then by name. Each sits
  * under the nearest thing it is part of, by its link or by the borders around it. Whatever cannot

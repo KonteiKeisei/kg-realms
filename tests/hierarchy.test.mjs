@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { hierarchyOf, partOfChoices } from "../scripts/map-layers.mjs";
+import { hierarchyOf, hierarchyLine, partOfChoices } from "../scripts/map-layers.mjs";
 
 const square = (x, y, r) => [[x - r, y - r], [x + r, y - r], [x + r, y + r], [x - r, y + r]];
 const T = (id, name, extra = {}) => ({ id, name, kind: "territory", class: "Region", lon: 0, lat: 0, ...extra });
@@ -65,7 +65,7 @@ test("nothing depends on being linked, and a deleted parent is no trouble", () =
 
 test("the card and the editor show it", () => {
   const read = (f) => readFileSync(new URL(`../scripts/${f}`, import.meta.url), "utf8");
-  assert.ok(read("card-kinds.mjs").includes('["Part of", shown(places.within)], ["Crosses", shown(places.crosses)]'));
+  assert.ok(read("card-kinds.mjs").includes('subtitle: [line, known_as].filter(Boolean).join(" · ")'));
   assert.ok(read("ui-pins.mjs").includes('name="part-of"')); assert.ok(read("ui-pins.mjs").includes("Nothing above it"));
 });
 
@@ -84,4 +84,38 @@ test("a county in a state in a country: territories nest to any depth, of any ty
   assert.deepEqual(names(hierarchyOf({ id: "x", kind: "settlement", class: "Town", lon: 1, lat: 1 }, [usa, state, county]).within), ["Windsor", "Vermont", "Republic"]);
   assert.deepEqual(names(hierarchyOf(county, [usa, state, county]).within), ["Vermont", "Republic"]);
   assert.deepEqual(names(partOfChoices(county, [usa, state, county])), ["Republic", "Vermont"]);
+});
+
+const line = (place, list = all) => hierarchyLine(place, hierarchyOf(place, list));
+test("a card's line reads as a sentence", () => {
+  const arine = { id: "a", name: "Arine", kind: "settlement", class: "City", lon: 1, lat: 1 };
+  assert.equal(line(arine), "A settlement in Empiria, a territory of the Salvae Empire");
+  assert.equal(line({ ...arine, kind: "site", class: "Ruins" }), "A site in Empiria, a territory of the Salvae Empire");
+  assert.equal(line(empiria), "A territory of the Salvae Empire");
+  assert.equal(line({ id: "w", kind: "natural", class: "Forest", lon: 1, lat: 1 }), "A natural feature in Empiria, a territory of the Salvae Empire");
+});
+
+test("deeper chains, and names that read with or without 'the'", () => {
+  const usa = T("u", "Republic of Oak", { kind: "domain", class: "Republic", lon: 100, lat: 100 });
+  const state = T("s", "Vermont", { class: "State", partOf: "u", area: square(0, 0, 10) });
+  const county = T("c", "The Windsor Reach", { class: "County", partOf: "s", lon: 1, lat: 1, area: square(1, 1, 2) });
+  assert.equal(line({ id: "x", kind: "settlement", class: "Town", lon: 1, lat: 1 }, [usa, state, county]), "A settlement in the Windsor Reach, a territory of Vermont, a territory of the Republic of Oak");
+});
+
+test("a natural feature across a boundary says so", () => {
+  const river = { id: "r", kind: "natural", class: "River", lon: 15, lat: 0, area: [[0, 0], [30, 0]], areaClosed: false };
+  assert.equal(line(river), "A natural feature in the Salvae Empire, crossing Empiria and Southmark");
+  const open = [T("a", "Ash", { area: square(0, 0, 5) }), T("b", "Oak", { lon: 30, lat: 0, area: square(30, 0, 5) })];
+  assert.equal(line(river, open), "A natural feature crossing Ash and Oak");
+});
+
+test("part of nothing: no line, not a bare kind; a domain has none", () => {
+  assert.equal(line({ id: "b", kind: "site", class: "Ruins", lon: 500, lat: 500 }), null);
+  assert.equal(line(empire), null);
+  assert.equal(hierarchyLine(null), null);
+});
+
+test("a hidden domain is left out of the line for players", () => {
+  const list = [T("e", "Secret Empire", { kind: "domain", class: "Empire", hidden: true, lon: 100, lat: 100 }), empiria];
+  assert.equal(line({ id: "a", kind: "settlement", class: "Town", lon: 1, lat: 1 }, list), "A settlement in Empiria");
 });

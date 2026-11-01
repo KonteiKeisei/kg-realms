@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.87.2: where a place sits, on its card
+
+- **Place cards say where a place sits, in a sentence**, under its name: "A settlement in Empiria, a territory of the Salvae Empire". A natural feature adds what it crosses. A place that is part of nothing says nothing. This replaces the Part of and Crosses rows from 0.87.0. Players never see a hidden domain or territory in it.
+
 ## 0.87.1: a nested list
 
 - **The Places list nests domains and territories.** One section, Domains and territories, shows each with what is part of it folded beneath, by its Part of link or by the borders around it. A country holds its states, and they their counties. A search lists matches flat, and selecting one opens the way to it.
