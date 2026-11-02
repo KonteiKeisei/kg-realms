@@ -88,23 +88,6 @@ export function resheet(index, pack) {
   return { index: { ...index, sourceMap: sheet, mainMap: { bounds: sheet.bounds } }, pack: { ...pack, sourceMap: sheet, lods } };
 }
 
-/** How far a new picture's shape can be from the old one's before it counts as a different shape. */
-export const SHAPE_TOLERANCE = 0.01;
-/** Whether a picture `width` x `height` is the same shape as a sheet. */
-export const sameShape = (sheet, width, height) => Math.abs((width / height) / (sheet.width / sheet.height) - 1) <= SHAPE_TOLERANCE;
-/**
- * The sheet for a new picture of a world that already exists. Everything on a realm map is saved in
- * longitude and latitude, so the sheet covers exactly the same ground: its size only ever doubles, one
- * step of zoom at a time, which leaves the bounds and every place where they are. It doubles enough to
- * hold all of a bigger picture (up to MAX_PICTURE), and a smaller picture is enlarged to fit.
- */
-export function regenSheet(old, width, height) {
-  const ratio = Math.max(width / old.width, height / old.height);
-  let k = ratio > 1.05 ? Math.ceil(Math.log2(ratio)) : 0;
-  while (k > 0 && Math.max(old.width, old.height) * 2 ** k > MAX_PICTURE) k--;
-  const f = 2 ** k, w = old.width * f;
-  return { ...old, width: w, height: old.height * f, nativeZoom: old.nativeZoom + k, detailZoom: old.detailZoom + k, x: old.x * f, y: old.y * f, worldSize: old.worldSize * f, milesPerPixel: old.bounds.mapWidthMiles / w, keepSheet: true };
-}
 /** The folder for a rebuild's tiles: new each time, so the old map stays whole until the new one is ready. */
 export function nextTileFolder(pack) {
   const used = (pack?.lods ?? []).flatMap((l) => l.tiles.map((t) => Number(/^assets\/terrain\/v(\d+)\//.exec(t.path ?? "")?.[1] ?? 1)));

@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.91.1: only the tiles change
+
+- **Changed:** Regenerate map tiles now replaces only the tiles. Any picture is fitted to the map's existing size and shape, so the canvas, scale and coordinates stay exactly as they are and everything on the map lies over the new art. For a larger map, make a new scene.
+
 ## 0.91.0: a better map picture
 
 - **New:** got a better map picture? Open a made realm map's scene config. Map picture and **Regenerate map tiles from this picture** are where Background Image was.
