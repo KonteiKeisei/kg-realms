@@ -97,3 +97,16 @@ test("a player following progress does not see the stops ahead", () => {
   assert.doesNotMatch(html, /<b title="Karackas"/); assert.doesNotMatch(html, /Next:/);
   game.user.isGM = true;
 });
+
+test("a route point shows, closed or open, above the stop it leads to", () => {
+  game.user.isGM = true;
+  flags.journey = { waypoints: [{ lon: 5, lat: 0, name: "Near Valdoram" }, { lon: 10, lat: 0, name: "Wakeflow", stop: true }, { lon: 20, lat: 0, name: "Karackas", stop: true }], stays: [0, 0, 0], legModes: [null, null, null], start: { lon: 0, lat: 0, name: "Arine" } };
+  const two = { ...sheet, nodes: sheet.nodes.map((n) => (n.stop > 0 ? { ...n, stop: n.stop + 1 } : n)) };
+  for (const open of [[], [0]]) {
+    const hud = newHud(); hud.sheet = two; hud.openLegs = new Set(open);
+    const html = draw(hud, null), point = html.indexOf("Near Valdoram"), stop = html.indexOf('<b title="Wakeflow"'), next = html.indexOf('<b title="Karackas"');
+    assert.ok(point >= 0 && point < stop && stop < next, "in order: " + [point, stop, next]);
+    assert.ok(html.includes('aria-label="Remove this route point"'));
+    assert.ok(!html.includes("route points</button>"), "not folded away");
+  }
+});

@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.90.2: route points in their place
+
+- **Changed:** route points are always in view, above the stop they lead to, each with its name and a remove button. They are no longer folded into one list after the route.
+- **Fixed:** "Places on this leg" no longer shows when there are none.
+- **Changed:** the ship line no longer repeats the Boat list. It only says you can drop a ship there.
+
 ## 0.90.1: stop controls back in view
 
 - **Fixed:** an opened stop in the travel panel hid its own controls. Stay, Show on the map, Bypass, Remove this stop and Places on this leg were stuck behind the rows below, leaving a blank gap.
