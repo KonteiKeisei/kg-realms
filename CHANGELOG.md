@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.91.2: new art keeps its detail
+
+- **Changed:** Regenerate map tiles keeps all the detail of a bigger picture, as finer levels of tiles shown when you zoom in. The canvas, the map's scale and everything on it stay exactly as they are. Any picture is fitted to the map's shape.
+
 ## 0.91.1: only the tiles change
 
 - **Changed:** Regenerate map tiles now replaces only the tiles. Any picture is fitted to the map's existing size and shape, so the canvas, scale and coordinates stay exactly as they are and everything on the map lies over the new art. For a larger map, make a new scene.

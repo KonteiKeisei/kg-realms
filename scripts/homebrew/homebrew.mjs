@@ -9,7 +9,7 @@ import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
 import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars } from "./export.mjs";
 import { startBiomeClimates } from "../biome-weather.mjs";
-import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, nextTileFolder } from "./plan.mjs";
+import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, detailLevels, nextTileFolder } from "./plan.mjs";
 
 const ID = "kg-realms";
 const SETTING = "homebrewWorlds";
@@ -377,7 +377,7 @@ export function sceneMapPicture(root, scene) {
   const original = scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
   const row = document.createElement("div");
   row.dataset.kgrMapPicture = "true";
-  row.innerHTML = `<div class="form-group"><label>Map picture ${q("The picture this realm map's tiles are made from. It is fitted to this map's size and shape. Places, roads, rivers and everything else stay where they are, on top of the new art. For a larger map, make a new scene. Foundry's Background Image is not used on a realm map.")}</label><div class="form-fields"><input type="text" data-map-src placeholder="Choose a picture"><button type="button" class="icon fa-solid fa-file-import" data-map-browse aria-label="Browse for a picture" data-tooltip="Browse"></button></div></div>
+  row.innerHTML = `<div class="form-group"><label>Map picture ${q("The picture this realm map's tiles are made from. It is fitted to this map's shape, and a bigger picture keeps its detail when you zoom in. Places, roads, rivers and everything else stay where they are, on top of the new art. Foundry's Background Image is not used on a realm map.")}</label><div class="form-fields"><input type="text" data-map-src placeholder="Choose a picture"><button type="button" class="icon fa-solid fa-file-import" data-map-browse aria-label="Browse for a picture" data-tooltip="Browse"></button></div></div>
     <div class="form-group"><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button></div><p class="hint">Makes new tiles for the whole map. The current map keeps working until they are ready, then everyone's game reloads.</p></div>`;
   const input = row.querySelector("[data-map-src]"), button = row.querySelector("[data-map-regen]");
   input.value = original;
@@ -403,13 +403,14 @@ async function regenerateMap(scene, src) {
     if (!res.ok) throw Error(`HTTP ${res.status}`);
     blob = await res.blob(); bitmap = await createImageBitmap(blob);
   } catch (err) { console.error(`${ID} | reading a new map picture`, err); return ui.notifications.error(`KG Realms: could not read that picture: ${err?.message ?? err}`); }
-  // The picture is fitted to the map as it is: only the tiles change, nothing else has to.
-  const sheet = index.sourceMap;
+  // The picture is fitted to the map as it is: only the tiles change, nothing else has to. A bigger
+  // picture keeps its detail, in finer levels of tiles on the same sheet.
+  const sheet = index.sourceMap, detail = detailLevels(sheet, bitmap.width, bitmap.height), f = 2 ** detail;
   bitmap.close();
   const size = (w, h) => `${w.toLocaleString()} x ${h.toLocaleString()}`;
   const go = await foundry.applications.api.DialogV2.confirm({
     window: { title: "Regenerate map tiles", icon: "fa-solid fa-arrows-rotate" }, position: { width: 460 }, rejectClose: false,
-    content: `<p>Replace the tiles of <b>${esc(def.title)}</b> with this picture, fitted to the map's ${size(sheet.width, sheet.height)}.</p>
+    content: `<p>Replace the tiles of <b>${esc(def.title)}</b> with this picture, fitted to the map's shape and kept at ${size(sheet.width * f, sheet.height * f)}.</p>
       <p>Places, roads, rivers and everything else stay exactly where they are. When it finishes, everyone's game reloads.</p>`
   });
   if (!go) return;
@@ -419,14 +420,14 @@ async function regenerateMap(scene, src) {
   const halt = () => { if (stopped) throw Error("stopped"); };
   try {
     win.set("read", "now");
-    bitmap = await createImageBitmap(blob, { resizeWidth: sheet.width, resizeHeight: sheet.height, resizeQuality: "high" });
+    bitmap = await createImageBitmap(blob, { resizeWidth: sheet.width * f, resizeHeight: sheet.height * f, resizeQuality: "high" });
     win.set("read", "done", size(bitmap.width, bitmap.height));
     step = "tiles"; halt();
     // A folder of their own: the map in use is not touched until every new tile is saved.
     const folder = nextTileFolder(oldPack), tileDir = `${def.root}/${folder}`;
     await ensureDir(tileDir);
     await checkUploads(tileDir);
-    const lods = planTiles(sheet, folder), tiles = lods.flatMap((l) => l.tiles);
+    const lods = planTiles(sheet, { folder, detail }), tiles = lods.flatMap((l) => l.tiles);
     encoder = await encodeTiles(bitmap, tiles, tileDir, win, halt, (e) => { encoder = e; });
     encoder.stop(); encoder = null; bitmap.close();
     win.set("tiles", "done", `${tiles.length} tiles`);

@@ -48,10 +48,13 @@ export function homebrewSheet(width, height, miles) {
  * The detail levels and tiles for a sheet. An overview at a quarter size (when the picture is big
  * enough to need one) and the picture at full size. Each tile carries where to cut it from the
  * picture (`crop`, in that level's pixels, with a 2 px border copied from its neighbours).
+ * detail: how many finer levels the picture has beyond the sheet (it is then that many times twice the
+ * sheet's size); its tiles go on the same sheet positions. folder: where the tiles are saved.
  */
-export function planTiles(sheet, folder = "assets/terrain") {
+export function planTiles(sheet, { folder = "assets/terrain", detail = 0 } = {}) {
   const n = sheet.nativeZoom, big = Math.max(sheet.width, sheet.height) > 4096;
   const levels = big ? [[n - 2, 2044], [n, 1020]] : [[n, 1020]];
+  if (detail > 0) levels.push([n + detail, 1020]);
   return levels.map(([z, SIZE]) => {
     const scale = 2 ** (z - n), width = Math.round(sheet.width * scale), height = Math.round(sheet.height * scale);
     const lod = { z, width, height, scale, tiles: [] };
@@ -65,7 +68,7 @@ export function planTiles(sheet, folder = "assets/terrain") {
         textureWidth: tw, textureHeight: th, frameX: 2, frameY: 2,
         frameWidth: Math.min(pw, (sheet.width - px / scale) * scale), frameHeight: Math.min(ph, (sheet.height - py / scale) * scale),
         path: `${folder}/${id}${TILE_SUFFIX}`,
-        crop: { left, top, right, bottom, padLeft: px === 0 ? 2 : 0, padTop: py === 0 ? 2 : 0, scale }
+        crop: { left, top, right, bottom, padLeft: px === 0 ? 2 : 0, padTop: py === 0 ? 2 : 0, scale: scale / 2 ** detail }
       });
     }
     return lod;
@@ -88,6 +91,17 @@ export function resheet(index, pack) {
   return { index: { ...index, sourceMap: sheet, mainMap: { bounds: sheet.bounds } }, pack: { ...pack, sourceMap: sheet, lods } };
 }
 
+/**
+ * How many levels of detail finer than its sheet a world's new picture needs. Nothing about the world
+ * changes for a new picture: its sheet, scale and everything on it stay exactly as they are. Only the
+ * tiles hold more: each level doubles them, enough to keep all of a bigger picture, up to MAX_PICTURE.
+ */
+export function detailLevels(sheet, width, height) {
+  const ratio = Math.max(width / sheet.width, height / sheet.height);
+  let k = ratio > 1.05 ? Math.ceil(Math.log2(ratio)) : 0;
+  while (k > 0 && Math.max(sheet.width, sheet.height) * 2 ** k > MAX_PICTURE) k--;
+  return k;
+}
 /** The folder for a rebuild's tiles: new each time, so the old map stays whole until the new one is ready. */
 export function nextTileFolder(pack) {
   const used = (pack?.lods ?? []).flatMap((l) => l.tiles.map((t) => Number(/^assets\/terrain\/v(\d+)\//.exec(t.path ?? "")?.[1] ?? 1)));
