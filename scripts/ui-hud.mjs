@@ -1088,9 +1088,12 @@ export class TravelHud {
     const p = this.progress(), hour = p?.hour ?? 0;
     const marks = [];
     const progressOnly = !gm && s.show === "progress";
-    let path = [];
+    let path = [], wet = [];
     if (r) {
-      path = (progressOnly ? r.track.filter((q) => q.hour <= hour) : r.track).map((q) => ll(q.at));
+      const shown = progressOnly ? r.track.filter((q) => q.hour <= hour) : r.track;
+      path = shown.map((q) => ll(q.at));
+      // On a boat, the line is blue.
+      wet = shown.map((q) => !!r.legs[q.leg]?.sea);
       // A camp where each night falls ashore (none while a crewed ship sails on).
       for (const h of this.camps ?? []) {
         if (progressOnly && h > hour) break;
@@ -1110,7 +1113,8 @@ export class TravelHud {
     const here = p ? this.#at(hour) : null;
     if (here) marks.push({ at: ll(here), name: "Party", kind: "here" });
     else if (gm && this.stops()[0]) { const f = this.stops()[0]; marks.push({ at: [f.lon, f.lat], name: "Start", kind: "here" }); }
-    if (progressOnly && here) path.push(ll(here));    layer.setJourney(path.length > 1 ? path : null, marks);
+    if (progressOnly && here) { path.push(ll(here)); wet.push(wet.at(-1) ?? false); }
+    layer.setJourney(path.length > 1 ? path : null, marks, wet);
   }
 
   /* ------------------------------------------------------------------ panel */

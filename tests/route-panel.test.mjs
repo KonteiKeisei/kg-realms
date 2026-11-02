@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { boatOptions, buildSea, pathCrossing, planSea, shoreWater, voyageParts, WAY_LABELS } from "../scripts/waterways.mjs";
+import { boatOptions, buildSea, journeyFeatures, pathCrossing, planSea, shoreWater, voyageParts, WAY_LABELS } from "../scripts/waterways.mjs";
 
 const blank = () => ({ data: new Uint8Array(500 * 400).fill(1), width: 500, height: 400, cell: 4 });
 const seaOf = (lines) => { const shores = lines.filter((w) => w.kind === "shore"); return buildSea(shoreWater(blank(), shores), lines, { milesPerPixel: 0.5 }); };
@@ -60,4 +60,14 @@ test("the panel: the end first, Add stop, handles, a choice per leg, bypass", ()
   assert.ok(hud.includes("legWays"));
   const rules = readFileSync(new URL("../scripts/travel-rules.mjs", import.meta.url), "utf8");
   assert.ok(rules.includes('"River and sea"'));
+});
+
+test("the journey's line: blue by water, and whole where land meets water", () => {
+  const f = journeyFeatures([[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], [false, false, true, true, false]);
+  assert.deepEqual(f.map((x) => x.properties.water), [false, true, false]);
+  assert.deepEqual(f.map((x) => x.geometry.coordinates), [[[0, 0], [1, 0]], [[1, 0], [2, 0], [3, 0]], [[3, 0], [4, 0]]]);
+  assert.deepEqual(journeyFeatures(null, null), []);
+  assert.equal(journeyFeatures([[0, 0], [1, 1]], null)[0].properties.water, false, "no water list: all by land");
+  const map = readFileSync(new URL("../scripts/source-map.mjs", import.meta.url), "utf8");
+  assert.ok(map.includes("['case',['get','water'],night?'#b0e2f2':'#8fdcff',"));
 });

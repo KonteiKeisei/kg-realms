@@ -488,6 +488,21 @@ export function portVoyage(sea, from, to, { mph = 2, season = "summer", reach = 
   return { legs: [{ kind: "sea", name: null, mph, pts: [from, to], miles, hours }], miles, hours };
 }
 
+/**
+ * A journey's line as map features, one for each stretch by land or by water, each sharing its first
+ * point with the end of the last so the line stays whole. wet: whether each point is by water.
+ */
+export function journeyFeatures(coords, wet) {
+  if (!coords) return [];
+  const runs = [];
+  coords.forEach((c, i) => {
+    const water = !!wet?.[i], last = runs.at(-1);
+    if (last?.water === water) last.pts.push(c);
+    else runs.push({ water, pts: last ? [last.pts.at(-1), c] : [c] });
+  });
+  return runs.filter((r) => r.pts.length > 1).map((r) => ({ type: "Feature", properties: { water: r.water }, geometry: { type: "LineString", coordinates: r.pts } }));
+}
+
 /** What each way by water is called. */
 export const WAY_LABELS = { sea: "Sea route", river: "River route", both: "River and sea" };
 /**

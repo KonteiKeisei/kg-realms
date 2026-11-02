@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.89.2: blue on the water
+
+- **Changed:** the route line on the map is blue on any leg going by boat, by sea or by river, and stays gold on land. It works in day and night view.
+
 ## 0.89.1: closed coasts always work
 
 - **Fixed:** a closed shoreline now always works. With its water side set to Outside the loop, everything outside it is sea and everything inside it is land. Inside and outside now come from the loop's shape, so a wiggly coast can't confuse them.

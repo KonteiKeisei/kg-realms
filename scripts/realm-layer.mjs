@@ -1,4 +1,5 @@
 import { placeZooms } from "./source-map.mjs";
+import { journeyFeatures } from "./waterways.mjs";
 import { installMapSymbols } from './map-symbols.mjs';
 import { worldUrl } from "./worlds.mjs";
 import { createMapRoot, createLabelRoot, screenInScene } from "./canvas-util.mjs";
@@ -93,13 +94,13 @@ export class RealmLayer {
     this.#apply("routes", (map) => map.getSource("routes")?.setData(this.routes));
   }
 
-  /** A planned journey's path ([lon, lat] list), or null to clear it. */
-  setJourney(coords, camps = []) {
-    this.journey = [coords, camps];
+  /** A planned journey's path ([lon, lat] list), or null to clear it. wet: whether each point is by water. */
+  setJourney(coords, camps = [], wet = null) {
+    this.journey = [coords, camps, wet];
     this.onJourneyChanged?.(coords);
     this.#apply("journey", (map) => {
-      const [line, marks] = this.journey;
-      map.getSource("journey")?.setData({ type: "FeatureCollection", features: line ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } }] : [] });
+      const [line, marks, water] = this.journey;
+      map.getSource("journey")?.setData({ type: "FeatureCollection", features: journeyFeatures(line, water) });
       map.getSource("journey-camps")?.setData({ type: "FeatureCollection", features: (marks ?? []).map((c) => ({ type: "Feature", properties: { label: c.label ?? "", name: c.name ?? "", kind: c.kind ?? "camp", selected: !!c.selected }, geometry: { type: "Point", coordinates: c.at } })) });
     });
   }
