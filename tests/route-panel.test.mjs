@@ -81,3 +81,10 @@ test("the panel's layout: the plan scrolls, what now is pinned, with plain label
   assert.ok(camp.includes('return this.watch.setup !== p.night || this.watch.scene ? "decide" : "setup"'));
   assert.ok(camp.includes('run ? "" : tasks + this.#rollLog'), "the camp scene runs the night: the panel keeps a summary");
 });
+
+test("an opened row keeps its tools in view: the leg's options take only the room they need", () => {
+  const css = readFileSync(new URL("../styles/realms.css", import.meta.url), "utf8");
+  assert.ok(css.includes(".kgr-travel .tr-detail .leg-how { flex: 0 0 auto;"), "an older rule gives .leg-how flex: 1 0 100%, which pushes Stay and Remove out of the row");
+  const hud = readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8");
+  assert.ok(hud.includes("Remove this stop"));
+});

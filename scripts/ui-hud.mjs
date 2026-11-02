@@ -1194,7 +1194,7 @@ export class TravelHud {
     const the = (x) => (x.startsWith("the ") ? x : `the ${x}`);
     const dayOf = (h) => this.#dayAt(h);
     const days = (hours, perDay) => { const d = Math.max(1, Math.ceil(hours / perDay)); return `${d} day${d === 1 ? "" : "s"}`; };
-    const noBoat = (leg) => { const a = this.boatAt(sts[leg]), who = a ? sts[leg + 1] : sts[leg]; return `<span class="leg-explain">${esc(this.stopTitle(who, "This stop"))} has no port or drawn river, so this leg has no boat option.</span>`; };
+    const noBoat = (leg) => { const here = this.boatAt(sts[leg + 1]), who = this.stopTitle(here ? sts[leg] : sts[leg + 1], "This stop"); return `<span class="leg-explain">${here ? `The stop before this one, ${esc(who)},` : `${esc(who)}`} has no port or drawn river, so this leg has no boat option.</span>`; };
     // How one leg goes, for the GM: Land or each way by water, in plain words, with its boat or method and fare.
     const legHow = (leg) => {
       const L = r?.legs[leg];

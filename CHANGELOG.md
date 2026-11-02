@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.90.1: stop controls back in view
+
+- **Fixed:** an opened stop in the travel panel hid its own controls. Stay, Show on the map, Bypass, Remove this stop and Places on this leg were stuck behind the rows below, leaving a blank gap.
+- **Changed:** the "no boat option" line says which stop it means, for example "The stop before this one, Wilderness, has no port or drawn river".
+
 ## 0.90.0: UX overhaul
 
 The travel panel is reorganized around one layout: the plan scrolls in the middle, and what to do now stays pinned at the bottom.
