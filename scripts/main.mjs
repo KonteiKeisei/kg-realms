@@ -1,7 +1,7 @@
 import { PartyTokenFit } from "./party-token-fit.mjs";
 import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
-import { registerHomebrew } from "./homebrew/homebrew.mjs";
+import { registerHomebrew, sceneMapPicture } from "./homebrew/homebrew.mjs";
 import { setExportData } from "./homebrew/export.mjs";
 import { calendarSwitchedClimates, setSceneClimate, followClimate } from "./biome-weather.mjs";
 import { flagsNeedRedraw, lakeBiome } from "./biome-climate.mjs";
@@ -1375,6 +1375,7 @@ Hooks.on("renderSceneConfig", (app, html) => {
   if (!game.user.isGM) return;
   const scene = app.document ?? app.object, root = html instanceof HTMLElement ? html : html?.[0];
   scenePartyPicker(root, scene);
+  sceneMapPicture(root, scene);
 });
 // Once (0.56.0): a world that foraged at camp keeps foraging, now a task of Advanced watches.
 Hooks.once("ready", async () => {

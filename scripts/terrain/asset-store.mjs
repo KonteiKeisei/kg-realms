@@ -9,7 +9,7 @@ export function packFiles(manifest){
   if(manifest.lods.some((l,i)=>!Number.isInteger(l.z)||!Array.isArray(l.tiles)||!l.tiles.length||(i>0&&l.z<=manifest.lods[i-1].z)))throw Error('Invalid map detail levels');
   const files=new Map(),ids=new Set();
   for(const lod of manifest.lods)for(const t of lod.tiles??[]){
-    if(t.lod!==lod.z||ids.has(t.id)||!/^assets\/terrain\/z\d+-\d+-\d+\.ktx2(\.fbx)?$/.test(t.path??'')||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216)throw Error('Invalid map package entry');
+    if(t.lod!==lod.z||ids.has(t.id)||!/^assets\/terrain\/(v\d+\/)?z\d+-\d+-\d+\.ktx2(\.fbx)?$/.test(t.path??'')||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216)throw Error('Invalid map package entry');
     for(const k of ['x','y','width','height','textureWidth','textureHeight','frameX','frameY','frameWidth','frameHeight'])if(!Number.isFinite(t[k])||t[k]<0)throw Error('Invalid map geometry');
     if(!t.width||!t.height||t.textureWidth>4096||t.textureHeight>4096||t.frameX+t.frameWidth>t.textureWidth||t.frameY+t.frameHeight>t.textureHeight)throw Error('Invalid map frame');
     ids.add(t.id);if(files.has(t.hash)&&files.get(t.hash).ktxBytes!==t.ktxBytes)throw Error('Conflicting map package hashes');files.set(t.hash,t);

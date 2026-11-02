@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.91.0: a better map picture
+
+- **New:** got a better map picture? Open a made realm map's scene config. Map picture and **Regenerate map tiles from this picture** are where Background Image was.
+- Places, roads, rivers, shorelines and journeys stay on the same spot of the map. The map doubles in size as needed to hold all of a bigger picture, up to 16,384 px.
+- A picture of a different shape asks first, because it would be stretched to fit.
+- The current map keeps working while the tiles are made. Stopping or a failure leaves it unchanged. When it finishes, everyone's game reloads.
+
 ## 0.90.2: route points in their place
 
 - **Changed:** route points are always in view, above the stop they lead to, each with its name and a remove button. They are no longer folded into one list after the route.

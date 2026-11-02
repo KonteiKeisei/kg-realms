@@ -49,7 +49,7 @@ export function homebrewSheet(width, height, miles) {
  * enough to need one) and the picture at full size. Each tile carries where to cut it from the
  * picture (`crop`, in that level's pixels, with a 2 px border copied from its neighbours).
  */
-export function planTiles(sheet) {
+export function planTiles(sheet, folder = "assets/terrain") {
   const n = sheet.nativeZoom, big = Math.max(sheet.width, sheet.height) > 4096;
   const levels = big ? [[n - 2, 2044], [n, 1020]] : [[n, 1020]];
   return levels.map(([z, SIZE]) => {
@@ -64,7 +64,7 @@ export function planTiles(sheet) {
         width: Math.min(pw / scale, sheet.width - px / scale), height: Math.min(ph / scale, sheet.height - py / scale),
         textureWidth: tw, textureHeight: th, frameX: 2, frameY: 2,
         frameWidth: Math.min(pw, (sheet.width - px / scale) * scale), frameHeight: Math.min(ph, (sheet.height - py / scale) * scale),
-        path: `assets/terrain/${id}${TILE_SUFFIX}`,
+        path: `${folder}/${id}${TILE_SUFFIX}`,
         crop: { left, top, right, bottom, padLeft: px === 0 ? 2 : 0, padTop: py === 0 ? 2 : 0, scale }
       });
     }
@@ -79,11 +79,36 @@ export function planTiles(sheet) {
  * would shift, so callers only do this for worlds with nothing on them.
  */
 export function resheet(index, pack) {
-  const old = index.sourceMap, sheet = homebrewSheet(old.width, old.height, old.bounds.mapWidthMiles);
+  const old = index.sourceMap;
+  if (old.keepSheet) return null;
+  const sheet = homebrewSheet(old.width, old.height, old.bounds.mapWidthMiles);
   if (sheet.nativeZoom === old.nativeZoom && sheet.worldSize === old.worldSize && sheet.x === old.x && sheet.y === old.y) return null;
   const dz = sheet.nativeZoom - old.nativeZoom;
   const lods = pack.lods.map((l) => ({ ...l, z: l.z + dz, tiles: l.tiles.map((t) => ({ ...t, lod: t.lod + dz })) }));
   return { index: { ...index, sourceMap: sheet, mainMap: { bounds: sheet.bounds } }, pack: { ...pack, sourceMap: sheet, lods } };
+}
+
+/** How far a new picture's shape can be from the old one's before it counts as a different shape. */
+export const SHAPE_TOLERANCE = 0.01;
+/** Whether a picture `width` x `height` is the same shape as a sheet. */
+export const sameShape = (sheet, width, height) => Math.abs((width / height) / (sheet.width / sheet.height) - 1) <= SHAPE_TOLERANCE;
+/**
+ * The sheet for a new picture of a world that already exists. Everything on a realm map is saved in
+ * longitude and latitude, so the sheet covers exactly the same ground: its size only ever doubles, one
+ * step of zoom at a time, which leaves the bounds and every place where they are. It doubles enough to
+ * hold all of a bigger picture (up to MAX_PICTURE), and a smaller picture is enlarged to fit.
+ */
+export function regenSheet(old, width, height) {
+  const ratio = Math.max(width / old.width, height / old.height);
+  let k = ratio > 1.05 ? Math.ceil(Math.log2(ratio)) : 0;
+  while (k > 0 && Math.max(old.width, old.height) * 2 ** k > MAX_PICTURE) k--;
+  const f = 2 ** k, w = old.width * f;
+  return { ...old, width: w, height: old.height * f, nativeZoom: old.nativeZoom + k, detailZoom: old.detailZoom + k, x: old.x * f, y: old.y * f, worldSize: old.worldSize * f, milesPerPixel: old.bounds.mapWidthMiles / w, keepSheet: true };
+}
+/** The folder for a rebuild's tiles: new each time, so the old map stays whole until the new one is ready. */
+export function nextTileFolder(pack) {
+  const used = (pack?.lods ?? []).flatMap((l) => l.tiles.map((t) => Number(/^assets\/terrain\/v(\d+)\//.exec(t.path ?? "")?.[1] ?? 1)));
+  return `assets/terrain/v${Math.max(1, ...used) + 1}`;
 }
 
 /** The pack manifest (terrain-pack.json) once every tile has its `ktxBytes` and `hash`. */

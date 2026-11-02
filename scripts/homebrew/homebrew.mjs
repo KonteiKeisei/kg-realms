@@ -9,7 +9,7 @@ import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
 import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars } from "./export.mjs";
 import { startBiomeClimates } from "../biome-weather.mjs";
-import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles } from "./plan.mjs";
+import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, regenSheet, sameShape, nextTileFolder } from "./plan.mjs";
 
 const ID = "kg-realms";
 const SETTING = "homebrewWorlds";
@@ -20,11 +20,19 @@ const FilePickerImpl = () => foundry.applications.apps?.FilePicker?.implementati
 const saved = () => foundry.utils.deepClone(game.settings.get(ID, SETTING) ?? {});
 const sceneOf = (li) => { const el = li instanceof HTMLElement ? li : li?.[0]; return game.scenes.get(el?.dataset?.entryId ?? el?.dataset?.documentId); };
 const isVideo = (src) => /\.(webm|mp4|m4v|ogv)(\?|$)/i.test(src ?? "");
+let reloading = false;
 
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
   Hooks.on("createScene", sceneFromModule);
+  // A world's map was rebuilt: everyone reloads, so nobody keeps drawing the old one.
+  Hooks.on("updateScene", (scene, changes) => {
+    if (changes.flags?.[ID]?.mapVersion == null || reloading) return;
+    reloading = true;
+    ui.notifications.info("KG Realms: the map was rebuilt. Reloading...");
+    foundry.utils.debouncedReload();
+  });
   game.settings.register(ID, "calendarsApplied", { scope: "world", config: false, type: Object, default: {} });
   // Calendaria finishes starting after "ready", and says so.
   // The module's calendar first, so the biome climates go on the calendar the world will use.
@@ -206,10 +214,10 @@ let BuildWindowClass = null;
 const BuildWindow = function (...args) { BuildWindowClass ??= buildWindowClass(); return new BuildWindowClass(...args); };
 const buildWindowClass = () => class extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = { id: "kgr-realm-build", classes: ["kg-realms-build"], window: { title: "Making realm world", icon: "fa-solid fa-earth-europe" }, position: { width: 420 } };
-  constructor(name, onStop) {
-    super({ window: { title: `Making ${name}` } });
+  constructor(name, onStop, { title = `Making ${name}`, steps = [["backup", "Back up the scene"], ["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Save the world"], ["scene", "Turn the scene into a realm map"]] } = {}) {
+    super({ window: { title } });
     this.onStop = onStop;
-    this.steps = [["backup", "Back up the scene"], ["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Save the world"], ["scene", "Turn the scene into a realm map"]].map(([key, label]) => ({ key, label, state: "todo", note: "" }));
+    this.steps = steps.map(([key, label]) => ({ key, label, state: "todo", note: "" }));
     this.done = 0; this.total = 0; this.started = Date.now(); this.message = "";
   }
   set(key, state, note = "") { const s = this.steps.find((x) => x.key === key); if (s) Object.assign(s, { state, note }); this.render(); }
@@ -275,23 +283,7 @@ async function build(scene, name, miles) {
     await ensureDir(tileDir);
     await checkUploads(tileDir);
     const sheet = homebrewSheet(bitmap.width, bitmap.height, miles), lods = planTiles(sheet), tiles = lods.flatMap((l) => l.tiles);
-    win.total = tiles.length; win.tilesStarted = Date.now(); win.set("tiles", "now", `0 / ${tiles.length}`);
-    const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 2) - 1));
-    encoder = new TileEncoder(count, `${location.origin}${foundry.utils.getRoute(`modules/${ID}`)}`); await encoder.ready;
-    let next = 0;
-    await Promise.all(Array.from({ length: count }, async (_, worker) => {
-      while (next < tiles.length) {
-        halt();
-        const tile = tiles[next++];
-        const bytes = await encoder.encode(worker, cutTile(bitmap, tile), tile.textureWidth, tile.textureHeight);
-        halt();
-        const head = ktx2Header(bytes);
-        if (!head.magic || head.width !== tile.textureWidth || head.height !== tile.textureHeight || head.levels !== 1) throw Error(`the encoder made a bad tile (${tile.id})`);
-        tile.ktxBytes = bytes.byteLength; tile.hash = await sha256(bytes);
-        await upload(tileDir, `${tile.id}${TILE_SUFFIX}`, bytes, "application/octet-stream");
-        win.done++; win.set("tiles", "now", `${win.done} / ${tiles.length}`);
-      }
-    }));
+    encoder = await encodeTiles(bitmap, tiles, tileDir, win, halt, (e) => { encoder = e; });
     encoder.stop(); encoder = null; bitmap.close();
     win.set("tiles", "done", `${tiles.length} tiles`);
 
@@ -327,6 +319,30 @@ async function build(scene, name, miles) {
   }
 }
 
+/** Cut a picture into its tiles, encode them and save them, on as many workers as can be spared. Returns the encoder. */
+async function encodeTiles(bitmap, tiles, tileDir, win, halt, started) {
+  win.total = tiles.length; win.tilesStarted = Date.now(); win.set("tiles", "now", `0 / ${tiles.length}`);
+  const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency ?? 2) - 1));
+  const encoder = new TileEncoder(count, `${location.origin}${foundry.utils.getRoute(`modules/${ID}`)}`);
+  started(encoder);
+  await encoder.ready;
+  let next = 0;
+  await Promise.all(Array.from({ length: count }, async (_, worker) => {
+    while (next < tiles.length) {
+      halt();
+      const tile = tiles[next++];
+      const bytes = await encoder.encode(worker, cutTile(bitmap, tile), tile.textureWidth, tile.textureHeight);
+      halt();
+      const head = ktx2Header(bytes);
+      if (!head.magic || head.width !== tile.textureWidth || head.height !== tile.textureHeight || head.levels !== 1) throw Error(`the encoder made a bad tile (${tile.id})`);
+      tile.ktxBytes = bytes.byteLength; tile.hash = await sha256(bytes);
+      await upload(tileDir, `${tile.id}${TILE_SUFFIX}`, bytes, "application/octet-stream");
+      win.done++; win.set("tiles", "now", `${win.done} / ${tiles.length}`);
+    }
+  }));
+  return encoder;
+}
+
 async function backupScene(scene) {
   let folder = game.folders.find((f) => f.type === "Scene" && f.name === BACKUPS);
   folder ??= await Folder.implementation.create({ name: BACKUPS, type: "Scene", color: "#5a4a36" });
@@ -345,6 +361,95 @@ async function convertScene(scene, id, { miles, backup = null }) {
     "environment.dark": REALM_DARK_AMBIENCE,
     [`flags.${ID}`]: { world: id, level: "surface", bounds: index.sourceMap.bounds, milesPer100, version: DATA_VERSION, darkAmbience: REALM_AMBIENCE_REVISION, homebrewOriginal: original }
   });
+}
+
+/* ------------------------------------------------------------------ a better picture */
+
+/**
+ * The scene config of a made realm map: its picture, and a button to rebuild the map's tiles from it.
+ * Foundry's own Background Image must stay empty on a realm map (the tiles are its picture), so this
+ * row stands in its place. It has no form name: nothing here is saved by the scene's Save button.
+ */
+export function sceneMapPicture(root, scene) {
+  if (!root || !scene || !homebrewOf(scene) || root.querySelector("[data-kgr-map-picture]")) return;
+  const native = root.querySelector('[name$="background.src"]')?.closest(".form-group");
+  const basics = root.querySelector('.tab[data-tab="basics"]') ?? root.querySelector("form") ?? root;
+  const original = scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
+  const row = document.createElement("div");
+  row.dataset.kgrMapPicture = "true";
+  row.innerHTML = `<div class="form-group"><label>Map picture ${q("The picture this realm map's tiles are made from. Places, roads, rivers and everything else stay on the same spot of the map, so use the same map at its same shape: a sharper or corrected copy. Foundry's Background Image is not used on a realm map.")}</label><div class="form-fields"><input type="text" data-map-src placeholder="Choose a picture"><button type="button" class="icon fa-solid fa-file-import" data-map-browse aria-label="Browse for a picture" data-tooltip="Browse"></button></div></div>
+    <div class="form-group"><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button></div><p class="hint">Makes new tiles for the whole map. The current map keeps working until they are ready, then everyone's game reloads.</p></div>`;
+  const input = row.querySelector("[data-map-src]"), button = row.querySelector("[data-map-regen]");
+  input.value = original;
+  const ready = () => { button.disabled = !input.value.trim(); };
+  input.addEventListener("input", ready); ready();
+  row.querySelector("[data-map-browse]").addEventListener("click", () => {
+    new (FilePickerImpl())({ type: "image", current: input.value, callback: (path) => { input.value = path; ready(); } }).render(true);
+  });
+  button.addEventListener("click", () => regenerateMap(scene, input.value.trim()));
+  if (native) { native.after(row); native.hidden = true; native.style.display = "none"; }
+  else basics.prepend(row);
+}
+
+async function regenerateMap(scene, src) {
+  const def = homebrewOf(scene);
+  if (!def || !src) return;
+  if (isVideo(src)) return ui.notifications.warn("KG Realms: a video cannot be made into map tiles. Choose a picture.");
+  const read = async (rel) => (await fetch(worldUrl(def.id, rel), { cache: "no-store" })).json();
+  let blob, bitmap, index, oldPack;
+  try {
+    index = await read("index.json"); oldPack = await read("terrain-pack.json");
+    const res = await fetch(foundry.utils.getRoute(src), { cache: "no-store" });
+    if (!res.ok) throw Error(`HTTP ${res.status}`);
+    blob = await res.blob(); bitmap = await createImageBitmap(blob);
+  } catch (err) { console.error(`${ID} | reading a new map picture`, err); return ui.notifications.error(`KG Realms: could not read that picture: ${err?.message ?? err}`); }
+  const old = index.sourceMap, width = bitmap.width, height = bitmap.height, sheet = regenSheet(old, width, height), same = sameShape(old, width, height);
+  bitmap.close();
+  const size = (w, h) => `${w.toLocaleString()} x ${h.toLocaleString()}`;
+  const go = await foundry.applications.api.DialogV2.confirm({
+    window: { title: "Regenerate map tiles", icon: "fa-solid fa-arrows-rotate" }, position: { width: 460 }, rejectClose: false,
+    content: `<p>Make new tiles for <b>${esc(def.title)}</b> from this picture (${size(width, height)}). The map is saved at ${size(sheet.width, sheet.height)}.</p>
+      ${same ? "" : `<p class="notification warning" style="position:static;">This picture is a different shape from the current map (${size(old.width, old.height)}). It will be stretched to fit, so it will not line up with your places and shorelines. Crop it to the same shape first if you can.</p>`}
+      ${width < old.width * 0.95 ? "<p>It is smaller than the current map, so it will look softer.</p>" : ""}
+      <p>Places, roads, rivers and everything else stay on the same spot of the map. When it finishes, everyone's game reloads.</p>`
+  });
+  if (!go) return;
+  let stopped = false, encoder = null, step = "read";
+  const win = new BuildWindow(def.title, () => { stopped = true; win.message = "Stopping..."; win.render(); encoder?.stop(); }, { title: `New map tiles: ${def.title}`, steps: [["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Switch the map to them"]] });
+  win.render({ force: true });
+  const halt = () => { if (stopped) throw Error("stopped"); };
+  try {
+    win.set("read", "now");
+    bitmap = await createImageBitmap(blob, { resizeWidth: sheet.width, resizeHeight: sheet.height, resizeQuality: "high" });
+    win.set("read", "done", size(bitmap.width, bitmap.height));
+    step = "tiles"; halt();
+    // A folder of their own: the map in use is not touched until every new tile is saved.
+    const folder = nextTileFolder(oldPack), tileDir = `${def.root}/${folder}`;
+    await ensureDir(tileDir);
+    await checkUploads(tileDir);
+    const lods = planTiles(sheet, folder), tiles = lods.flatMap((l) => l.tiles);
+    encoder = await encodeTiles(bitmap, tiles, tileDir, win, halt, (e) => { encoder = e; });
+    encoder.stop(); encoder = null; bitmap.close();
+    win.set("tiles", "done", `${tiles.length} tiles`);
+    step = "save"; win.set("save", "now"); halt();
+    const clean = lods.map((l) => ({ ...l, tiles: l.tiles.map(({ crop, ...t }) => t) }));
+    const pack = packManifest(def.id, sheet, lods, await sha256(new TextEncoder().encode(JSON.stringify(clean))));
+    await uploadJson(def.root, "index.json", { ...index, sourceMap: sheet, mainMap: { bounds: sheet.bounds } });
+    await uploadJson(def.root, "terrain-pack.json", pack);
+    win.set("save", "done");
+    win.finished = true; win.message = "Done. Reloading..."; win.render();
+    forgetWorld(def.id);
+    await scene.update({ [`flags.${ID}.homebrewOriginal.background`]: src, [`flags.${ID}.mapVersion`]: Date.now() });
+  } catch (err) {
+    encoder?.stop();
+    win.set(step, "failed");
+    win.finished = true;
+    if (stopped) { win.message = "Stopped. The map is unchanged."; win.render(); return; }
+    console.error(`${ID} | regenerating map tiles`, err);
+    const memory = /memory|allocation|RangeError/i.test(String(err?.message ?? err));
+    win.message = memory ? "The browser ran out of memory. Shrink the picture (for example to 8,000 px on its long side) and try again. The map is unchanged." : `Could not make the tiles: ${err?.message ?? err}. The map is unchanged.`;
+    win.render();
+  }
 }
 
 /* ------------------------------------------------------------------ afterwards */
