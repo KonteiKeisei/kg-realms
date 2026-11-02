@@ -22,7 +22,7 @@ import { latLonToScene, sceneToLatLon } from "./geo.mjs";
 import { isPrimaryGM, primaryGM } from "./authority.mjs";
 import { journeyKey, progressKey, snapshotNeeded } from "./journey-state.mjs";
 import { captureScroll, restoreScroll } from "./panel-scroll.mjs";
-import { shellHead, shellSection } from "./ui-shell.mjs";
+import { shellHead, foldCaret } from "./ui-shell.mjs";
 import { writeJourney } from "./journey-write.mjs";
 import { walkingHistory, retimeWalking, baseTravelHour } from "./walking-timing.mjs";
 import { biomeLookup, biomeFlag, syncPartyBiome, freezeBiomeTravel, biomeTypes } from "./biomes.mjs";
@@ -131,7 +131,7 @@ export class TravelHud {
     return start ? [start, ...s.waypoints] : s.waypoints;
   }
   /** The GM's open tab: the route, or the encounters along it (per user, this browser). */
-  get tab() { try { const t = localStorage.getItem("kgr-travel-tab"); return ["enc", "rules"].includes(t) ? t : "route"; } catch { return "route"; } }
+  get tab() { try { const t = localStorage.getItem("kgr-travel-tab"); return ["enc", "rules", "camp"].includes(t) ? t : "route"; } catch { return "route"; } }
   set tab(v) { try { localStorage.setItem("kgr-travel-tab", v); } catch { /* storage off */ } }
   get collapsed() { try { return localStorage.getItem("kgr-travel-collapsed") === "1"; } catch { return false; } }
   set collapsed(v) { try { localStorage.setItem("kgr-travel-collapsed", v ? "1" : "0"); } catch { /* storage off */ } }
@@ -177,6 +177,8 @@ export class TravelHud {
     this.el.addEventListener("pointerup", (e) => this.#gripUp(e));
     this.el.addEventListener("pointercancel", () => this.#gripEnd());
     this.el.addEventListener("keydown", (e) => {
+      const row = e.target.closest?.(".tr-row[data-act]");
+      if (row && !e.target.closest(".stop-grip") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); return row.click(); }
       const grip = e.target.closest?.(".stop-grip");
       if (!grip || (e.key !== "ArrowUp" && e.key !== "ArrowDown") || !this.leader) return;
       e.preventDefault(); e.stopPropagation();
@@ -363,7 +365,7 @@ export class TravelHud {
         const roadOnly = METHODS[legs[i]?.method?.key]?.roadsOnly && legs[i]?.method?.key;
         const gap = (q) => roadGapMiles(this.graph, q, SOURCE_MAP.milesPerPixel), far = (q) => gap(q) > roadReachMiles(SOURCE_MAP.milesPerPixel);
         const offRoad = roadOnly ? (far(pts[i]) ? { name: names[i], miles: gap(pts[i]) } : far(pts[i + 1]) ? { name: names[i + 1], miles: gap(pts[i + 1]) } : null) : null;
-        this.noRouteWhy = { from: names[i], to: names[i + 1], fromOn: under(pts[i]), toOn: under(pts[i + 1]), roads: this.graph?.nodes?.size ?? 0, roadOnly, offRoad };
+        this.noRouteWhy = { leg: i, from: names[i], to: names[i + 1], fromOn: under(pts[i]), toOn: under(pts[i + 1]), roads: this.graph?.nodes?.size ?? 0, roadOnly, offRoad };
         console.warn("kg-realms | no route", { ...this.noRouteWhy, stops: sts.map((w, k) => ({ name: names[k], lon: w.lon, lat: w.lat, sheet: pts[k], on: under(pts[k]) })), legModes: s.legModes, legMethods: s.legMethods });
       }
     } else {
@@ -1149,7 +1151,7 @@ export class TravelHud {
     // The shell's header (ui-shell.mjs); the party pills sit under it.
     const head = shellHead({ icon: "fa-person-hiking", eyebrow: "Travel", title, lock: { attr: 'data-act="lock"', on: this.locked }, min: { attr: 'data-act="collapse"', on: this.collapsed } }) + partyTabs;
     if (rulesOnly) { this.panelHtml = null; this.el.innerHTML = head + (this.collapsed ? "" : `<nav class="kgr-tabs"><button data-tab="rules" class="on">Rules</button></nav><div class="body">${this.#rulesTab()}</div>`); this.#place(); restoreScroll(this.el, scroll); return; }
-    if (this.collapsed) { this.panelHtml = null; this.el.innerHTML = head + `<p class="progress-line">${this.#statusLine()}</p>` + (gm ? this.#buttons() : ""); this.#place(); restoreScroll(this.el, scroll); return; }
+    if (this.collapsed) { this.panelHtml = null; this.el.innerHTML = head + this.#pinned(this.camp.stage(p) === "decide" ? this.camp.html(p) : ""); this.#place(); restoreScroll(this.el, scroll); return; }
     const pace = PACES[s.pace], sp = this.speed(), base = sp.feet / 10, mph = base * pace.mph / 3;
     const seg = (name, value, list) => `<div class="seg">${list.map(([v, l, t]) => `<button data-set="${name}" data-value="${v}" class="${v === value ? "on" : ""}" ${t ? `title="${esc(t)}"` : ""}>${l}</button>`).join("")}</div>`;
     const R = this.ruleText();
@@ -1159,15 +1161,14 @@ export class TravelHud {
     const paceSeg = seg("pace", s.pace, ["slow", "normal", "fast"].map((k) => [k, `${PACES[k].label} <small>${mi(daily(k) / s.hours)} mph</small>`, R.pace[k]]));
     const showText = { route: "players see the route", progress: "players see progress only", none: "players see nothing" }[s.show] ?? "";
     // The setup, folded into one line once a route exists (the Setup button opens it again).
-    const open = gm && (this.setupOpen || sts.length < 2);
+    const open = gm && !!this.setupOpen;
     // Someone encumbered (on foot, it slows the party): in red, with who and how.
     const load = sp.burdened.map((x) => `${x.name}: ${x.burden}`).join(", ");
     const how = method === "foot" ? `<span class="${sp.burden ? "burdened" : ""}" ${load ? `data-tooltip="${esc(`Encumbered: ${load}. Lighten the load to travel faster.`)}"` : ""}>speed ${sp.feet} ft${sp.who ? ` (${esc(sp.who)}, slowest${sp.burden ? `, ${esc(sp.burden)}` : ""})` : ""}</span>${sp.burdened.length && !sp.burden ? ` · <span class="burdened" data-tooltip="${esc(`Encumbered: ${load}.`)}">${esc(sp.burdened.map((x) => x.name.split(" ")[0]).join(", "))} encumbered</span>` : ""}` : own ? `${mi(s.methodMph ?? 8)} mph` : METHODS[method].offroad ? "roads and trails only" : "travel pace";
     const biome=this.currentBiome(), favored=this.favoredTerrains().includes(biome?.type);
-    // The setup in one line of chips (0.65.3): how, the pace, a day's miles, the hours, the ground.
-    const chip = (text, cls = "", tip = "") => `<span class="kgr-sh-chip ${cls}" ${tip ? `data-tooltip="${esc(tip)}"` : ""}>${text}</span>`;
-    const summary = `<div class="setup-sum chips"><div class="kgr-sh-chips">${chip(esc(METHODS[method].short), "gold")}${chip(`${esc(pace.label)} pace`)}${chip(`${both(daily(s.pace))} a day`)}${chip(`${s.hours} h road · ${s.rest} h camp`)}${chip(how, sp.burden || sp.burdened.length ? "warn" : "")}${gm ? chip(esc(showText)) : ""}${biome ? chip(`${esc(biome.name)}${favored && method !== "flying" ? " · Ranger" : ""}`, favored && method !== "flying" ? "gold" : "", favored && method !== "flying" ? "Ranger: biome travel penalty halved" : "Biome here") : ""}</div>
-      ${gm && sts.length > 1 ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
+    // The setup, in one line: how the party travels, and the day.
+    const aboard = p?.sailing ? this.result?.legs.find((l) => l.sea && l.start <= p.hour + 1e-6 && l.start + l.hours > p.hour) : null, aboardIdx = aboard ? this.result.legs.indexOf(aboard) : -1;
+    const summary = `<div class="tr-setup"><div class="grow"><b>${esc(METHODS[method].short)}, ${esc(pace.label.toLowerCase())} pace</b><small>${aboard ? `This leg: ${esc(this.vessel(s.legVessels?.[aboardIdx]).label.toLowerCase())}` : `${both(daily(s.pace))} a day · ${s.hours} h road · ${s.rest} h camp · ${how}`}</small></div>${gm ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
     const fr = { ...DEFAULT.fares, ...(s.fares ?? {}) };
     const settings = open ? `${summary}
       <div class="row"><label>Name<input type="text" name="name" value="${esc(s.name)}" placeholder="${esc(title)}"></label></div>
@@ -1185,98 +1186,98 @@ export class TravelHud {
         const term = { ...RIDE_DEALS.terms, ...s.terms }[k], rate = term === "paid" ? { ...RIDE_DEALS.pays, ...s.pays }[k] : { ...RIDE_DEALS.fares, ...s.fares }[k];
         return `<div class="grid2"><label>${label}<select name="term-${k}">${[["fare", "Party pays"], ["free", "Free ride"], ["paid", paid]].map(([v, l]) => `<option value="${v}" ${v === term ? "selected" : ""}>${l}</option>`).join("")}</select></label>${term === "free" ? "" : `<label>${term === "paid" ? "Pay" : "Fare"}, a mile each<span class="unit"><input type="number" name="rate-${k}" min="0" max="1000" step="1" value="${rate}"> cp</span></label>`}</div>`;
       }).join("")}
-      <div class="row"><label>Players see</label>${seg("show", s.show, [["route", "Route"], ["progress", "Progress"], ["none", "Nothing"]])}</div>`
+      <div class="row"><label>Players see ${rule(R.show)}</label>${seg("show", s.show, [["route", "Route"], ["progress", "Progress"], ["none", "Nothing"]])}</div>`
       : summary;
-    // The route sheet: each point where something changes, and the going to the next.
+    // The route: one row for each stop, which opens to how the leg goes and what can be done there.
     const sh = this.sheet, nums = this.#numbers(), pr = this.progress();
+    const progressOnly = !gm && s.show === "progress", nowHour = pr?.hour ?? 0;
     const the = (x) => (x.startsWith("the ") ? x : `the ${x}`);
     const dayOf = (h) => this.#dayAt(h);
-    const node = (n, i) => {
-      const k = n.stop, first = i === 0;
-      const badge = first ? '<i class="fa-solid fa-person-hiking"></i>' : k != null ? `${nums[k - 1] ?? k}` : "";
-      // A stop not yet reached has a handle: drag it up or down the list to change the order.
-      const order = s.waypoints.map((w, i) => i).filter((i) => nums[i] != null), passed = !!pr && (r?.legEnds?.[k - 1] ?? Infinity) <= pr.hour + 1e-6;
-      const movable = gm && k != null && k > 0 && order.length > 1 && order.includes(k - 1) && !passed;
-      const grip = movable ? `<button type="button" class="stop-grip" data-grip="${k - 1}" aria-label="Drag to change the order of ${esc(n.name)}" title="Drag up or down to change the order"><i class="fa-solid fa-grip-vertical"></i></button>` : "";
-      // Stay aboard past this stop: a boat in, and a boat can go on to the next.
-      const nextBoat = gm && k > 0 && k < sts.length - 1 && r?.legs[k - 1]?.sea && !passed && !(s.stays[k - 1] > 0) ? this.boatAt(sts[k + 1]) : "";
-      const bypass = nextBoat ? `<button type="button" data-act="bypass" data-i="${k - 1}" class="bypass">Bypass ${esc(this.stopTitle(sts[k], "this stop"))}: stay aboard to ${esc(the(nextBoat))}</button>` : "";
-      // The stop's own controls on a second line, so the name and distance keep the first.
-      const tools = gm && k != null && k > 0 ? `<span class="stop-tools"><label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button data-act="del" data-i="${k - 1}" class="del" title="Remove this stop"><i class="fa-solid fa-xmark"></i></button>${bypass}</span>` : "";
-      return `<li class="node ${first ? "start" : k != null ? "stop" : "pass"} ${k != null && this.selected === k - 1 ? "sel" : ""}" ${movable ? `data-stop-i="${k - 1}"` : ""}>${grip}<span class="n">${badge}</span><span class="location-title"><button class="nm link" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k != null ? k - 1 : ""}" title="${esc(n.name)}: show on the map">${esc(n.name)}</button>${(first || k != null) && !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), around = spotRealms(lon, lat, this.getPlaces()); return around ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })() : ""}${this.seaNodes?.has(i) ? `<small class="sea-available">${esc(this.seaNodes.get(i))}</small>` : ""}</span><span class="meta">${first ? "" : `${mi(n.miles)} mi · day ${dayOf(n.hour)}`}</span>${tools}</li>`;
-    };
-    // Where the party is: a marker after the last point passed.
-    const partyAt = pr && pr.status !== "arrived" && sh ? sh.nodes.findLastIndex((n) => n.hour <= pr.hour + 1e-6) : -1;
-    // The going to the next point. The first piece of each leg says how the leg goes (the party's
-    // way, another method, or a boat between ports) and, for a fare, its price, which the GM can
-    // haggle at any time. A leg already behind the party is not changed.
-    const seen = new Set();
-    const going = (g) => {
-      const leg = g.leg, L = r?.legs[leg], direct = s.legModes?.[leg] === "direct", first = !seen.has(leg);
-      seen.add(leg);
-      const done = pr && L && L.start + L.hours <= pr.hour + 1e-6;
+    const days = (hours, perDay) => { const d = Math.max(1, Math.ceil(hours / perDay)); return `${d} day${d === 1 ? "" : "s"}`; };
+    const noBoat = (leg) => { const a = this.boatAt(sts[leg]), who = a ? sts[leg + 1] : sts[leg]; return `<span class="leg-explain">${esc(this.stopTitle(who, "This stop"))} has no port or drawn river, so this leg has no boat option.</span>`; };
+    // How one leg goes, for the GM: Land or each way by water, in plain words, with its boat or method and fare.
+    const legHow = (leg) => {
+      const L = r?.legs[leg];
+      if (!L) return "";
+      const direct = s.legModes?.[leg] === "direct", done = pr && L.start + L.hours <= pr.hour + 1e-6;
       const legMethod = s.legMethods?.[leg] ?? null, flying = (legMethod ?? s.method) === "flying", roadsOnly = !!METHODS[legMethod ?? s.method]?.roadsOnly;
-      const toggle = gm && first && !L?.sea && !flying && !roadsOnly && !done ? `<button data-act="way" data-i="${leg}" class="way ${direct ? "direct" : ""}" title="${direct ? "Going straight across country. Click to use roads." : "Using roads where they save time. Click to go straight across country."}">${direct ? '<i class="fa-solid fa-tree"></i> Direct' : '<i class="fa-solid fa-road"></i> Road'}</button>` : "";
-      let how = "";
-      if (gm && first && L) {
-        const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, ch = this.legChoices?.[leg], way = L.sea ? this.#wayOf(leg, L) : "land";
-        const opt = (value, label, on) => `<option value="${esc(value)}" ${on ? "selected" : ""}>${esc(label)}</option>`;
-        const sel = L.sea
-          ? `<label class="leg-ship">Boat <select name="ship-${leg}" ${done ? "disabled" : ""}>${Object.entries(VESSELS).map(([k, x]) => opt(k, `${x.label}, ${x.mph} mph${x.crewed ? ", day and night" : ", 8 h a day"}`, v.key === k)).join("")}${v?.actor ? opt(v.key, v.label, true) : ""}</select></label>`
-          : `<select name="how-${leg}" ${done ? "disabled" : ""} aria-label="How the party goes by land">${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, legMethod === k)).join("")}</select>`;
-        // The choice for this leg: land, and each way by water that exists, each with what it costs.
-        const days = (hours, perDay) => { const d = Math.max(1, Math.ceil(hours / perDay)); return `${d} day${d === 1 ? "" : "s"}`; };
-        const choice = (key, label, o, perDay) => `<button type="button" data-act="leg-way" data-i="${leg}" data-value="${key}" class="${way === key ? "on" : ""}" aria-pressed="${way === key}" ${done || !o ? "disabled" : ""}>${label}<small>${o ? `${mi(o.miles)} mi, ${days(o.hours, perDay)}` : "no way by land"}</small></button>`;
-        const boatDay = ch?.vessel.crewed ? 24 : 8, sts2 = this.stops();
-        const choices = ch ? `<span class="leg-q">How does the party get to ${esc(this.stopTitle(sts2[leg + 1], "the next stop"))}? ${rule(R.ways)}</span><span class="leg-ways">${choice("land", "Land", ch.land, s.hours)}${ch.boat.map((o) => choice(o.key, WAY_LABELS[o.key], o.plan, boatDay)).join("")}</span>` : "";
-        // In plain words: where the party boards, where it lands, and whether that is the end.
-        const aboard = (s.waypoints[leg]?.bypassed?.length ?? 0) > 0, boardAt = L.sea ? this.boatAt(sts2[leg]) : "", landAt = L.sea ? this.boatAt(sts2[leg + 1]) : "";
-        const placed = (x) => (x.startsWith("the ") ? `on <b>${esc(x)}</b>` : `at the <b>${esc(x)}</b>`);
-        const explain = boardAt && landAt ? `<span class="leg-explain">The party boards ${placed(boardAt)} and ${aboard ? "stays aboard to" : "lands"} ${aboard ? `<b>${esc(the(landAt))}</b>` : placed(landAt)}, ${leg + 1 === sts2.length - 1 ? "the destination" : "the next stop"}.</span>` : "";
-        const parts = L.sea && way === "both" ? voyageParts(L.plan, HARBOUR_MI).map((p) => `<span class="leg-part"><b>${p.kind === "river" ? "River route" : "Sea route"}</b><span>${mi(p.miles)} mi, ${days(p.hours, boatDay)}</span>${p.names.length ? `<small>${esc(p.names.join(", "))}</small>` : ""}</span>`).join("") : "";
-        const crossing = (this.riverOffers ?? []).filter((o) => o.leg === leg).map((o) => `<span class="river-offer"><b>The road crosses ${esc(riverLabel(o.river))}</b><span>Land to the crossing: ${mi(o.landMiles)} mi, ${days(o.landHours, s.hours)}. River route to ${esc(the(this.boatAt(sts2[leg + 1])))}: ${mi(o.plan.miles)} mi, ${days(o.plan.hours, 8)}.</span><span class="row"><button type="button" data-act="river-take" data-i="${leg}" class="primary">Take the river route from the crossing</button><button type="button" data-act="river-skip" data-i="${leg}">Stay on the road</button></span></span>`).join("");
-        const fare = this.fareOf(leg);
-        const fareRow = fare ? `<span class="fare"><label>${fare.paid ? "Pay" : "Fare"} <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
-        const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"} ${rule(this.ruleText().vessels)}</span>` : "";
-        const warn = L.autoSea && !ch ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland: going by boat.</span>` : "";
-        how = `<span class="leg-how">${choices}${explain}${parts}${sel}${drop}${fareRow}${warn}${crossing}</span>`;
-      }
-      return `<li class="going ${g.kind}"><span class="via">${esc(g.via)}</span><span class="meta">${mi(g.miles)} mi · ${hrs(g.hours)}</span>${toggle}${how}</li>`;
+      const v = L.sea ? this.vessel(s.legVessels?.[leg]) : null, ch = this.legChoices?.[leg], way = L.sea ? this.#wayOf(leg, L) : "land";
+      const opt = (value, label, on) => `<option value="${esc(value)}" ${on ? "selected" : ""}>${esc(label)}</option>`;
+      const sel = L.sea
+        ? `<label class="leg-ship">Boat <select name="ship-${leg}" ${done ? "disabled" : ""}>${Object.entries(VESSELS).map(([k, x]) => opt(k, `${x.label}, ${x.mph} mph${x.crewed ? ", day and night" : ", 8 h a day"}`, v.key === k)).join("")}${v?.actor ? opt(v.key, v.label, true) : ""}</select> ${rule(R.vessels)}</label>`
+        : `<label class="leg-ship">Travelling by <select name="how-${leg}" ${done ? "disabled" : ""}>${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, legMethod === k)).join("")}</select> ${rule(R.method)}</label>`;
+      const roads = !L.sea && !flying && !roadsOnly && !done ? `<span class="leg-ways"><button type="button" ${direct ? `data-act="way" data-i="${leg}"` : 'class="on"'} aria-pressed="${!direct}">By road<small>Roads where they save time</small></button><button type="button" ${direct ? 'class="on"' : `data-act="way" data-i="${leg}"`} aria-pressed="${direct}">Direct<small>Straight across country</small></button></span>` : "";
+      // The choice for this leg: land, and each way by water that exists, each with what it costs.
+      const choice = (key, label, o, perDay) => `<button type="button" data-act="leg-way" data-i="${leg}" data-value="${key}" class="${way === key ? "on" : ""}" aria-pressed="${way === key}" ${done || !o ? "disabled" : ""}>${label}<small>${o ? `${mi(o.miles)} mi, ${days(o.hours, perDay)}` : "no way by land"}</small></button>`;
+      const boatDay = ch?.vessel.crewed ? 24 : 8;
+      const ask = ch ? `<span class="leg-q">How does the party get to ${esc(this.stopTitle(sts[leg + 1], "the next stop"))}? ${rule(R.ways)}</span><span class="leg-ways">${choice("land", "Land", ch.land, s.hours)}${ch.boat.map((o) => choice(o.key, WAY_LABELS[o.key], o.plan, boatDay)).join("")}</span>` : noBoat(leg);
+      // In plain words: where the party boards, where it lands, and whether that is the end.
+      const aboard = (s.waypoints[leg]?.bypassed?.length ?? 0) > 0, boardAt = L.sea ? this.boatAt(sts[leg]) : "", landAt = L.sea ? this.boatAt(sts[leg + 1]) : "";
+      const placed = (x) => (x.startsWith("the ") ? `on <b>${esc(x)}</b>` : `at the <b>${esc(x)}</b>`);
+      const explain = boardAt && landAt ? `<span class="leg-explain">The party boards ${placed(boardAt)} and ${aboard ? "stays aboard to" : "lands"} ${aboard ? `<b>${esc(the(landAt))}</b>` : placed(landAt)}, ${leg + 1 === sts.length - 1 ? "the destination" : "the next stop"}.</span>` : "";
+      const parts = L.sea && way === "both" ? voyageParts(L.plan, HARBOUR_MI).map((q) => `<span class="leg-part"><b>${q.kind === "river" ? "River route" : "Sea route"}</b><span>${mi(q.miles)} mi, ${days(q.hours, boatDay)}</span>${q.names.length ? `<small>${esc(q.names.join(", "))}</small>` : ""}</span>`).join("") : "";
+      const fare = this.fareOf(leg);
+      const fareRow = fare ? `<span class="fare"><label>${fare.paid ? "Pay" : "Fare"} <input type="number" name="fare-${leg}" min="0" step="0.1" value="${gp(fare.gp)}"> gp a head</label>${rule(R.fares)}${fare.haggled ? `<small class="haggled">haggled, default ${gp(fare.def)} gp</small><button data-act="fare-reset" data-i="${leg}" class="link">Reset</button>` : `<small>default</small>`}</span>` : "";
+      const drop = L.sea ? `<span class="ship-drop" data-leg="${leg}" title="Drop a ship (a water vehicle actor) here to sail on it">${v.img ? `<img src="${esc(v.img)}" alt="">` : '<i class="fa-solid fa-ship"></i>'} ${esc(v.label)}, ${mi(v.mph)} mph${v.crewed ? ", sails day and night" : ", 8 h a day"}. Drop a ship here to change it.</span>` : "";
+      const warn = L.autoSea && !ch ? `<span class="warn-line"><i class="fa-solid fa-ship"></i> No way overland: going by boat.</span>` : "";
+      const crossing = (this.riverOffers ?? []).filter((o) => o.leg === leg).map((o) => `<span class="tr-offer"><b>The road crosses ${esc(riverLabel(o.river))}</b><span>Land to the crossing: ${mi(o.landMiles)} mi, ${days(o.landHours, s.hours)}. River route to ${esc(the(this.boatAt(sts[leg + 1])))}: ${mi(o.plan.miles)} mi, ${days(o.plan.hours, 8)}.</span><span class="row"><button type="button" data-act="river-take" data-i="${leg}" class="primary">Take the river route from the crossing</button><button type="button" data-act="river-skip" data-i="${leg}">Stay on the road</button></span></span>`).join("");
+      return `<div class="leg-how">${ask}${explain}${parts}${sel}${roads}${drop}${fareRow}${warn}${crossing}</div>`;
     };
-    const party = (i) => (i === partyAt && i < sh.nodes.length - 1 ? `<li class="party"><span class="dot"></span>${gm ? "Party" : "You are here"}, ${mi(this.#milesAt(pr.hour))} mi</li>` : "");
-    // Quicker ways by ship from a port: offered under it, one row for each port it could sail to.
-    const shipHint = (i) => (this.shipHints ?? []).map((h, k) => (h.a.node !== i ? "" : `<li class="ship-hint"><b><i class="fa-solid fa-ship"></i> Faster by ship from ${esc(h.a.p.name)}</b>
-      ${h.options.map((o, j) => `<div class="ship-opt"><div class="grow"><span><b>To ${esc(o.b.p.name)}</b>: ${this.#span(o.sea.hours)}, saves ${this.#span(o.land - o.sea.hours)} · ${gp(o.fare)} gp a head</span>
+    // Quicker ways by ship from a port: offered in the leg they would replace.
+    const shipOffers = (from, to) => (this.shipHints ?? []).map((h, k) => (h.a.node < from || h.a.node >= to ? "" : `<div class="tr-offer"><b><i class="fa-solid fa-ship"></i> Faster by ship from the port of ${esc(h.a.p.name)}</b>
+      ${h.options.map((o, j) => `<div class="ship-opt"><div class="grow"><span>To the port of ${esc(o.b.p.name)}: ${this.#span(o.sea.hours)}, saves ${this.#span(o.land - o.sea.hours)}, ${gp(o.fare)} gp a head.</span>
         ${o.calls.length ? `<small>Calling at ${o.calls.map((c) => esc(c.p.name)).join(", ")}: the party can stop there.</small>` : ""}
         ${o.skips.length ? `<small class="skip">Skips ${o.skips.map((c) => esc(c.name)).join(", ")} (not a port).</small>` : ""}</div>
-        <button data-act="ship-take" data-i="${k}" data-o="${j}" class="primary">Sail</button></div>`).join("")}
+        <button type="button" data-act="ship-take" data-i="${k}" data-o="${j}" class="primary">Sail</button></div>`).join("")}
       <span class="sub">Sailing ship, day and night. Stops with a stay are not sailed past.</span>
-      <span class="row"><button data-act="ship-skip" data-i="${k}" title="No ship from here: the party goes on overland (this suggestion goes away)">Stay overland</button></span></li>`)).join("");
-    // The sheet in parts, one for each stop and what lies on the way to the next. The part the party is
-    // in shows whole; the others fold to their stop, with a line saying what is folded (0.69.1).
-    const groupOf = [], starts = [];
-    if (sh) { let g = -1; sh.nodes.forEach((n, i) => { if (i === 0 || n.stop != null) { g++; starts[g] = i; } groupOf[i] = g; }); }
-    const legNow = sh ? groupOf[Math.max(0, partyAt)] ?? 0 : 0;
-    const legOpen = (g) => g === legNow || this.mode === "route" || !!this.openLegs?.has(g);
-    const foldRow = (html, i) => legOpen(groupOf[i]) ? html : html.replace(/<li class="/g, '<li class="folded ');
-    const stopRow = (n, i) => {
-      const g = groupOf[i], next = starts[g + 1], inside = (next ?? sh.nodes.length) - i - 1, hints = gm ? (this.shipHints ?? []).filter((h) => groupOf[h.a.node] === g).length : 0;
-      if (next == null || g === legNow || this.mode === "route") return node(n, i);
-      const miles = sh.nodes[next].miles - n.miles, on = !!this.openLegs?.has(g);
-      const what = [`${mi(miles)} mi to ${esc(sh.nodes[next].name)}`, inside ? `${inside} on the way` : null, hints ? `${hints} ship offer${hints === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
-      return node(n, i).replace(/<\/li>$/, `<button type="button" class="link fold-toggle" data-act="leg-fold" data-g="${g}" aria-expanded="${on}"><i class="fa-solid fa-caret-${on ? "down" : "right"}"></i> ${on ? "Fold" : what}</button></li>`);
-    };
+      <button type="button" data-act="ship-skip" data-i="${k}" title="No ship from here: the party goes on overland (this offer goes away)">Stay overland</button></div>`)).join("");
+    const starts = [];
+    if (sh) sh.nodes.forEach((n, i) => { if (i === 0 || n.stop != null) starts.push(i); });
+    const order = s.waypoints.map((w, i) => i).filter((i) => nums[i] != null), nextAt = pr && pr.status !== "arrived" && sh ? starts.slice(1).findIndex((i) => sh.nodes[i].hour > nowHour + 1e-6) : -1;
+    const startRow = () => `<div class="tr-stop start"><div class="tr-row"><span></span><span class="n"><i class="fa-solid fa-person-hiking" aria-label="The party"></i></span><span class="t"><b>${esc(this.stopTitle(sts[0], "Start"))}</b>${(() => { const [lon, lat] = [sts[0]?.lon, sts[0]?.lat], around = sts[0] ? spotRealms(lon, lat, this.getPlaces()) : ""; return around && !/^(In|On|Near|near)\s/.test(sts[0]?.name ?? "") ? `<small class="stop-where">In ${esc(around)}</small>` : ""; })()}${this.seaNodes?.has(0) ? `<small class="sea-available">${esc(this.seaNodes.get(0))}</small>` : ""}</span></div></div>`;
     // Stops the boat sails past, listed just above the stop it lands at.
-    const bypassedRows = (n) => (n.stop > 0 ? s.waypoints[n.stop - 1]?.bypassed ?? [] : []).map((b, j) => `<li class="bypassed"><span class="location-title"><b>${esc(b.name ?? "Stop")}</b><small>Bypassed. The boat does not call here.</small></span>${gm ? `<button type="button" data-act="stop-here" data-i="${n.stop - 1}" data-b="${j}">Stop here</button>` : ""}</li>`).join("");
-    const list = sh ? `<ol class="stops">${sh.nodes.map((n, i) => bypassedRows(n) + (i === 0 || n.stop != null ? stopRow(n, i) : foldRow(node(n, i), i)) + party(i) + (gm ? foldRow(shipHint(i), i) : "") + (sh.segments[i] ? foldRow(going(sh.segments[i]), i) : "")).join("")}</ol>`
-      : sts.length ? `<ol class="stops">${sts.map((w, i) => node({ name: w.name ?? (i ? "Stop" : "Start"), at: lonLatToSource(w.lon, w.lat), miles: 0, hour: 0, stop: i }, i).replace(/<span class="meta">[^<]*<\/span>/, '<span class="meta"></span>')).join("")}</ol>` : "";
+    const bypassedRows = (k) => (s.waypoints[k - 1]?.bypassed ?? []).map((b, j) => `<div class="tr-stop bypassed"><div class="tr-row"><span class="t"><b>${esc(b.name ?? "Stop")}</b><small>Bypassed. The boat does not call here.</small></span>${gm ? `<button type="button" data-act="stop-here" data-i="${k - 1}" data-b="${j}">Stop here</button>` : ""}</div></div>`).join("");
+    const stopRow = (g) => {
+      const i = starts[g + 1], n = sh.nodes[i], prev = sh.nodes[starts[g]], k = n.stop, w = s.waypoints[k - 1], end = starts[g + 2] ?? sh.nodes.length;
+      const done = !!pr && n.hour <= nowHour + 1e-6, here = g === nextAt, open = !!this.openLegs?.has(g);
+      const movable = gm && order.length > 1 && order.includes(k - 1) && !done;
+      const grip = movable ? `<button type="button" class="stop-grip" data-grip="${k - 1}" aria-label="Drag to change the order of ${esc(n.name)}" title="Drag up or down to change the order"><i class="fa-solid fa-grip-vertical"></i></button>` : "<span></span>";
+      const legs = [...new Set(sh.segments.slice(starts[g], i).filter(Boolean).map((x) => x.leg))];
+      const lastLeg = r?.legs[legs.at(-1)], way = lastLeg?.sea ? WAY_LABELS[this.#wayOf(legs.at(-1), lastLeg)] : "Land";
+      const stay = s.stays[k - 1] > 0 ? `stays ${s.stays[k - 1]} d` : "";
+      const line = [way, w?.bypassed?.length ? "stays aboard" : "", stay, this.seaNodes?.get(i)?.split(":")[0]].filter(Boolean).join(" · ");
+      const span = Math.max(1, dayOf(n.hour) - dayOf(prev.hour));
+      const head = `<div class="tr-row" data-act="leg-fold" data-g="${g}" role="button" tabindex="0" aria-expanded="${open}">${grip}<span class="n">${nums[k - 1] ?? k}</span><span class="t"><b title="${esc(n.name)}">${esc(n.name)}</b><small class="${lastLeg?.sea ? "wet" : "dry"}">${esc(line)}</small></span><span class="r"><b>${mi(n.miles - prev.miles)} mi</b>${span} day${span === 1 ? "" : "s"} · day ${dayOf(n.hour)}</span>${foldCaret(open)}</div>`;
+      if (!open) return bypassedRows(k) + `<div class="tr-stop ${done ? "done" : ""} ${here ? "here" : ""} ${this.mode === "route" && this.selected === k - 1 ? "sel" : ""}" ${movable ? `data-stop-i="${k - 1}"` : ""}>${head}</div>`;
+      const nextBoat = gm && k < sts.length - 1 && r?.legs[k - 1]?.sea && !done && !(s.stays[k - 1] > 0) ? this.boatAt(sts[k + 1]) : "";
+      const landAfter = nextBoat && !r?.legs[k]?.sea;
+      const bypass = nextBoat ? `<button type="button" data-act="bypass" data-i="${k - 1}" class="wide">Bypass ${esc(n.name)}: stay aboard to ${esc(the(nextBoat))}</button>${landAfter ? `<small class="sub">The leg after it is by land now, so this also makes it a boat leg.</small>` : ""}` : "";
+      const around = !/^(In|On|Near|near)\s/.test(n.name ?? "") ? (() => { const [lon, lat] = sourceToLonLat(n.at[0], n.at[1]), x = spotRealms(lon, lat, this.getPlaces()); return x ? `<small class="stop-where">In ${esc(x)}</small>` : ""; })() : "";
+      // Places passed and roads joined, folded away.
+      const inside = sh.nodes.slice(starts[g] + 1, i), placesOpen = !!this.openPlaces?.has(g);
+      const places = inside.length || legs.length ? `<button type="button" class="tr-fold" data-act="leg-places" data-g="${g}" aria-expanded="${placesOpen}">${foldCaret(placesOpen)} Places on this leg (${inside.length})</button>${placesOpen ? `<ul class="tr-places">${sh.segments.slice(starts[g], i).map((seg, j) => { const p = sh.nodes[starts[g] + j]; return `${j ? `<li><b>${esc(p.name)}</b><span>${mi(p.miles)} mi · day ${dayOf(p.hour)}</span></li>` : ""}${seg ? `<li class="via"><span>${esc(seg.via)}</span><span>${mi(seg.miles)} mi · ${hrs(seg.hours)}</span></li>` : ""}`; }).join("")}</ul>` : ""}` : "";
+      const tools = gm ? `<span class="stop-tools"><label class="stay" title="Days to stay here">Stay <input type="number" min="0" max="60" name="stay-${k - 1}" value="${s.stays[k - 1] ?? 0}"> d</label><button type="button" data-act="goto" data-x="${n.at[0]}" data-y="${n.at[1]}" data-i="${k - 1}">Show on the map</button></span>${bypass}<button type="button" data-act="del" data-i="${k - 1}" class="wide">Remove this stop</button>` : "";
+      return bypassedRows(k) + `<div class="tr-stop open ${done ? "done" : ""} ${here ? "here" : ""} ${this.mode === "route" && this.selected === k - 1 ? "sel" : ""}" ${movable ? `data-stop-i="${k - 1}"` : ""}>${head}<div class="tr-detail">${around}${gm ? legs.map(legHow).join("") + shipOffers(starts[g], end) : ""}${tools}${places}</div></div>`;
+    };
+    // A player following progress only sees the stops already reached.
+    const shownStops = sh ? starts.slice(1).map((_, g) => g).filter((g) => !progressOnly || sh.nodes[starts[g + 1]].hour <= nowHour + 1e-6) : [];
+    const stopCount = order.length, bypassCount = s.waypoints.reduce((a, w) => a + (w.bypassed?.length ?? 0), 0);
+    const routeCap = !sh ? `${stopCount} stop${stopCount === 1 ? "" : "s"}` : pr?.status === "arrived" ? "Arrived" : pr?.status === "stay" && nextAt >= 0 ? `At stop ${nextAt} of ${stopCount}` : nextAt >= 0 ? `Next: stop ${nextAt + 1} of ${stopCount}` : `${stopCount} stop${stopCount === 1 ? "" : "s"}${bypassCount ? `, ${bypassCount} bypassed` : ""}`;
+    // No route to draw: the stops as they are, and what is wrong with the leg that failed.
+    const failedLeg = this.noRoute ? this.noRouteWhy?.leg ?? 0 : -1;
+    const failed = !gm || this.stops().length < 2 ? ""
+      : this.routeError ? `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> The route could not be worked out: ${esc(this.routeError)}. Try Recalculate the route (More); the console (F12) has the details.</p>`
+      : this.noRoute && this.noRouteWhy?.roadOnly ? (() => { const w = this.noRouteWhy, who = METHODS[w.roadOnly].short.toLowerCase(); return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> A ${esc(who)} goes only by road and trail. ${w.offRoad ? `${esc(w.offRoad.name)} is ${Number.isFinite(w.offRoad.miles) ? `${mi(w.offRoad.miles)} mi from the nearest one` : "not near one, and this map has none"}: move the stop to a road, or choose another way for this leg.` : `No road or trail joins ${esc(w.from)} and ${esc(w.to)}: draw one on the Roads tab, or choose another way for this leg.`}</p>`; })()
+      : this.noRoute ? (() => { const w = this.noRouteWhy; return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> No way found${w ? ` from ${esc(w.from)} (on ${esc(w.fromOn)}) to ${esc(w.to)} (on ${esc(w.toOn)})` : " between these stops"}. Water is in the way and no boat route joins them${w && (w.fromOn === "water" || w.toOn === "water") ? `: ${esc(w.toOn === "water" ? w.to : w.from)} stands on water (the map's own, a shoreline's water side, or a painted biome)` : ""}. If that is wrong, check the shorelines: on the Waterways tab, Show the map's water, and look for a shoreline whose water leaks round an open end. The console (F12) has the details.</p>`; })() : "";
+    const unrouted = () => sts.slice(1).map((w, i) => { const opt = (value, label, on) => `<option value="${esc(value)}" ${on ? "selected" : ""}>${esc(label)}</option>`; const legMethod = s.legMethods?.[i] ?? null; return `<div class="tr-stop ${i === failedLeg ? "open" : ""}"><div class="tr-row"><span></span><span class="n">${i + 1}</span><span class="t"><b>${esc(this.stopTitle(w, "Stop"))}</b><small class="dry">${i === failedLeg ? "No way found" : ""}</small></span></div>${i === failedLeg ? `<div class="tr-detail">${failed}${gm ? `<label class="leg-ship">Travelling by <select name="how-${i}">${opt("", `${METHODS[s.method]?.short ?? "On foot"} (journey default)`, !legMethod)}${Object.entries(METHODS).filter(([k]) => k !== s.method).map(([k, m]) => opt(`m:${k}`, m.label, legMethod === k)).join("")}</select></label><button type="button" data-act="del" data-i="${i}" class="wide">Remove this stop</button>` : ""}</div>` : ""}</div>`; }).join("");
+    const list = sts.length ? `<section class="tr-sec"><div class="tr-cap">Route<span class="kgr-sh-sp"></span>${progressOnly ? "" : esc(routeCap)}</div>${startRow()}${sh ? shownStops.map(stopRow).join("") : unrouted()}</section>` : "";
     // Points that only shape the path: listed small, each removable.
     const shaping = s.waypoints.map((w, i) => ({ w, i })).filter(({ i }) => nums[i] == null);
-    const shapeLabel = `Path shaped through ${shaping.length} point${shaping.length === 1 ? "" : "s"}`;
-    const via = !gm || !shaping.length ? "" : !this.shapingOpen && this.mode !== "route"
-      ? `<button data-act="shaping" class="disclose"><i class="fa-solid fa-caret-right"></i> ${shapeLabel}</button>`
-      : `<div class="via-points"><button data-act="shaping" class="disclose"><i class="fa-solid fa-caret-down"></i> ${shapeLabel}</button>${shaping.map(({ w, i }) => { const at = lonLatToSource(w.lon, w.lat); return `<span class="chip ${this.selected === i ? "sel" : ""}"><button class="link" data-act="goto" data-x="${at[0]}" data-y="${at[1]}" data-i="${i}" title="Show on the map">${esc(w.name ?? "Point")}</button><button data-act="del" data-i="${i}" title="Remove this point"><i class="fa-solid fa-xmark"></i></button></span>`; }).join("")}<button data-act="recalc" class="clear-shaping" title="Drop these points and work the route out afresh along the roads between your stops"><i class="fa-solid fa-arrows-rotate"></i> Recalculate route</button></div>`;
-    const hint = this.mode === "route" ? `<p class="hint edit"><b>Editing the route.</b> ${s.waypoints.length ? "Click a place to add it as a stop. Click the route to add a point, then drag it to pull the path that way. Drag a stop's handle in this list to change the order. Right-click a stop, or select it and press Delete, to remove it." : "Click the place the journey ends."} Ctrl+Z undoes. Esc to finish.</p>`
+    const shapeLabel = `${shaping.length} route point${shaping.length === 1 ? "" : "s"}`;
+    const via = !gm || !shaping.length ? "" : !this.shapingOpen
+      ? `<button data-act="shaping" class="tr-fold">${foldCaret(false)} ${shapeLabel}</button>`
+      : `<div class="via-points"><button data-act="shaping" class="tr-fold">${foldCaret(true)} ${shapeLabel}</button>${shaping.map(({ w, i }) => { const at = lonLatToSource(w.lon, w.lat); return `<span class="chip ${this.selected === i ? "sel" : ""}"><button class="link" data-act="goto" data-x="${at[0]}" data-y="${at[1]}" data-i="${i}" title="Show on the map">${esc(w.name ?? "Point")}</button><button data-act="del" data-i="${i}" title="Remove this point"><i class="fa-solid fa-xmark"></i></button></span>`; }).join("")}<button data-act="recalc" class="clear-shaping" title="Drop these points and work the route out afresh along the roads between your stops"><i class="fa-solid fa-arrows-rotate"></i> Recalculate route</button></div>`;
+    const hint = this.mode === "route" ? `<p class="hint edit"><b>Editing the route.</b> ${s.waypoints.length ? "Click a place to add a stop. Click the route to add a point, then drag it to pull the path. Right-click a stop to remove it." : "Click the place the journey ends."} Ctrl+Z undoes. Esc to finish.</p>`
       : this.mode === "encounter" ? `<p class="hint edit"><b>Adding encounters.</b> Click the route to place one. Drag one to move it along the route. Click one to edit it, right-click to remove it. Ctrl+Z undoes. Esc to finish.</p>`
       : sts.length < 2 && !gm ? `<p class="hint">No route yet.</p>` : "";
     // Places to search by name, for choosing the end or adding a stop.
@@ -1286,32 +1287,42 @@ export class TravelHud {
       return this.placeListHtml;
     };
     const whereTo = gm && !s.waypoints.length ? `<div class="where-to"><label for="kgr-where">Where to?</label><input id="kgr-where" name="where" list="kgr-route-places" placeholder="Search for a place" autocomplete="off">${placeList()}${this.mode === "route" ? `<span>Or click a place on the map.</span>` : `<button type="button" data-act="edit"><i class="fa-solid fa-location-crosshairs"></i> Pick on the map</button>`}</div>` : "";
-    const addStop = gm && s.waypoints.length ? (this.addingStop ? `<div class="add-stop"><label for="kgr-add-place">Add a stop</label><input id="kgr-add-place" name="add-place" list="kgr-route-places" placeholder="Search for a place" autocomplete="off">${placeList()}<span>Or click a place on the map.</span><button type="button" data-act="add-stop">Done adding stops</button></div>` : `<div class="add-stop"><button type="button" data-act="add-stop"><i class="fa-solid fa-plus"></i> Add stop</button></div>`) : "";
-    const ground = r ? (() => { const t = r.ground.road + r.ground.trail + r.ground.offroad + r.ground.water || 1; return [["road", r.ground.road], ["trail", r.ground.trail], ["overland", r.ground.offroad], ["by water", r.ground.water]].filter(([, v]) => v / t >= 0.01).map(([k, v]) => `${Math.round(v / t * 100)}% ${k}`).join(", "); })() : "";
+    const addHelp = `<small class="sub">A new stop goes where it adds the least distance. Drag its handle to move it.</small>`;
+    const addStop = gm && s.waypoints.length && pr?.status !== "arrived" ? (this.addingStop || this.mode === "route" ? `<div class="add-stop"><label for="kgr-add-place">Add a stop</label><input id="kgr-add-place" name="add-place" list="kgr-route-places" placeholder="Search for a place" autocomplete="off">${placeList()}<span>Or click a place on the map.</span>${addHelp}${this.addingStop ? `<button type="button" data-act="add-stop">Done adding stops</button>` : ""}</div>` : `<div class="add-stop"><button type="button" data-act="add-stop"><i class="fa-solid fa-plus"></i> Add stop</button>${addHelp}</div>`) : "";
+    const ground = r ? (() => { const t = r.ground.road + r.ground.trail + r.ground.offroad + r.ground.water || 1; return [["by water", r.ground.water], ["road", r.ground.road], ["trail", r.ground.trail], ["overland", r.ground.offroad]].filter(([, v]) => v / t >= 0.01).map(([k, v]) => `${Math.round(v / t * 100)}% ${k}`).join(", "); })() : "";
     // Nights out: in camp, aboard ship, or staying somewhere on the way.
     const nights = r ? Math.max(0, Math.ceil(elapsedAt(this.plan, r.hours, { hoursPerDay: s.hours, rest: s.rest }) / 24 - 1e-9) - 1) : 0;
     const priced = r ? r.legs.map((l, i) => this.fareOf(i)).filter(Boolean) : [], heads = this.members().length || 1;
     const fares = priced.filter((x) => !x.paid).reduce((a, x) => a + x.gp, 0), earned = priced.filter((x) => x.paid).reduce((a, x) => a + x.gp, 0);
-    const totals = r ? `<p class="totals"><b>${both(r.miles)}</b>, ${hrs(r.hours)} on the way, about ${nights} night${nights === 1 ? "" : "s"} out. ${ground}.${fares ? ` Fares ${gp(fares)} gp a head${heads > 1 ? `, ${gp(fares * heads)} gp for ${heads}` : ""}.` : ""}${earned ? ` Pay ${gp(earned)} gp a head${heads > 1 ? `, ${gp(earned * heads)} gp for ${heads}` : ""}.` : ""}${gm && this.plan?.encounters.length ? ` Encounters: ${this.plan.encounters.map((e) => esc(e.name)).join(", ")}.` : ""}</p>` : "";
-    // The pinned footer (ui-shell.mjs): Undo, editing the route and its encounters, then More.
-    const foot = gm ? `<footer class="kgr-sh-foot"><button data-act="undo" title="Undo the last route change (Ctrl+Z)" aria-label="Undo" ${this.history?.length ? "" : "disabled"}><i class="fa-solid fa-rotate-left"></i></button><button data-act="edit" class="${this.mode === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> ${this.mode === "route" ? "Finish route" : "Edit route"}</button>
-      <button data-act="place-encounter" class="${this.mode === "encounter" ? "on" : ""}" ${r ? "" : "disabled"}><i class="fa-solid fa-triangle-exclamation"></i> ${this.mode === "encounter" ? "Finish adding" : "Add encounters"}</button>
+    const totalDays = r ? this.#dayAt(r.hours) : 0, encCount = gm ? this.plan?.encounters.filter((e) => e.kind !== "town").length ?? 0 : 0;
+    const sumGrid = r ? `<div class="tr-sum"><span>Distance</span><b>${both(r.miles)}</b><span>Time</span><b>${totalDays} day${totalDays === 1 ? "" : "s"}, about ${nights} night${nights === 1 ? "" : "s"}</b><span>Ground</span><b>${ground}</b>${fares ? `<span>Fares</span><b>${gp(fares)} gp a head${heads > 1 ? `, ${gp(fares * heads)} gp for ${heads}` : ""}</b>` : ""}${earned ? `<span>Pay</span><b>${gp(earned)} gp a head${heads > 1 ? `, ${gp(earned * heads)} gp for ${heads}` : ""}</b>` : ""}${encCount ? `<span>Encounters</span><b>${pr?.status === "arrived" ? `${encCount} met` : `${encCount} on the way`}</b>` : ""}</div>` : "";
+    // The whole journey: open while planning and at the end, folded on the way.
+    const underWay = !!pr && pr.status !== "arrived", journeyOpen = !underWay || !!this.journeyOpen;
+    const journey = !r || progressOnly ? "" : underWay ? `<button type="button" class="tr-fold" data-act="journey-fold" aria-expanded="${journeyOpen}">${foldCaret(journeyOpen)} The journey: ${mi(r.miles)} mi, ${totalDays} day${totalDays === 1 ? "" : "s"}</button>${journeyOpen ? sumGrid : ""}` : `<section class="tr-sec"><div class="tr-cap">The journey</div>${sumGrid}</section>`;
+    // The camp: a tab of its own while camp is being set up and through the night. End of the day is
+    // a decision in the pinned part; the night watch at sea sits above the route.
+    const stage = this.camp.stage(pr), inCamp = stage === "setup" || stage === "night", campHtml = stage ? this.camp.html(pr) : "";
+    if (inCamp !== !!this.wasInCamp) { this.wasInCamp = inCamp; if (inCamp) this.tab = "camp"; else if (this.tab === "camp") this.tab = "route"; }
+    else if (!inCamp && this.tab === "camp") this.tab = "route";
+    const pinned = this.#pinned(stage === "decide" ? campHtml : "");
+    // The pinned footer (ui-shell.mjs): Undo when there is a route change to undo, editing, then More.
+    const editable = gm && !inCamp && pr?.status !== "arrived" && !this.mode;
+    const foot = gm ? `<footer class="kgr-sh-foot">${this.history?.length ? `<button data-act="undo" title="Undo the last route change (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo route change</button>` : ""}${editable ? `<button data-act="edit"><i class="fa-solid fa-route"></i> Edit route</button>${r ? `<button data-act="place-encounter"><i class="fa-solid fa-triangle-exclamation"></i> Add encounters</button>` : ""}` : ""}
       <span class="kgr-sh-sp"></span><button data-act="more" class="more ${this.moreOpen ? "on" : ""}" aria-expanded="${this.moreOpen ? "true" : "false"}">More <i class="fa-solid fa-caret-${this.moreOpen ? "up" : "down"}"></i></button>
       ${this.moreOpen ? `<div class="more-menu" role="menu"><button data-act="recalc" role="menuitem" ${this.stops().length > 1 ? "" : "disabled"} title="From the start through your stops to the end, along the roads"><i class="fa-solid fa-arrows-rotate"></i> Recalculate the route</button><button data-act="reset" role="menuitem" ${this.state.trip ? "" : "disabled"}><i class="fa-solid fa-backward-fast"></i> Back to the start</button><button data-act="clear" role="menuitem" class="danger"><i class="fa-solid fa-trash"></i> Clear the route</button></div>` : ""}</footer>` : "";
-    const rows = gm ? this.#encounterRows() : [];
+    const encRows = gm ? this.#encounterRows() : [];
     const activeTab = !gm && this.tab === "enc" ? "route" : this.tab;
-    const tabs = `<nav class="kgr-tabs"><button data-tab="route" class="${activeTab === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> Route</button>${gm ? `<button data-tab="enc" class="${activeTab === "enc" ? "on" : ""}"><i class="fa-solid fa-triangle-exclamation"></i> Encounters <small>${rows.filter((x) => x.hour != null).length}</small></button>` : ""}<button data-tab="rules" class="${activeTab === "rules" ? "on" : ""}"><i class="fa-solid fa-book"></i> Rules</button></nav>`;
-    const offRoute = rows.filter((x) => x.hour == null).length;
+    const tabs = `<nav class="kgr-tabs"><button data-tab="route" class="${activeTab === "route" ? "on" : ""}"><i class="fa-solid fa-route"></i> Route</button>${inCamp ? `<button data-tab="camp" class="${activeTab === "camp" ? "on" : ""}"><i class="fa-solid fa-campground"></i> Camp</button>` : ""}${gm ? `<button data-tab="enc" class="${activeTab === "enc" ? "on" : ""}"><i class="fa-solid fa-triangle-exclamation"></i> Encounters <small>${encRows.filter((x) => x.hour != null).length}</small></button>` : ""}<button data-tab="rules" class="${activeTab === "rules" ? "on" : ""}"><i class="fa-solid fa-book"></i> Rules</button></nav>`;
+    const offRoute = encRows.filter((x) => x.hour == null).length;
     const warn = offRoute ? `<p class="warn" data-tab="enc"><i class="fa-solid fa-circle-exclamation"></i> ${offRoute} encounter${offRoute === 1 ? " is" : "s are"} off the route and will not be met. See Encounters.</p>` : "";
-    // The route, as a section with its stop count (folds away; kept per panel).
-    const route = list || via || totals ? shellSection("Route", `${list}${via}${totals}`, { count: Math.max(0, sts.length - 1) ? `${sts.length - 1} stop${sts.length === 2 ? "" : "s"}` : null, open: !this.routeShut, key: "route" }) : "";
-    const failed = !gm || this.stops().length < 2 ? ""
-      : this.routeError ? `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> The route could not be worked out: ${esc(this.routeError)}. Try Recalculate the route (More); the console (F12) has the details.</p>`
-      : this.noRoute && this.noRouteWhy?.roadOnly ? (() => { const w = this.noRouteWhy, who = METHODS[w.roadOnly].short.toLowerCase(); return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> A ${esc(who)} goes only by road and trail. ${w.offRoad ? `${esc(w.offRoad.name)} is ${Number.isFinite(w.offRoad.miles) ? `${mi(w.offRoad.miles)} mi from the nearest one` : "not near one, and this map has none"}: move the stop to a road, or choose another way for this leg.` : `No road or trail joins ${esc(w.from)} and ${esc(w.to)}: draw one on the Roads tab, or choose another way for this leg.`}</p>`; })()
-    : this.noRoute ? (() => { const w = this.noRouteWhy; return `<p class="warn"><i class="fa-solid fa-circle-exclamation"></i> No way found${w ? ` from ${esc(w.from)} (on ${esc(w.fromOn)}) to ${esc(w.to)} (on ${esc(w.toOn)})` : " between these stops"}. Water is in the way and no boat route joins them${w && (w.fromOn === "water" || w.toOn === "water") ? `: ${esc(w.toOn === "water" ? w.to : w.from)} stands on water (the map's own, a shoreline's water side, or a painted biome)` : ""}. If that is wrong, check the shorelines: on the Waterways tab, Show the map's water, and look for a shoreline whose water leaks round an open end. The console (F12) has the details.</p>`; })() : "";
-    const main = gm && this.tab === "enc" ? `${hint}${this.#encounterTab(rows)}` : this.tab === "rules" ? this.#rulesTab() : `${settings}${hint}${whereTo}${failed}${route}${addStop}${warn}`;
+    const encounter = gm && pr?.status === "encounter" && pr.encounter?.kind !== "town" ? this.#encounterDetail(pr) : "";
+    const topError = failedLeg < 0 ? failed : "";
+    const main = activeTab === "camp" ? `${campHtml}${encounter}`
+      : gm && activeTab === "enc" ? `${hint}${this.#encounterTab(encRows)}`
+      : activeTab === "rules" ? this.#rulesTab()
+      : `${hint}${stage === "sea" ? campHtml : ""}${encounter}${settings}${whereTo}${topError}${list}${via}${addStop}${journey}${warn}`;
     // The redraw keeps the panel where it was scrolled to.
-    const html = `${head}${tabs}<div class="body">${this.tab === "rules" ? "" : this.#nowBox()}${main}</div>${foot}`;
+    const html = `${head}${tabs}<div class="body">${main}</div>${pinned}${foot}`;
     if (html !== this.panelHtml) { this.el.innerHTML = html; this.panelHtml = html; }
     this.camp.decorate(this.el);
     if (this.mode) editBar.update(this, this.#barState());
@@ -1340,12 +1351,13 @@ export class TravelHud {
       const meta = e.hour == null ? "off the route" : e.rest ? `in camp, night ${e.rest.night ?? "?"} · ${hrs(e.rest.at ?? 0)} into the rest` : `${mi(this.#milesAt(e.hour))} mi · day ${dayOf(e.hour)}`;
       return `<li class="enc-row ${state}" data-enc="${esc(e.id)}" data-own="${e.own ? 1 : ""}" title="Open its card">
         <span class="n">${e.hour == null ? '<i class="fa-solid fa-circle-exclamation"></i>' : ++n}</span>
-        <span class="nm">${esc(e.name ?? "Encounter")}${e.own ? "" : ' <small title="Placed in the map editor">map</small>'}</span>
+        <span class="nm">${esc(e.name ?? "Encounter")}${e.own ? "" : ' <small title="Placed in the map editor">placed on the map</small>'}</span>
         <span class="meta">${meta}${e.dc != null ? ` · DC ${e.dc}` : ""}</span>
         <button data-act="goto" data-x="${e.at[0]}" data-y="${e.at[1]}" data-i="" title="Show on the map"><i class="fa-solid fa-location-crosshairs"></i></button>
         <button data-act="enc-edit" data-id="${esc(e.id)}" data-own="${e.own ? 1 : ""}" title="Edit"><i class="fa-solid fa-pen"></i></button></li>`;
     };
-    return `<ol class="encounters">${rows.map(row).join("")}</ol><p class="hint">Click an encounter for its card.</p>`;
+    const on = rows.filter((e) => e.hour != null), off = rows.filter((e) => e.hour == null);
+    return `${on.length ? `<section class="tr-sec"><div class="tr-cap">On the route<span class="kgr-sh-sp"></span>${on.length}</div><ol class="encounters">${on.map(row).join("")}</ol></section>` : ""}${off.length ? `<section class="tr-sec"><div class="tr-cap">Off the route<span class="kgr-sh-sp"></span>Will not be met</div><ol class="encounters">${off.map(row).join("")}</ol></section>` : ""}<p class="hint">Click an encounter for its card. To place a new one, click Add encounters, then click the route.</p>`;
   }
 
   /** A length of time as days and hours ("2 d 9 h"), or hours under a day. */
@@ -1377,103 +1389,85 @@ export class TravelHud {
     </div>`;
   }
 
-  /** One line: where the journey stands. */
-  #statusLine() {
-    const s = this.state, p = this.progress(), r = this.result;
-    if (!r) return "No route";
-    if (!p) return "Not set off";
-    const left = p.until ? hrs(Math.max(0, p.until - this.clock) / 3600) : "";
-    switch (p.status) {
-      case "moving": return `${p.sailing ? "At sea" : "On the road"}: ${mi(this.#milesAt(p.hour))} of ${mi(r.miles)} mi`;
-      case "halted": return p.away ? "Paused while the table is away" : "Stopped";
-      case "resting": return `${this.camp.phaseStatus(p)?.label ?? "Camped"}, ${left} until departure`;
-      case "stay": return `Staying, ${left} more`;
-      case "decide": return "End of the day: camp or push on";
-      // Players never learn an encounter's name (or that one is waiting): to them the party has stopped.
-      case "encounter": return p.encounter?.kind === "town" ? `Reached ${esc(p.encounter.name)}` : !game.user.isGM ? "Stopped" : `Encounter${p.encounter?.name ? `: ${esc(p.encounter.name)}` : ""}`;
-      case "arrived": return "Arrived";
-    }
-    return "";
-  }
-
   /**
-   * The journey right now, first in the panel: the day, the distance, a progress bar with the stops on
-   * it, where the party is, and (GM) the one thing to do next as the gold button, with the other
-   * controls small beneath it. Players see the same box without the controls or encounter names.
+   * What now, pinned under the plan: any decision first (with its own buttons), then the day, the
+   * distance and a progress bar with the stops on it, where the party is, then (GM) the buttons.
+   * Players see the same without the buttons or encounter names.
    */
-  #nowBox() {
-    const s = this.state, p = this.progress(), r = this.result, gm = game.user.isGM;
-    if (!r || this.stops().length < 2) return "";
-    const days = this.#dayAt(r.hours);
+  #pinned(decision = "") {
+    const s = this.state, p = this.progress(), r = this.result, gm = game.user.isGM, sts = this.stops(), progressOnly = !gm && s.show === "progress";
+    const pin = (body) => (body ? `<section class="tr-pin">${body}</section>` : "");
+    const pos = (title, sub = "", pill = "", cls = "") => `<div class="tr-pos"><b>${title}</b>${sub ? `<small>${sub}</small>` : ""}<span class="kgr-sh-sp"></span>${pill ? `<span class="pill ${cls}">${esc(pill)}</span>` : ""}</div>`;
+    const biome = this.currentBiome()?.name ?? "";
+    const days = r ? this.#dayAt(r.hours) : 0;
+    if (gm && this.mode === "route") return pin(`${pos("Editing", r ? `${mi(r.miles)} mi, ${days} day${days === 1 ? "" : "s"}` : "")}<button type="button" data-act="edit" class="primary">Finish route</button>`);
+    if (gm && this.mode === "encounter") return pin(`${pos("Adding encounters")}<button type="button" data-act="place-encounter" class="primary">Finish adding</button>`);
+    if (sts.length < 2) return gm ? pin(`${pos("Choose where to go", esc(biome))}<p class="tell">Start travel appears once there is a route.</p>`) : "";
+    if (!r) {
+      const leg = this.noRouteWhy?.leg;
+      return gm ? pin(`${pos("No route", "", this.noRoute && leg != null ? `Fix leg ${leg + 1}` : "", "alert")}<p class="tell">Start travel appears once every leg has a way.</p>`) : "";
+    }
     if (!p) {
       if (!gm) return "";
-      return `<section class="nowbox"><div class="now-head"><b>Not set off</b><span class="sub">${mi(r.miles)} mi, about ${days} day${days === 1 ? "" : "s"}</span></div>
-        <p class="now-line">Start travel, then move time on (here or with the calendar) and the party travels with it.</p>
-        <div class="now-main one"><button data-act="start" class="primary"><i class="fa-solid fa-play"></i> Start travel</button></div></section>`;
+      return pin(`${pos("Not started", esc(biome))}<p class="tell">Start travel, then move time on (here or with the calendar) and the party travels with it.</p><button type="button" data-act="start" class="primary"><i class="fa-solid fa-play"></i> Start travel</button>`);
     }
     const done = this.#milesAt(p.hour), pct = Math.max(0, Math.min(100, (done / Math.max(1e-9, r.miles)) * 100));
-    const ticks = (this.sheet?.nodes ?? []).filter((n) => n.stop > 0 && n.miles < r.miles - 1e-6).map((n) => `<i style="left:${((n.miles / r.miles) * 100).toFixed(1)}%"></i>`).join("");
+    const ticks = progressOnly ? "" : (this.sheet?.nodes ?? []).filter((n) => n.stop > 0 && n.miles < r.miles - 1e-6).map((n) => `<i style="left:${((n.miles / r.miles) * 100).toFixed(1)}%"></i>`).join("");
     const town = p.status === "encounter" && p.encounter?.kind === "town";
     // Players never learn an encounter's name, or that one is waiting: to them the party has stopped.
-    const pill = { moving: [p.sailing ? "Sailing" : "On the road", ""], halted: [p.away ? "Paused: away" : "Stopped", ""], resting: [this.camp.phaseStatus(p)?.label ?? "Camped", ""], stay: ["Staying", ""], decide: ["End of the day", "ask"], arrived: ["Arrived", "ok"] }[p.status]
-      ?? (town ? [`Reached ${p.encounter.name}`, "ask"] : gm ? ["Encounter", "alert"] : ["Stopped", ""]);
-    const where = this.#near(this.#at(p.hour)), left = p.until ? hrs(Math.max(0, p.until - this.clock) / 3600) : "";
-    const next = (this.sheet?.nodes ?? []).find((n) => n.stop > 0 && n.hour > p.hour + 1e-6);
+    const pill = { moving: [p.sailing ? "Sailing" : "On the road", ""], halted: [p.away ? "Paused: away" : "Paused", ""], resting: [this.camp.phaseStatus(p)?.label ?? "Camped", ""], stay: ["Staying", ""], decide: [gm ? "Waiting for you" : "End of the day", "amber"], arrived: ["Arrived", "ok"] }[p.status]
+      ?? (town ? [gm ? "Waiting for you" : `Reached ${p.encounter.name}`, "amber"] : gm ? [p.camp ? "Encounter in camp" : "Encounter", "alert"] : ["Stopped", ""]);
+    const where = this.#near(this.#at(p.hour)), left = p.until ? this.#span(Math.max(0, p.until - this.clock) / 3600) : "";
+    const next = progressOnly ? null : (this.sheet?.nodes ?? []).find((n) => n.stop > 0 && n.hour > p.hour + 1e-6);
     let line = `${where[0].toUpperCase()}${where.slice(1)}.`;
     if (p.status === "moving") line += p.sailing ? " Aboard ship, sailing day and night." : ` ${hrs(p.dayHours ?? 0)} of ${s.hours} h on the road today.`;
+    if (p.status === "halted" && !p.away) line += " Time passes, but the party stays put.";
     if (left && ["resting", "stay"].includes(p.status)) line += ` ${left} more.`;
     if (next && p.status !== "arrived") line += ` Next: <b>${esc(next.name)}</b>, day ${this.#dayAt(next.hour)}.`;
-    // Making camp and the night's watches (ui-camp.mjs): the GM's and the players' alike.
-    let body = this.camp.html(p);
-    if (gm) {
-      const ctl = this.#controls(p);
-      if (p.status === "decide") {
-        // The camp panel holds Begin the rest and Push on.
-      } else if (town) {
-        body += `<div class="now-main"><button data-act="town-stay" class="primary"><i class="fa-solid fa-door-open"></i> Stop in ${esc(p.encounter.name)}</button><button data-act="town-pass"><i class="fa-solid fa-play"></i> Carry on</button></div>`;
-      } else if (p.status === "encounter") {
-        const e = p.encounter, who = e.dc != null ? perceptionAgainst(this.party(), e.dc, s.pace) : [];
-        const col = (title, list, mark) => `<div><span class="cap">${title} (${list.length})</span>${list.map((c) => `<span class="${mark === "✓" ? "yes" : "no"}">${mark} ${esc(c.name)} ${c.adjusted}</span>`).join("") || '<span class="none">none</span>'}</div>`;
-        body += `<div class="now-enc"><b><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.name)}</b><span class="sub">${e.dc != null ? `Perception DC ${e.dc}` : "No Perception DC"}${e.notes ? ` · ${esc(e.notes)}` : ""}</span></div>
-          ${who.length ? `<div class="now-who">${col("Passive: notices", who.filter((c) => c.notices), "✓")}${col("Passive: misses", who.filter((c) => !c.notices), "✗")}</div>` : ""}
-          ${p.camp ? "" : e.dc != null && e.perception !== "passive" ? `<button data-act="ask-rolls" class="now-ask" title="The party was asked when the encounter began; ask again"><i class="fa-solid fa-dice-d20"></i> Ask for Perception rolls again</button>` : e.dc != null ? `<span class="sub">Passive Perception only: no rolls asked.</span>` : ""}
-          ${assetStrip({ actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] })}
-          <div class="now-main"><button data-act="carry-on" class="primary"><i class="fa-solid fa-play"></i> Conclude Encounter</button><button data-act="enc-card" data-id="${esc(e.id)}" data-own="${(s.encounters ?? []).some((o) => o.id === e.id) ? 1 : ""}"><i class="fa-solid fa-id-card"></i> Open card</button>${e.pinned ? `<button data-act="enc-journal" data-uuid="${esc(e.pinned)}" title="Its pinned journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}</div>`;
-      } else if (p.status === "halted") {
-        const escape = s.trip?.escape;
-        body += `${escape ? `<p class="now-line">Camp was abandoned without rest or packing. The party fled ${mi(escape.distance)} miles. The GM decides what was left behind.</p>` : ""}<div class="now-main one"><button data-act="start" class="primary"><i class="fa-solid fa-play"></i> ${escape ? `Rejoin route (${mi(escape.distance)} mi)` : "Resume travel"}</button></div>`;
-        if (s.trip?.townStop?.from === p.since) body += `<button data-act="town-enter"><i class="fa-solid fa-door-open"></i> Enter ${esc(s.trip.townStop.name)}: ${s.trip.townStop.arrival === 'sea' ? 'dock arrival' : 'choose entrance'}</button>`;
-      }
-      body += ctl;
+    const position = `${pos(`Day ${this.#dayAt(p.hour)}${progressOnly ? "" : ` of ${days}`}`, progressOnly ? `${mi(done)} mi` : `${mi(done)} of ${mi(r.miles)} mi`, pill[0], pill[1])}<div class="now-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-label="Journey progress"><span style="width:${pct.toFixed(1)}%"></span>${ticks}</div>`;
+    const inCamp = p.status === "resting" || (p.status === "encounter" && p.camp);
+    const whereLine = inCamp || p.status === "decide" ? "" : `<p class="now-line">${line}</p>`;
+    if (!gm) return pin(`${decision}${position}${whereLine}`);
+    // A decision comes first, and holds its own buttons.
+    if (decision) return pin(`<div class="tr-ask">${decision}</div>${position}`);
+    if (town) return pin(`<div class="tr-ask"><b>Reached ${esc(p.encounter.name)}</b><small>This town has a map. The party can stop and go in, or carry on through.</small><div class="tr-pair"><button type="button" data-act="town-stay" class="primary"><i class="fa-solid fa-door-open"></i> Stop in ${esc(p.encounter.name)}</button><button type="button" data-act="town-pass"><i class="fa-solid fa-play"></i> Carry on</button></div></div>${position}`);
+    if (p.status === "encounter") return pin(`<div class="tr-ask alert"><b>${esc(p.encounter?.name ?? "Encounter")}</b><small>${p.camp ? "The night waits until you conclude it, then the rest carries on." : "The party has stopped. The journey waits until you conclude it."}</small><button type="button" data-act="carry-on" class="primary"><i class="fa-solid fa-play"></i> Conclude Encounter</button></div>${position}${whereLine}`);
+    if (p.status === "arrived") {
+      const end = this.plan?.encounters.find((e) => e.kind === "town" && e.sceneId && e.hour >= r.hours - 1e-3), scene = end && game.scenes.get(end.sceneId);
+      return pin(`${position}${whereLine}<div class="tr-pair">${scene ? `<button type="button" data-act="arrive-enter" class="primary"><i class="fa-solid fa-door-open"></i> Enter ${esc(end.name)}</button>` : ""}<button type="button" data-act="clear">New journey</button></div>`);
     }
-    return `<section class="nowbox">
-      <div class="now-head"><b>Day ${this.#dayAt(p.hour)} of ${days}</b><span class="sub">${mi(done)} of ${mi(r.miles)} mi</span><span class="pill ${pill[1]}">${esc(pill[0])}</span></div>
-      <div class="now-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-label="Journey progress"><span style="width:${pct.toFixed(1)}%"></span>${ticks}</div>
-      <p class="now-line">${line}</p>${body}</section>`;
+    if (p.status === "halted") {
+      const escape = s.trip?.escape;
+      return pin(`${position}${escape ? `<p class="now-line">Camp was abandoned without rest or packing. The party fled ${mi(escape.distance)} miles. The GM decides what was left behind.</p>` : whereLine}<button type="button" data-act="start" class="primary"><i class="fa-solid fa-play"></i> ${escape ? `Rejoin route (${mi(escape.distance)} mi)` : "Resume travel"}</button>${s.trip?.townStop && s.trip.townStop.from === p.since ? `<button type="button" data-act="town-enter"><i class="fa-solid fa-door-open"></i> Enter ${esc(s.trip.townStop.name)}: ${s.trip.townStop.arrival === "sea" ? "dock arrival" : "choose entrance"}</button>` : ""}`);
+    }
+    if (p.status === "resting") return pin(position);
+    const moving = p.status === "moving" || p.status === "stay";
+    const tell = !moving ? "" : p.status === "stay" ? `<p class="tell">The party sets off again when the stay ends, as time moves on.</p>` : `<p class="tell">The ${p.sailing ? "ship sails" : "party moves"} as time moves on: use the buttons below, or the calendar.</p>`;
+    return pin(`${position}${whereLine}${tell}${this.#controls(p)}`);
   }
 
-  /** The GM's smaller controls under the main button: stop (or resume), and the two skips. */
+  /** The encounter the party has met: who notices it, and its card and pictures. */
+  #encounterDetail(p) {
+    const s = this.state, e = p.encounter, R = this.ruleText(), who = e?.dc != null ? perceptionAgainst(this.party(), e.dc, s.pace) : [];
+    if (!e) return "";
+    const names = (list) => list.map((c) => `${esc(c.name)} ${c.adjusted}`).join(", ") || "none";
+    return `<section class="tr-sec"><div class="tr-cap">The encounter ${rule(R.notice)}</div>
+      <div class="tr-sum"><span>Wisdom (Perception)</span><b>${e.dc != null ? `DC ${e.dc}` : "No DC"}</b>${who.length ? `<span>Notices</span><b>${names(who.filter((c) => c.notices))}</b><span>Misses</span><b>${names(who.filter((c) => !c.notices))}</b>` : ""}${e.notes ? `<span>Notes</span><b>${esc(e.notes)}</b>` : ""}</div>
+      ${p.camp ? "" : e.dc != null && e.perception !== "passive" ? `<button data-act="ask-rolls" class="wide" title="The party was asked when the encounter began; ask again"><i class="fa-solid fa-dice-d20"></i> Ask for Perception rolls again</button>` : e.dc != null ? `<small class="sub">Passive Perception only: no rolls asked.</small>` : ""}
+      ${assetStrip({ actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] })}
+      <div class="tr-pair"><button data-act="enc-card" data-id="${esc(e.id)}" data-own="${(s.encounters ?? []).some((o) => o.id === e.id) ? 1 : ""}"><i class="fa-solid fa-id-card"></i> Open card</button>${e.pinned ? `<button data-act="enc-journal" data-uuid="${esc(e.pinned)}" title="Its pinned journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}</div></section>`;
+  }
+
+  /** The GM's controls while the party is on its way: the two skips, then pause. */
   #controls(p) {
     const st = p?.status, ahead = p && this.plan?.encounters.some((e) => !e.rest && e.hour > p.hour + 1e-6);
     const blocked = !p || ["decide", "encounter", "arrived", "resting"].includes(st);
-    const stopBtn = st === "halted" || st === "arrived" ? "" : `<button data-act="stop"><i class="fa-solid fa-stop"></i> Stop travel</button>`;
-    return `<div class="now-ctl">${stopBtn}
-      <button data-act="skip-encounter" title="Move time on to the next encounter, making camp each night" ${blocked || !ahead ? "disabled" : ""}><i class="fa-solid fa-forward"></i> Next encounter</button>
-      <button data-act="skip-rest" title="Advance to the next camp decision, stopping at encounters on the way. Camp setup and sleep have not begun" ${blocked ? "disabled" : ""}><i class="fa-solid fa-campground"></i> Next camp</button></div>`;
-  }
-
-  /** Start/stop and the skips (GM), for the minimised panel. */
-  #buttons() {
-    if (!this.result) return "";
-    const p = this.progress(), st = p?.status;
-    const going = p && !["halted", "arrived"].includes(st);
-    const ahead = p && this.plan?.encounters.some((e) => !e.rest && e.hour > p.hour + 1e-6);
-    const blocked = !p || ["decide", "encounter", "arrived", "resting"].includes(st);
-    return `<div class="steps">
-      <button data-act="${going ? "stop" : "start"}" class="main" ${st === "arrived" ? "disabled" : ""}><i class="fa-solid fa-${going ? "stop" : "play"}"></i> ${going ? "Stop travel" : this.state.trip?.escape ? "Rejoin route" : p ? "Resume travel" : "Start travel"}</button>
-      <button data-act="skip-encounter" title="Move time on to the next encounter, making camp each night" ${blocked || !ahead ? "disabled" : ""}><i class="fa-solid fa-forward"></i> Next encounter</button>
-      <button data-act="skip-rest" title="Advance to the next camp decision, stopping at encounters on the way. Camp setup and sleep have not begun" ${blocked ? "disabled" : ""}><i class="fa-solid fa-campground"></i> Next camp</button>
-      <button data-act="reset" title="Back to the start" ${p ? "" : "disabled"}><i class="fa-solid fa-backward-fast"></i></button></div>`;
+    const atSea = !!p?.sailing;
+    return `<div class="tr-pair">
+      <button type="button" data-act="skip-encounter" title="Move time on to the next encounter, making camp each night" ${blocked || !ahead ? "disabled" : ""}><i class="fa-solid fa-forward"></i> Skip to next encounter</button>
+      <button type="button" data-act="skip-rest" title="Advance to the next camp decision, stopping at encounters on the way. Camp setup and sleep have not begun" ${blocked || atSea ? "disabled" : ""}><i class="fa-solid fa-campground"></i> Skip to next camp</button></div>
+      ${atSea ? `<small class="sub">No camp while the crew sails on. The party rests aboard.</small>` : ""}
+      <button type="button" data-act="stop"><i class="fa-solid fa-pause"></i> Pause travel</button>`;
   }
 
   #near(at) {
@@ -1516,6 +1510,7 @@ export class TravelHud {
     // The camp panel's own buttons (players use some of them too).
     const campBtn = e.target.closest("button[data-camp]");
     if (campBtn) return this.camp.click(campBtn);
+    if (e.target.closest(".stop-grip")) return;
     const btn = e.target.closest("[data-act], [data-set], [data-tab]");
     // A click on an encounter row (not its buttons): its card.
     const row = !btn && e.target.closest("[data-enc]");
@@ -1527,6 +1522,8 @@ export class TravelHud {
     if (act === "setup") { this.setupOpen = !this.setupOpen; return this.render(); }
     if (act === "shaping") { this.shapingOpen = !this.shapingOpen; return this.render(); }
     if (act === "leg-fold") { const g = Number(btn.dataset.g); this.openLegs ??= new Set(); this.openLegs.has(g) ? this.openLegs.delete(g) : this.openLegs.add(g); return this.render(); }
+    if (act === "leg-places") { const g = Number(btn.dataset.g); this.openPlaces ??= new Set(); this.openPlaces.has(g) ? this.openPlaces.delete(g) : this.openPlaces.add(g); return this.render(); }
+    if (act === "journey-fold") { this.journeyOpen = !this.journeyOpen; return this.render(); }
     if (act === "more") { this.moreOpen = !this.moreOpen; return this.render(); }
     if (act === "reset" || act === "clear") this.moreOpen = false;
     if (act === "enc-card") return this.showEncounterCard(btn.dataset.id, !!btn.dataset.own);
@@ -1549,6 +1546,11 @@ export class TravelHud {
     // Add stop: map clicks add stops while editing; the search box is there too.
     if (act === "add-stop") { this.addingStop = !this.addingStop; this.#setMode(this.addingStop ? "route" : null); return this.render(); }
     if (act === "bypass") return this.#bypass(i);
+    if (act === "arrive-enter") {
+      const end = this.plan?.encounters.find((x) => x.kind === "town" && x.sceneId && x.hour >= (this.result?.hours ?? 0) - 1e-3), scene = end && game.scenes.get(end.sceneId), arrival = settlementArrivalMode(this.result, this.progress()?.hour);
+      const gate = scene ? await chooseSettlementGate(scene, { arrival }) : null;
+      return gate ? this.enterTown(scene, gate, () => this.leader, arrival) : undefined;
+    }
     if (act === "stop-here") return this.#stopHere(i, Number(btn.dataset.b));
     if (act === "leg-way") {
       const v = btn.dataset.value;
@@ -1938,8 +1940,8 @@ export class TravelHud {
     const grip = e.target.closest?.(".stop-grip");
     if (!grip || e.button !== 0 || !game.user.isGM || !this.leader) return;
     e.preventDefault();
-    const rows = [...this.el.querySelectorAll("li[data-stop-i]")];
-    this.gripDrag = { i: Number(grip.dataset.grip), rows, row: grip.closest("li"), to: null };
+    const rows = [...this.el.querySelectorAll("[data-stop-i]")];
+    this.gripDrag = { i: Number(grip.dataset.grip), rows, row: grip.closest("[data-stop-i]"), to: null };
     this.gripDrag.row.classList.add("dragging");
     grip.setPointerCapture?.(e.pointerId);
   }

@@ -71,3 +71,13 @@ test("the journey's line: blue by water, and whole where land meets water", () =
   const map = readFileSync(new URL("../scripts/source-map.mjs", import.meta.url), "utf8");
   assert.ok(map.includes("['case',['get','water'],night?'#b0e2f2':'#8fdcff',"));
 });
+
+test("the panel's layout: the plan scrolls, what now is pinned, with plain labels", () => {
+  const hud = readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8");
+  assert.ok(hud.includes('<div class="body">${main}</div>${pinned}${foot}'));
+  for (const s of ["Not started", "Pause travel", "Skip to next encounter", "Skip to next camp", "Undo route change", "Resume travel", "Waiting for you", "as time moves on", "route point", "placed on the map", "New journey", "No camp while the crew sails on"]) assert.ok(hud.includes(s), s);
+  for (const s of ["Not set off", "Stop travel", "#nowBox", "#buttons", "#statusLine"]) assert.ok(!hud.includes(s), s);
+  const camp = readFileSync(new URL("../scripts/ui-camp.mjs", import.meta.url), "utf8");
+  assert.ok(camp.includes('return this.watch.setup !== p.night || this.watch.scene ? "decide" : "setup"'));
+  assert.ok(camp.includes('run ? "" : tasks + this.#rollLog'), "the camp scene runs the night: the panel keeps a summary");
+});

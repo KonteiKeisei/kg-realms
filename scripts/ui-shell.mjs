@@ -26,9 +26,15 @@ export function shellTabs(tabs, current, { attr = "data-tab", label = "Sections"
   return `<nav class="kgr-sh-tabs ${stacked ? "stacked" : ""}" role="tablist" aria-label="${esc(label)}">${tabs.map(([k, l, icon, n]) => `<button type="button" role="tab" ${attr}="${esc(k)}" class="${k === current ? "on" : ""}" aria-selected="${k === current}">${icon ? `<i class="fa-solid ${icon}" aria-hidden="true"></i>` : ""}<span>${esc(l)}</span>${n != null ? `<small>${esc(n)}</small>` : ""}</button>`).join("")}</nav>`;
 }
 
+/**
+ * The fold symbol on a button that opens or shuts something: the one symbol for it everywhere, a caret
+ * pointing right when shut and down when open. A <details> gets the same from realms.css, drawn on its summary.
+ */
+export const foldCaret = (open) => `<i class="fa-solid fa-caret-${open ? "down" : "right"}" aria-hidden="true"></i>`;
+
 /** A collapsible section: a header with a count, then its content. key: kept open or shut per panel. */
 export function shellSection(title, body, { count = null, open = true, key = "", action = "" } = {}) {
-  return `<details class="kgr-sh-sec" ${open ? "open" : ""} ${key ? `data-sec="${esc(key)}"` : ""}><summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span>${esc(title)}</span>${count != null ? `<small class="kgr-sh-count">${esc(count)}</small>` : ""}${action ? `<span class="kgr-sh-sp"></span>${action}` : ""}</summary><div class="kgr-sh-secbody">${body}</div></details>`;
+  return `<details class="kgr-sh-sec" ${open ? "open" : ""} ${key ? `data-sec="${esc(key)}"` : ""}><summary><span>${esc(title)}</span>${count != null ? `<small class="kgr-sh-count">${esc(count)}</small>` : ""}${action ? `<span class="kgr-sh-sp"></span>${action}` : ""}</summary><div class="kgr-sh-secbody">${body}</div></details>`;
 }
 
 /* ------------------------------------------------------------------ placement */

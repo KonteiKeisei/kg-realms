@@ -39,5 +39,5 @@ test("camp setup previews the current-time start and includes the next day's dat
   const hud={state:{rest:16,watch:{}},clock:clicked,members:()=>[],ruleText:()=>({forced:""}),
     dateText:t=>`Day ${Math.floor(t/86400)+1}, ${String(Math.floor(t/3600)%24).padStart(2,"0")}:${String(Math.floor(t/60)%60).padStart(2,"0")}`};
   const html=new CampPanel(hud).html({status:"decide",night:1,since:stopped,limit:8,dayHours:8});
-  assert.match(html,/Ready at Day 2, 10:39/);assert.doesNotMatch(html,/22:30/);
+  assert.match(html,/Camp ends at Day 2, 10:39/);assert.doesNotMatch(html,/22:30/);
 });

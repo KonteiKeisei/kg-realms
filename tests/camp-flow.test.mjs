@@ -18,7 +18,7 @@ test("the rest choice shows one-hour travel and keeps GM actions off the player 
   const html = panel.html(p);
   assert.match(html, /Push on for 1 hour/);
   assert.match(html, /Constitution save DC 11/);
-  assert.match(html, /Ready at 10:00/);
+  assert.match(html, /Camp ends at 10:00/);
   assert.match(html, /Setup/);assert.match(html, /Rest and watches/);assert.match(html, /Break camp/);
   assert.doesNotMatch(panel.html({ ...p, limit: 4 }), /Forced march: Constitution save DC/);
   game.user.isGM = false;

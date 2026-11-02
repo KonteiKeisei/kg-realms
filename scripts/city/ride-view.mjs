@@ -1,5 +1,6 @@
 import {cityPosition,cityDuration} from './routing.mjs';
 import {coinLabel} from './money.mjs';
+import {foldCaret} from '../ui-shell.mjs';
 const esc=s=>foundry.utils.escapeHTML(String(s??'')),W=1672,H=941,VP={x:836,y:440};
 const media='modules/kg-realms/assets/media/';
 const loadImage=src=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('Could not load carriage artwork.'));image.src=foundry.utils.getRoute(src);});
@@ -43,8 +44,8 @@ export class CityRideView {
     d.hidden=!coach;this.hud.el.classList.toggle('has-drawer',coach);this.hud.el.classList.toggle('drawer-shut',coach&&!open);
     if(!coach){d.innerHTML='';this.g=null;return;}
     const key=`${this.id}:${open}:${this.muted}`;if(this.drawerKey===key&&d.childElementCount)return;this.drawerKey=key;
-    d.innerHTML=open?`<div class="kgr-city-drawer-head"><i class="fa-solid fa-horse" aria-hidden="true"></i><span>Coach view</span><span class="kgr-sh-sp"></span><button type="button" data-act="view" class="kgr-sh-ctl" title="Passenger or driver" aria-label="Switch carriage view"><i class="fa-solid fa-eye"></i></button><button type="button" data-act="sound" class="kgr-sh-ctl ${this.audioBlocked?'needs-click':''}" title="Ride sound" aria-label="Toggle ride sound"><i class="fa-solid ${this.muted?'fa-volume-xmark':'fa-volume-high'}"></i></button><button type="button" data-act="drawer" class="kgr-sh-ctl" title="Collapse the coach view (for you only)" aria-label="Collapse the coach view"><i class="fa-solid fa-chevron-up"></i></button></div><div class="kgr-city-stage"><canvas width="${W}" height="${H}" aria-label="Street scenery from the coach"></canvas></div>`
-      :`<button type="button" data-act="drawer" class="kgr-city-drawer-tab" title="Show the coach view (for you only)"><i class="fa-solid fa-chevron-down"></i> Coach view</button>`;
+    d.innerHTML=open?`<div class="kgr-city-drawer-head"><i class="fa-solid fa-horse" aria-hidden="true"></i><span>Coach view</span><span class="kgr-sh-sp"></span><button type="button" data-act="view" class="kgr-sh-ctl" title="Passenger or driver" aria-label="Switch carriage view"><i class="fa-solid fa-eye"></i></button><button type="button" data-act="sound" class="kgr-sh-ctl ${this.audioBlocked?'needs-click':''}" title="Ride sound" aria-label="Toggle ride sound"><i class="fa-solid ${this.muted?'fa-volume-xmark':'fa-volume-high'}"></i></button><button type="button" data-act="drawer" class="kgr-sh-ctl" title="Collapse the coach view (for you only)" aria-label="Collapse the coach view">${foldCaret(true)}</button></div><div class="kgr-city-stage"><canvas width="${W}" height="${H}" aria-label="Street scenery from the coach"></canvas></div>`
+      :`<button type="button" data-act="drawer" class="kgr-city-drawer-tab" title="Show the coach view (for you only)">${foldCaret(false)} Coach view</button>`;
     if(!d.dataset.wired){d.dataset.wired='1';d.addEventListener('click',ev=>this.action(ev).catch(error=>ui.notifications.error(error.message)));}
     this.g=open?d.querySelector('canvas')?.getContext('2d')??null:null;this.painted=null;
   }

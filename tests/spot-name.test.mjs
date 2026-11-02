@@ -49,8 +49,8 @@ test("only what players may know, and only closed borders the GM drew", () => {
 });
 test("a long name stays in two lines, with the rest in its tooltip", () => {
   const css = readFileSync(new URL("../styles/realms.css", import.meta.url), "utf8");
-  assert.match(css, /location-title button\.nm \{[^}]*line-clamp: 2/);
-  assert.ok(readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8").includes('title="${esc(n.name)}: show on the map"'));
+  assert.match(css, /tr-row \.t b \{[^}]*line-clamp: 2/);
+  assert.ok(readFileSync(new URL("../scripts/ui-hud.mjs", import.meta.url), "utf8").includes('<b title="${esc(n.name)}">'));
 });
 
 test("the whole chain: nested borders, and what a territory is part of", () => {

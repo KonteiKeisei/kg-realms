@@ -49,6 +49,7 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
  const dot=['!=',['get','icon'],''];
  const weight=['match',['get','symbol'],'city',1.15,'town',0.95,'village',0.8,0.85];
  const pic=['==',['slice',['get','icon'],0,3],'mk-'];
+ const picScale=['case',pic,['match',['get','symbol'],'city',0.45,0.375],1];
  const priority=['+',['*',10,['get','rank']],['match',['get','symbol'],'city',0,'town',2,'keep',4,'village',5,'',8,6]];
  // What shows by zoom is decided by the settled zoom (realm-layer.mjs #settle): once the zoom has been
  // still a moment, not live while it changes, so names, places and roads come and go together.
@@ -57,9 +58,9 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   // A picture marker that cannot be drawn falls back to the place's map-key symbol.
   'icon-image':['coalesce',['image',['get','icon']],['image',['get','fallback']]],
   // Markers keep a readable size zoomed out; cities are a little larger than towns and sites.
-  // Picture markers fill their 64 px images; a key symbol's circle is only 26 px of its 48. Scale
-  // pictures to about a fifth larger than the circle, so their detail still reads.
-  'icon-size':['interpolate',['linear'],['zoom'],2,['*',0.85*markerScale,weight,['case',pic,0.5,1]],6,['*',0.9*markerScale,weight,['case',pic,0.5,1]],9,['*',1.1*markerScale,weight,['case',pic,0.5,1]],12,['*',1.4*markerScale,weight,['case',pic,0.5,1]]],
+  // Picture markers fill their 64 px images; a key symbol's circle, with its edge, is 24 px of its 48
+  // (a city's, 30). Scale pictures to match the circle of the same kind of place.
+  'icon-size':['interpolate',['linear'],['zoom'],2,['*',0.85*markerScale,weight,picScale],6,['*',0.9*markerScale,weight,picScale],9,['*',1.1*markerScale,weight,picScale],12,['*',1.4*markerScale,weight,picScale]],
   // Zoomed out, markers collide and the most important ones win (cities first).
   'icon-allow-overlap':!!fixed,'icon-ignore-placement':!!fixed,'icon-padding':2,
   'text-field':['get','name'],'text-font':['case',dot,['literal',['Noto Sans Medium']],['literal',['Noto Sans Italic']]],'text-size':ls(size),'text-max-width':12,'text-optional':true,

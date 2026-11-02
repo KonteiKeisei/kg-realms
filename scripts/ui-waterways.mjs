@@ -433,10 +433,10 @@ export class WaterwayEditor {
       const kKey = `kind:${kind}`, kOpen = this.#open.has(kKey) || sel?.kind === kind;
       const groups = this.#groups(kind).map((g) => {
         const inG = rows.filter(([, x]) => x.group === g).sort(order(g)), gKey = `group:${kind}:${g}`, gOpen = this.#open.has(gKey) || (sel?.kind === kind && sel.group === g);
-        return `<details class="kgr-ww-group" data-key="${esc(gKey)}" ${gOpen ? "open" : ""}><summary><i class="fa-solid fa-caret-right"></i><i class="fa-regular fa-folder${gOpen ? "-open" : ""}"></i><span class="grow">${esc(g)}</span><small>${inG.length}</small><span class="kgr-ww-rename" role="button" tabindex="0" data-act="group-rename" data-kind="${kind}" data-group="${esc(g)}" title="Rename this group, or ungroup it"><i class="fa-solid fa-pen"></i></span></summary>${inG.map(row).join("")}</details>`;
+        return `<details class="kgr-ww-group" data-key="${esc(gKey)}" ${gOpen ? "open" : ""}><summary><i class="fa-regular fa-folder${gOpen ? "-open" : ""}"></i><span class="grow">${esc(g)}</span><small>${inG.length}</small><span class="kgr-ww-rename" role="button" tabindex="0" data-act="group-rename" data-kind="${kind}" data-group="${esc(g)}" title="Rename this group, or ungroup it"><i class="fa-solid fa-pen"></i></span></summary>${inG.map(row).join("")}</details>`;
       }).join("");
       const loose = rows.filter(([, x]) => !x.group).sort(order(null)).map(row).join("");
-      return `<details class="kgr-ww-kind" data-key="${kKey}" ${kOpen ? "open" : ""}><summary><i class="fa-solid fa-caret-right"></i><span class="sw" style="background:${WATERWAY_KINDS[kind].color}"></span><span class="grow">${PLURAL[kind]}</span><small>${rows.length}</small></summary><div class="kgr-ww-body">${groups}${loose}</div></details>`;
+      return `<details class="kgr-ww-kind" data-key="${kKey}" ${kOpen ? "open" : ""}><summary><span class="sw" style="background:${WATERWAY_KINDS[kind].color}"></span><span class="grow">${PLURAL[kind]}</span><small>${rows.length}</small></summary><div class="kgr-ww-body">${groups}${loose}</div></details>`;
     }).join("");
     return `<div class="kgr-water-list"><span class="cap">On this map</span>${sections}</div>`;
   }

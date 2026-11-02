@@ -424,6 +424,14 @@ export class CampPanel {
   }
 
   /** The panel for this moment of the journey, or "" when there is no camp. p: the journey's progress. */
+  /** Which part of camp the journey is at: "decide", "setup", "night", "sea", or null. */
+  stage(p) {
+    if (!p || this.practice) return null;
+    if (p.status === "decide") return this.watch.setup !== p.night || this.watch.scene ? "decide" : "setup";
+    if (p.status === "resting" || (p.status === "encounter" && p.camp)) return "night";
+    return p.sailing && this.#setting("watchesAtSea") ? "sea" : null;
+  }
+
   html(p) {
     // A practice night is in the camp scene only; the travel panel stays the journey's.
     if (!p || this.practice) return "";
@@ -443,9 +451,9 @@ export class CampPanel {
       const hours = Math.max(16, Math.min(72, Number(this.st.rest) || 16));
       const progress = this.#phaseSummary(p, "camp");
       const forced = p.limit + 1 > 8;
-      return `<div class="camp camp-dock"><div class="camp-dock-heading"><small>NIGHT ${p.night} · REST AND WATCHES</small><h4>Make camp</h4><span>${(Math.round((p.dayHours ?? 0) * 10) / 10)} h on the road today</span></div>
+      return `<div class="camp camp-dock"><div class="camp-dock-heading"><small>NIGHT ${p.night} · REST AND WATCHES</small><h4>End of the day: make camp or push on?</h4><span>${(Math.round((p.dayHours ?? 0) * 10) / 10)} h on the road today</span></div>
         <div class="camp-dock-current"><b>Travel has stopped. Camp has not begun.</b><p>${gm ? "Review the camp schedule, or travel one more hour. Setup begins when you choose Begin camp setup." : "Waiting for the GM to make camp or push on."}</p>
-          ${gm ? `<label class="camp-hours">Hours in camp <input type="number" name="rest" min="16" max="72" value="${hours}"></label><small>Ready at ${esc(this.#dateTime((this.practice ? p.since ?? this.now : this.now) + hours * 3600))}</small>` : ""}</div>
+          ${gm ? `<label class="camp-hours">Hours in camp <input type="number" name="rest" min="16" max="72" value="${hours}"></label><small>Camp ends at ${esc(this.#dateTime((this.practice ? p.since ?? this.now : this.now) + hours * 3600))}</small>` : ""}</div>
         ${progress}${gm ? `<div class="now-main camp-go"><button data-camp="setup" class="primary"><i class="fa-solid fa-campground"></i> Make camp</button><button data-act="push" ${this.hud.leader ? "" : "disabled"} title="Travel one more hour, stopping at an encounter or arrival if either comes first"><i class="fa-solid fa-person-walking-arrow-right"></i> Push on for 1 hour</button></div>
         <p class="hint camp-rules">${forced ? `Forced march: Constitution save DC ${10 + (p.limit + 1 - 8)} per character at the end of the hour, or gain exhaustion.` : "The extra hour stays within eight hours of travel today."} ${rule(R.forced)}</p>` : ""}</div>`;
     }
@@ -500,7 +508,7 @@ export class CampPanel {
     const go = gm ? `<div class="now-main camp-go">${next ? `<button data-camp="view" data-view="${next}" class="primary">Review ${labels[next].toLowerCase()}</button>` : `<button data-act="camp" class="primary"><i class="fa-solid fa-campground"></i> <span>Begin camp setup <span class="camp-duration">(${pl.rest} h)</span></span></button>`}<button data-camp="unsetup" title="Back to the choice: make camp or push on"><i class="fa-solid fa-arrow-left"></i> Back</button></div>
       ${!next ? `<p class="hint camp-rules">The long rest ${rule(R.rest)}</p>` : ""}`
       : `<p class="hint">Waiting for the GM to begin camp setup.</p>`;
-    return `<div class="camp camp-dock"><div class="camp-dock-heading"><small>NIGHT ${p.night} · REST AND WATCHES</small><h4>${labels[view]}</h4><span>Camp for ${pl.rest} hours. Ready at ${esc(this.#dateTime(restStart + pl.rest * 3600))}</span></div>${this.#phaseSummary(p, "camp")}${nav}${stage}${go}</div>`;
+    return `<div class="camp camp-dock"><div class="camp-dock-heading"><small>NIGHT ${p.night} · REST AND WATCHES</small><h4>${labels[view]}</h4><span>Camp for ${pl.rest} hours. Camp ends at ${esc(this.#dateTime(restStart + pl.rest * 3600))}</span></div>${this.#phaseSummary(p, "camp")}${nav}${stage}${go}</div>`;
   }
 
   /**
@@ -833,8 +841,8 @@ export class CampPanel {
     const check = !run && p.status === "encounter" ? this.#watchCheck(p, w, m) : "";
     const ch = this.#checks(p.night), done = ["forage", "conceal", "alarm"].filter((k) => ch[k]?.done);
     const tasks = done.length ? `<div class="camp-rolls"><div class="camp-rolls-head"><b>Completed camp tasks</b></div><div class="camp-task-sum">${done.map((k) => `<span class="camp-task-status ${(k === "conceal" ? ch[k].result?.successes > 0 : ch[k].result?.success) ? "ok" : "no"}"><i class="fa-solid ${TASKS[k].icon}"></i> ${esc(pastTaskSummary(k, ch[k].result))}</span>`).join("<br>")}</div></div>` : "";
-    const scene = run ? `<div class="row camp-hold"><span class="grow"><i class="fa-solid fa-campground"></i> The camp scene: ${esc(this.#stepLabel(run.step))}${run.hold && p.status === "encounter" ? ", holding for the encounter" : ""}</span>${this.sceneMin ? `<button data-camp="scene-show">Show it</button>` : ""}</div>` : "";
-    return `<div class="camp camp-night">${this.#strip(p, n)}${this.#bar(pl, members, into >= 0 ? nowAt : null, start, cur)}${watchLine}${scene}${tasks}${this.#rollLog(p, n, members)}${encs}${check}${go}</div>`;
+    const scene = run ? `<div class="row camp-hold"><span class="grow"><i class="fa-solid fa-campground"></i> The camp scene is ${run.hold && p.status === "encounter" ? "holding for this encounter" : "running the night"}: ${esc(this.#stepLabel(run.step))}. Watches, rolls and encounters happen there.</span>${this.sceneMin ? `<button data-camp="scene-show">Show the camp scene</button>` : ""}</div>` : "";
+    return `<div class="camp camp-night">${this.#strip(p, n)}${this.#bar(pl, members, into >= 0 ? nowAt : null, start, cur)}${watchLine}${scene}${run ? "" : tasks + this.#rollLog(p, n, members)}${encs}${check}${go}</div>`;
   }
 
   /**

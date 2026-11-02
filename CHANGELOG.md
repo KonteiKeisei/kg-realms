@@ -1,5 +1,24 @@
 # KG Realms changelog
 
+## 0.90.0: UX overhaul
+
+The travel panel is reorganized around one layout: the plan scrolls in the middle, and what to do now stays pinned at the bottom.
+
+- **What now is always in the same place:** the day, the progress bar, where the party is and the buttons. Any decision (a town, an encounter, the end of the day) appears right above it, with its own buttons.
+- **One row per stop:** handle, number, name, how the party gets there, miles, days and arrival day. Click a row to open it: Land or the ways by water, boat or method, fare, stay, Bypass and Remove. Places passed fold away inside it.
+- **Setup and the journey:** how the party travels is one line, with the full form behind Setup. The journey's totals are a labelled list, open while planning and folded on the way.
+- **A Camp tab:** it appears for setting up camp and the night, then hands back to the route in the morning. While the camp scene runs the night, the panel keeps only a summary.
+- **Clearer words:** Pause travel and Paused replace Stop travel and Stopped, Skip to next encounter and Skip to next camp say they move time, Not started replaces Not set off, Camp ends at replaces Ready at, and Undo route change shows only when there is one. The panel now says that the party moves as time moves on.
+- **Clearer problems:** when a leg has no way, its row says so, with the fix and a way to change it. Encounters off the route have their own list.
+- **New buttons:** Enter (the town you arrived at) and New journey when the party arrives.
+- **Fixed:** a player set to see Progress only could read every stop ahead in the panel. They now see only the stops already reached.
+- More "?" rule tips: what players see, and noticing an encounter.
+
+Also in this release:
+
+- **Picture icons on the map are smaller:** they now match the circle for the same kind of place.
+- **One fold symbol everywhere:** a caret pointing right when shut and down when open, in every collapsible list and section, editor included.
+
 ## 0.89.2: blue on the water
 
 - **Changed:** the route line on the map is blue on any leg going by boat, by sea or by river, and stays gold on land. It works in day and night view.
