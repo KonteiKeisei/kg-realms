@@ -83,27 +83,28 @@ export function waterSideOf(pts, closed, p) {
  * The terrain grid with the water the GM's shorelines mark. Each shoreline with a water side
  * (shores: [{ pts (sheet px), closed, water: "left" | "right" | "inside" | "outside" }]) is a wall;
  * the open ground either side of every wall is flooded, and each region takes the side its walls
- * mostly say: water, or land. Regions no marked shoreline touches keep the map's own terrain. A
- * shoreline must run off the map's edge, close into a loop, or meet another, or the water runs
- * round its end. Returns a new grid ({ data, width, height, cell }); the given one is unchanged.
+ * mostly say: water, or land. Regions no marked shoreline touches keep the map's own terrain. An open
+ * shoreline must run off the map's edge or meet another, or the water runs round its end. A closed
+ * loop cannot leak: what is inside it and what is outside it is worked out from its shape, and the
+ * smallest loop around a cell has the say. Returns a new grid ({ data, width, height, cell, leaks });
+ * the given one is unchanged.
  */
 export function shoreWater(grid, shores) {
-  const marked = (shores ?? []).filter((s) => s?.water && s.pts?.length > 1);
+  const marked = (shores ?? []).filter((s) => s?.water && s.pts?.length > 1).map((s) => ({ ...s, pts: s.pts.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])) })).filter((s) => s.pts.length > 1);
   if (!grid || !marked.length) return grid;
   const { width: W, height: H, cell } = grid, N = W * H;
-  const wall = new Uint8Array(N), seedWater = [], seedLand = [], sides = marked.map(() => ({ water: [], land: [] }));
+  const wall = new Uint8Array(N), seedWater = [], seedLand = [], touching = [], loops = [], sides = marked.map(() => ({ water: [], land: [] }));
   const cellAt = (x, y) => { const cx = Math.floor(x / cell), cy = Math.floor(y / cell); return cx < 0 || cy < 0 || cx >= W || cy >= H ? -1 : cy * W + cx; };
   for (const [si, s] of marked.entries()) {
     const pts = s.closed && (s.pts[0][0] !== s.pts.at(-1)[0] || s.pts[0][1] !== s.pts.at(-1)[1]) ? [...s.pts, s.pts[0]] : s.pts;
     for (const p of resample(pts, cell / 2)) { const c = cellAt(p[0], p[1]); if (c >= 0) wall[c] = 1; }
     // Inside a loop is on its right when it runs clockwise on the map (sheet y down), else its left.
-    let side = s.water;
-    if (side === "inside" || side === "outside") {
-      let area = 0;
-      for (let i = 1; i < pts.length; i++) area += pts[i - 1][0] * pts[i][1] - pts[i][0] * pts[i - 1][1];
-      const insideRight = area > 0;
-      side = (side === "inside") === insideRight ? "right" : "left";
-    }
+    let side = s.water, area = 0;
+    for (let i = 1; i < pts.length; i++) area += pts[i - 1][0] * pts[i][1] - pts[i][0] * pts[i - 1][1];
+    const insideRight = area > 0;
+    if (side === "inside" || side === "outside") side = (side === "inside") === insideRight ? "right" : "left";
+    const loop = s.closed && pts.length > 3;
+    if (loop) loops.push({ pts, area: Math.abs(area), inside: (side === "right") === insideRight });
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
       if (!len) continue;
@@ -112,6 +113,7 @@ export function shoreWater(grid, shores) {
       for (let k = 0; k <= n; k++) {
         const x = a[0] + (dx * k) / n, y = a[1] + (dy * k) / n;
         const left = cellAt(x + lx * off, y + ly * off), right = cellAt(x - lx * off, y - ly * off);
+        if (loop) { touching.push(left, right); continue; }
         (side === "left" ? seedWater : seedLand).push(left);
         (side === "left" ? seedLand : seedWater).push(right);
         sides[si].water.push(side === "left" ? left : right);
@@ -137,15 +139,38 @@ export function shoreWater(grid, shores) {
   const votes = new Int32Array(regions);
   for (const c of seedWater) if (c >= 0 && !wall[c]) votes[label[c]]++;
   for (const c of seedLand) if (c >= 0 && !wall[c]) votes[label[c]]--;
+  // The loops: each cell belongs to the smallest loop around it, row by row across each loop's shape.
+  const within = new Int32Array(N).fill(-1), touched = new Uint8Array(regions);
+  for (const c of touching) if (c >= 0 && !wall[c]) touched[label[c]] = 1;
+  loops.sort((a, b) => b.area - a.area).forEach((l, li) => {
+    for (let cy = 0; cy < H; cy++) {
+      const y = (cy + 0.5) * cell, xs = [];
+      for (let i = 1; i < l.pts.length; i++) {
+        const a = l.pts[i - 1], b = l.pts[i];
+        if ((a[1] <= y) !== (b[1] <= y)) xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+      }
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const from = Math.max(0, Math.ceil(xs[k] / cell - 0.5)), to = Math.min(W - 1, Math.floor(xs[k + 1] / cell - 0.5));
+        for (let cx = from; cx <= to; cx++) within[cy * W + cx] = li;
+      }
+    }
+  });
+  const seaOutside = loops.some((l) => !l.inside);
   const data = new Uint8Array(grid.data);
   for (let i = 0; i < N; i++) {
     if (wall[i]) continue;
+    if (touched[label[i]]) {
+      const l = loops[within[i]];
+      if (l ? l.inside : seaOutside) data[i] = WATER;
+      else if (l && data[i] === WATER) data[i] = 1;
+    }
     const v = votes[label[i]];
     if (v > 0) data[i] = WATER;
     else if (v < 0 && data[i] === WATER) data[i] = 1;
   }
-  // A shoreline whose water side and land side are one open region leaks: the water runs round an
-  // open end (or through a gap) into the land it was meant to hold back. Its id (or index) is listed.
+  // An open shoreline whose water side and land side are one open region leaks: the water runs round
+  // an open end into the land it was meant to hold back. Its id (or index) is listed. A loop never does.
   const regionsOf = (cells) => new Set(cells.filter((c) => c >= 0 && !wall[c]).map((c) => label[c]));
   const leaks = marked.flatMap((s, si) => { const w = regionsOf(sides[si].water); return [...regionsOf(sides[si].land)].some((r) => w.has(r)) ? [s.id ?? si] : []; });
   return { ...grid, data, leaks };

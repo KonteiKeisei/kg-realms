@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.89.1: closed coasts always work
+
+- **Fixed:** a closed shoreline now always works. With its water side set to Outside the loop, everything outside it is sea and everything inside it is land. Inside and outside now come from the loop's shape, so a wiggly coast can't confuse them.
+- **Fixed:** the false "Its water leaks" warning no longer appears on closed loops. Only an open shoreline can leak.
+- Loops inside loops work: the smallest loop around a spot decides, so a lake in the land and an island in the lake are both right.
+
 ## 0.89.0: the new route panel
 
 - **New route flow:** pick where the journey ends first, by searching or clicking the map. After that, every click on a place adds a stop, or use the Add stop button, which also has a search box.
