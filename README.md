@@ -55,12 +55,6 @@ Hooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld({
 - **Carriage ride sound**: a looping sound for the settlement carriage ride. None ships with KG Realms; empty keeps the ride silent.
 - **Manage map files** (Ctrl+Shift+M): each player can save a world's map tiles to a folder on their computer instead of streaming them.
 
-## Development
-
-- `npm test` runs the tests. Tests that check the engine against Toril's data need the private KG Realms: Faerûn checkout beside this one and are skipped without it.
-- `python tools/serve.py 8790` serves the module for the previews in `tools/*.html`, with sibling modules at `/modules/<id>/`.
-- `python tools/package.py` builds the release zip in `dist/` (and a patch zip of what changed since the last release).
-
 ## Credits and licences
 
 - [MapLibre GL JS](https://maplibre.org/) (BSD 3-Clause), `lib/maplibre`.
