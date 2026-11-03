@@ -4,12 +4,24 @@ A regional map is a detailed travel map linked beneath a realm and above settlem
 
 ## Create and link a map
 
-1. On the parent realm, use the map editor to draw a closed area for the regional coverage. Give the area a name, such as Icewind Dale.
-2. Create a Foundry scene with the detailed picture as its Background Image. Right-click that scene in the directory and choose **Make regional map**.
-3. Enter the picture's full width in miles. This is the regional scale, independent of the size of its footprint on the realm artwork. The picture is processed with the existing map tile builder and its original scene is backed up.
-4. Choose the parent realm scene and its closed area. **Fit picture to outline** initially aligns the picture's corners with the outline's bounding box.
-5. For better alignment, match three landmarks that form a triangle. Each row contains the same landmark's image pixel coordinates on the parent and regional maps. The **Pick** buttons fill them from map clicks. View the relevant scene before picking. Escape cancels a pick. Three-point alignment supports rotation and different horizontal and vertical stretching; it does not reshape the regional picture.
-6. Save, then review inherited POI positions and trace the detailed roads. Move inherited POIs to their exact regional positions with the existing map editor. Draw regional roads up to the coverage edge so that they meet the parent roads. Parent roads inside the coverage are superseded.
+1. View the parent realm map (for example Map of Faerun). Press **E** to open the KG Realms **Map editor**, then choose its **Places** tab.
+2. Click **Draw regional coverage** at the top of Places. In the dialog, select **Icewind Dale** if that place already exists. Otherwise leave **Create a new region** selected and enter a name. Click **Draw coverage on the map**. For a new region, first click inside it to place its label.
+3. Click around the outer edge of the regional coverage to add at least three corners. Click the first corner again, click **Finish closed coverage**, or press **Enter** to close and save the outline. Escape cancels drawing. These are KG Realms map controls, not Foundry's native Drawing tools.
+4. Click **Done editing** in the orange bar at the top of the map. The outline is now available in the regional-map setup dialog.
+5. Create a Foundry scene with the detailed picture as its Background Image. Right-click that scene in the directory and choose **Make regional map**.
+6. Enter the picture's full width in miles. This is the regional scale, independent of the size of its footprint on the realm artwork. The picture is processed with the existing map tile builder and its original scene is backed up.
+7. Choose the parent realm scene and its closed area. **Fit picture to outline** initially aligns the picture's corners with the outline's bounding box.
+8. For better alignment, match three landmarks that form a triangle. Each row contains the same landmark's image pixel coordinates on the parent and regional maps. The **Pick** buttons fill them from map clicks. View the relevant scene before picking. Escape cancels a pick. Three-point alignment supports rotation and different horizontal and vertical stretching; it does not reshape the regional picture.
+9. Save, then review inherited POI positions and trace the detailed roads. Move inherited POIs to their exact regional positions with the existing map editor. Draw regional roads up to the coverage edge so that they meet the parent roads. Parent roads inside the coverage are superseded.
+
+### Finding the outline controls in 0.92.0
+
+The direct Draw regional coverage action was added in 0.92.2. In 0.92.0, the border tools only appear after selecting a place:
+
+1. In Map editor > Places, type Icewind Dale in **Find a place**, then click its result.
+2. In the selected place's controls, choose **Shape > Area**. Then click **Draw border** or **Redraw border**.
+3. Click at least three corners, then click the **first corner** to close the outline. In this older drawing mode, Enter and double-click finish an open line, which regional setup cannot use.
+4. If there is no existing place, click **Add place**, choose **Territory**, then click inside the region. Name it in its place card, close the card, select the new place, and follow steps 2 and 3.
 
 An already converted map can be linked using **Regional map settings** in its scene context menu. The **Regional maps** control on a realm lists maps that can be linked or adjusted. Use **Realm world settings** to correct a homebrew map's width in miles. Reopen regional settings after changing the coverage outline to adopt its new boundary.
 

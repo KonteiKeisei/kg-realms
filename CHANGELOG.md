@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.92.2: regional setup controls and instructions
+
+- Add Draw regional coverage directly to Map editor > Places, visible before selecting a place. Choose an existing region or name a new one, place its label, and draw its coverage on the map.
+- Regional coverage drawing has an explicit Finish closed coverage action. Enter closes it, three corners are required, and cancelling a redraw preserves the previous outline.
+- Make regional map now opens a correctly named regional dialog, labels its name field and build action correctly, and explains that parent linking and inherited POIs follow tile creation.
+- Expand the setup guide with exact buttons, map clicks and closing actions, including the manual steps for users still on 0.92.0. Missing-outline errors identify the coverage tool.
+
 ## 0.92.0: connected regional maps
 
 - Add a regional travel-map type beneath a realm, with independent scale, coverage and three-landmark alignment. Create it from a scene picture with Make regional map, or link an existing map through Regional map settings.

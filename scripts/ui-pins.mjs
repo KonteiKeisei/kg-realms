@@ -31,7 +31,7 @@ export class PinEditor {
     this.selected = null;
     this.press = null;     // { id, start: [x, y], moved }
     this.panel = null;
-    this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), dblclick: (e) => { if (this.drawing) { this.#stop(e); this.#finishBorder(false); } } };
+    this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), dblclick: (e) => { if (this.drawing) { this.#stop(e); this.#finishBorder(!!this.drawing.regional); } } };
     this.undoStack = [];
     this.lastClick = null;
     // Esc steps back one level: stop adding, then let go of the place, then leave the editor.
@@ -40,11 +40,11 @@ export class PinEditor {
       if (e.key === "Escape") {
         e.preventDefault(); e.stopImmediatePropagation();
         if (this.drawing) { this.drawing = null; this.#overlay(); return this.#render(); }
-        if (this.placing || this.picking || this.adding) { this.placing = this.picking = this.adding = false; return this.#render(); }
+        if (this.placing || this.picking || this.adding) { this.placing = this.picking = this.adding = false; this.regionalName=null;return this.#render(); }
         if (this.selected) return this.select(null);
         return this.onLeave?.();
       }
-      if (e.key === "Enter" && this.drawing) { e.preventDefault(); e.stopImmediatePropagation(); return this.#finishBorder(false); }
+      if (e.key === "Enter" && this.drawing) { e.preventDefault(); e.stopImmediatePropagation(); return this.#finishBorder(!!this.drawing.regional); }
       if ((e.key === "Delete" || e.key === "Backspace") && this.corner != null && !this.drawing) { e.preventDefault(); e.stopImmediatePropagation(); return this.#removeCorner(this.corner); }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyZ") { e.preventDefault(); e.stopImmediatePropagation(); this.#undo(); }
     };
@@ -53,7 +53,8 @@ export class PinEditor {
   /** What the editing bar says on this tab. */
   status() {
     const p = this.selected ? this.getPlace(this.selected) : null;
-    if (this.placing) return { hint: "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
+    if (this.placing) return { hint: this.regionalName ? "Click inside the region to place its label, then draw its coverage" : "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
+    if (this.drawing?.regional) return {hint:`Draw regional coverage: click at least three corners, then click the first corner or Finish closed coverage`,esc:"cancels drawing",tip:"Click to add a coverage corner",crosshair:true};
     if (this.drawing) return { hint: `Drawing ${p?.name ?? "the"} border · click to add corners · click the first corner to close it · Enter or double-click leaves the ends apart`, esc: "cancels drawing", tip: this.drawing.pts.length > 2 ? "Click the first corner to close the border" : "Click to add a corner", crosshair: true };
     if (p && this.#editable(p)) return { hint: `${p.name} · drag a corner to move it · click an edge to add one · right-click a corner to remove it`, esc: "lets go of it", tip: "" };
     if (p) return { hint: `${p.name} · drag to move it · double-click for its card`, esc: "lets go of it", tip: "" };
@@ -93,7 +94,7 @@ export class PinEditor {
     this.offCanvas?.(); this.offCanvas = null;
     window.removeEventListener("keydown", this.onKey, { capture: true });
     this.selected = this.press = null;
-    this.placing = false;
+    this.placing = false; this.regionalName = null;
     this.drawing = this.editing = this.cornerDrag = null; this.corner = null;
     this.getLayer()?.setAreaEdit?.(null);
     this.panel?.remove();
@@ -227,6 +228,7 @@ export class PinEditor {
   async #finishBorder(closed) {
     const d = this.drawing;
     if (!d) return;
+    if(d.regional&&d.pts.length<3)return ui.notifications.info("KG Realms: regional coverage needs at least three corners. Keep clicking the map, or Escape to cancel.");
     if (d.pts.length < 2) return ui.notifications.info("KG Realms: a border needs at least two corners. Esc cancels.");
     this.drawing = null; this.hover = null;
     await this.#saveOutline(this.selected, d.pts, closed && d.pts.length > 2);
@@ -314,21 +316,38 @@ export class PinEditor {
     layer.setAreaEdit(o?.pts ?? null, !!o?.closed, this.corner, label);
   }
 
+  async drawRegionalCoverage() {
+    const choices=this.getPlaces().filter(p=>['territory','domain'].includes(p.kind)||['Region','Macroregion'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
+    const result=await foundry.applications.api.DialogV2.wait({window:{title:"Draw regional coverage"},position:{width:480},rejectClose:false,
+      content:`<p>Use an existing region to keep its POI, or create a named coverage area. You will draw its outline directly on this realm map.</p><div class="form-group"><label>Region</label><select name="existing"><option value="">Create a new region</option>${choices.map(p=>`<option value="${esc(p.id)}" ${p.id===this.selected?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="form-group"><label>New region name</label><input name="name" type="text" placeholder="Icewind Dale"></div><p>Click at least three corners on the map, then click the first corner or Finish closed coverage. Escape cancels the outline.</p>`,
+      buttons:[{action:'draw',label:'Draw coverage on the map',callback:(_e,b)=>({existing:b.form.elements.existing.value,name:b.form.elements.name.value.trim()})},{action:'cancel',label:'Cancel',callback:()=>null}]});
+    if(!result||!this.active)return;
+    if(result.existing){
+      if(!this.getPlace(result.existing))return ui.notifications.warn("That region is no longer available. Choose it again.");
+      this.select(result.existing);await this.#save(result.existing,{shape:'area',...(placeLayer(this.getPlace(result.existing))==='places'?{layer:'realms'}:{})});this.#startBorder(true);
+    }else{
+      if(!result.name)return ui.notifications.warn("Enter a name for the new region, or choose an existing region.");
+      this.select(null);this.regionalName=result.name;this.newKind='territory';this.placing=true;this.#render();
+    }
+  }
+  #startBorder(regional=false){this.drawing={pts:[],regional};this.editing=null;this.#render();this.#overlay();this.onStatus?.();}
+
   /** A new place where the GM clicked, then open it for editing. */
   async #addPlace(g) {
     this.placing = false;
     const [lon, lat] = this.getLayer().fromScreen(...g);
     const id = `added-${foundry.utils.randomID()}`;
-    const kind = this.newKind ?? "settlement";
+    const regionalName=this.regionalName;this.regionalName=null;
+    const kind = regionalName?"territory":this.newKind ?? "settlement";
     const CLASS = { settlement: "Town", site: "Site", domain: "Kingdom", territory: "Region", natural: "Feature" };
     this.#remember();
     await this.saveEdits((w) => {
       w.added ??= {};
-      w.added[id] = { id, name: "New place", kind, class: CLASS[kind], rank: 4, level: "surface", lon: +lon.toFixed(6), lat: +lat.toFixed(6) };
+      w.added[id] = { id, name: regionalName??"New place", ...(regionalName?{shape:"area",layer:"realms"}:{}), kind, class: CLASS[kind], rank: 4, level: "surface", lon: +lon.toFixed(6), lat: +lat.toFixed(6) };
       return w;
     });
     this.select(id);
-    this.openCard?.(id, { edit: true });
+    if(regionalName)this.#startBorder(true);else this.openCard?.(id, { edit: true });
   }
 
   async #save(id, fields) {
@@ -371,7 +390,7 @@ export class PinEditor {
       <div class="row">${p.edited && !p.added ? `<button data-act="reset-pos"><i class="fa-solid fa-location-crosshairs"></i> Reset position</button><button data-act="reset" class="danger"><i class="fa-solid fa-rotate-left"></i> Reset all edits</button>` : ""}<button data-act="done">Done</button></div>
       <div class="row"><button data-act="remove-place" class="danger" title="${p.added ? "Delete this place you added" : "Gone from this world: off the map, out of search and journeys. It can be restored below the list of places, with its edits."}"><i class="fa-solid fa-eraser"></i> ${p.added ? "Delete place" : "Remove from the map"}</button></div>`
       : `<p class="hint">Click a place to select it (its kind and map marker show here). Double-click it for its card: name, art, what is known, scene, who sees it.</p>${Object.keys(this.getMarkers()).length ? `<h4 class="kgr-own">Your markers</h4><div class="kgr-own-list">${Object.entries(this.getMarkers()).map(([k, m]) => `<span title="${esc(m.name)}"><img src="${esc(foundry.utils.getRoute(m.src))}" alt=""> ${esc(m.name)}</span>`).join("")}</div><p class="hint">Click a place, then Change, to give it one of these.</p>` : ""}${this.#removedRow()}`;
-    const tools = `<div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${!["site", "domain", "territory", "natural"].includes(this.newKind) ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="domain" ${this.newKind === "domain" ? "selected" : ""}>Domain</option><option value="territory" ${this.newKind === "territory" ? "selected" : ""}>Territory</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
+    const tools = `<div class="row"><button type="button" data-act="draw-region"><i class="fa-solid fa-draw-polygon"></i> Draw regional coverage</button></div><p class="hint">Outline the area covered by a detailed regional map. Choose an existing region or create one.</p><div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${!["site", "domain", "territory", "natural"].includes(this.newKind) ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="domain" ${this.newKind === "domain" ? "selected" : ""}>Domain</option><option value="territory" ${this.newKind === "territory" ? "selected" : ""}>Territory</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
     const files = `<div class="kgr-file-row"><button data-act="export" title="Save every place edit and your markers to a file"><i class="fa-solid fa-file-export"></i> Export places</button><button data-act="import" title="Load place edits from a file"><i class="fa-solid fa-file-import"></i> Import places</button></div>`;
     this.panel.innerHTML = `${tools}${body}${this.placing || this.adding ? "" : `<div class="kgr-enc-list kgr-place-list"><span class="cap">On this map (${this.getPlaces().length})</span><input type="search" name="place-filter" placeholder="Find a place" value="${esc(this.filter ?? "")}" aria-label="Find a place"><div class="kgr-place-groups">${this.#list()}</div></div>`}${files}`;
     this.onStatus?.();
@@ -445,7 +464,7 @@ export class PinEditor {
     const layerRule = ruleTooltip("<p><strong>Places</strong> Settlements, sites, peaks: where a party can stand.</p><p><strong>Realms</strong> Kingdoms, empires and regions: who holds the land.</p><p><strong>Geography</strong> Forests, ranges, deserts, seas, lakes and rivers: what the land and water are.</p><p><strong>Showing</strong> The map shows one layer at a time (the layers rail on the travel panel). A place shows only on its own layer.</p>");
     const follow = this.#shoreRow(p);
     const border = p.shoreLine ? `<p class="hint">Its border is shared: ${o?.pts.length ?? 0} corners, ${o?.closed ? "closed" : "ends apart"}. Reshape it in ${borderHome(p.followRef)}.</p>` : shape === "point" ? "" : this.drawing
-      ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. Click the first corner to close the border; Enter or double-click leaves its ends apart. Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> Finish as a line</button><button data-act="border-cancel">Cancel</button></div>`
+      ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. ${this.drawing.regional?"Click the first corner, Finish closed coverage, or press Enter to close it.":"Click the first corner to close the border; Enter or double-click leaves its ends apart."} Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> ${this.drawing.regional?"Finish closed coverage":"Finish as a line"}</button><button data-act="border-cancel">Cancel</button></div>`
       : `<p class="hint">${o ? `${o.pts.length} corners, ${o.closed ? "closed" : "ends apart"}${o.fromRecord ? " (the world's rectangle: draw or reshape it)" : ""}.` : "No border yet: its name shows at its point on its layer."}</p>
         <div class="row"><button data-act="border-draw"><i class="fa-solid fa-draw-polygon"></i> ${o && !o.fromRecord ? "Redraw border" : "Draw border"}</button>${o && !o.fromRecord && shape === "area" ? `<button data-act="border-toggle">${o.closed ? "Open the shape" : "Close the shape"}</button>` : ""}${p.area ? `<button data-act="border-remove" class="danger">Remove border</button>` : ""}</div>`;
     return `<div class="kgr-area-rows">${p.shoreLine ? "" : `<div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}`}
@@ -474,8 +493,9 @@ export class PinEditor {
       else await this.#save(id, { [act]: v });
       this.#render(); return this.#overlay();
     }
-    if (act === "border-draw") { this.drawing = { pts: [] }; this.editing = null; this.#render(); this.#overlay(); return this.onStatus?.(); }
-    if (act === "border-finish") return this.#finishBorder(false);
+    if(act==="draw-region")return this.drawRegionalCoverage();
+    if (act === "border-draw") return this.#startBorder();
+    if (act === "border-finish") return this.#finishBorder(!!this.drawing?.regional);
     if (act === "border-cancel") { this.drawing = null; this.#render(); return this.#overlay(); }
     if (act === "border-toggle") { const o = this.#editPts(); if (!o.closed && o.pts.length < 3) return ui.notifications.warn("KG Realms: a closed border needs at least three corners."); return this.#saveOutline(id, o.pts, !o.closed); }
     if (act === "border-remove") { await this.#save(id, { area: null, areaClosed: null }); await this.#followBorder(id, null); this.#render(); return this.#overlay(); }
@@ -524,7 +544,7 @@ export class PinEditor {
     if (act === "pick-marker") { this.picking = false; await this.#save(id, { marker: e.target.closest("[data-marker]").dataset.marker }); return this.#render(); }
     if (act === "marker-default") { await this.#save(id, { marker: null }); return this.#render(); }
     if (act === "add-marker") { this.adding = !this.adding; return this.#render(); }
-    if (act === "add-place") { this.placing = !this.placing; this.selected = null; return this.#render(); }
+    if (act === "add-place") { this.regionalName=null;this.placing = !this.placing; this.selected = null; return this.#render(); }
     if (act === "add-browse") {
       const input = this.panel.querySelector('[name="new-src"]');
       return new foundry.applications.apps.FilePicker.implementation({ type: "image", current: input.value, callback: (path) => { input.value = path; } }).render(true);

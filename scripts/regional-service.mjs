@@ -149,7 +149,7 @@ export class RegionalMaps {
     if(Object.values(this.links).some(l=>l.parent===world))throw Error('A map with regional children cannot itself become a region.');
     await this.prepare(parent);await this.load(world);
     const areas=this.rawPlaces(parent,this.indexes[parent].places).filter(p=>p.area?.length>=3&&p.areaClosed!==false);
-    if(!areas.length)throw Error('Draw a closed region outline on the parent map with the map editor first, then reopen this dialog.');
+    if(!areas.length)throw Error('On the parent map, open Map editor > Places > Draw regional coverage. Draw and close its outline, then reopen this dialog.');
     const selected=areas.find(p=>p.id===existing?.outline)??areas[0],p=sourceProjection(this.indexes[parent].sourceMap),child=this.indexes[world].sourceMap;
     const defaults=area=>{const pts=area.area.map(q=>p.toSource(...q)),xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]);return [{parent:[Math.min(...xs),Math.min(...ys)],region:[0,0]},{parent:[Math.max(...xs),Math.min(...ys)],region:[child.width,0]},{parent:[Math.min(...xs),Math.max(...ys)],region:[0,child.height]}];};
     const anchors=existing?.parent===parent?existing.anchors:defaults(selected),raw=this.rawPlaces(world,this.indexes[world].places);

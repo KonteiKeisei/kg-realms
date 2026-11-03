@@ -164,7 +164,7 @@ function contextOptions(options) {
   const gm = () => game.user.isGM;
   options.push(
     { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li); return gm() && !!s?.background?.src && !isVideo(s.background.src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
-    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene);if(scene?.getFlag(ID,"world"))await game.modules.get(ID).api.regionalMaps.configure(scene);} },
+    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world"))await game.modules.get(ID).api.regionalMaps.configure(scene);} },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
     { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => exportModule(homebrewOf(sceneOf(li))) }
@@ -241,19 +241,19 @@ const buildWindowClass = () => class extends foundry.applications.api.Applicatio
 
 /* ------------------------------------------------------------------ make */
 
-async function makeRealmWorld(scene) {
+async function makeRealmWorld(scene,{regional=false}={}) {
   if (!scene) return;
   const all = saved(), again = Object.values(all).find((d) => d.scene === scene.id && worldDef(d.id));
   const values = await foundry.applications.api.DialogV2.wait({
-    window: { title: "Make realm world", icon: "fa-solid fa-earth-europe" }, position: { width: 440 }, rejectClose: false,
+    window: { title: regional?"Make regional map":"Make realm world", icon: regional?"fa-solid fa-map-location-dot":"fa-solid fa-earth-europe" }, position: { width: 440 }, rejectClose: false,
     content: `<div class="kgr-make-world">
-      <div class="form-group"><label>World name</label><input name="name" type="text" value="${esc(again?.title ?? scene.name)}" required></div>
+      <div class="form-group"><label>${regional?"Regional map name":"World name"}</label><input name="name" type="text" value="${esc(again?.title ?? scene.name)}" required></div>
       <div class="form-group"><label>Map width in miles ${q("How far it is from the left edge of the picture to the right. Travel times and the day's distance on the route sheet use it. You can change it later in the world's settings.")}</label><input name="miles" type="number" min="1" step="any" value="${again?.miles ?? milesFromGrid(scene.width, scene.grid) ?? 1000}" required></div>
       ${again ? `<div class="form-group"><label class="checkbox"><input name="reuse" type="checkbox" checked> Use the map tiles already made for ${esc(again.title)}</label></div>` : ""}
-      <p class="notes">Nothing is read from the picture: the realm starts empty and you add places, roads, rivers and regions with the editors. The scene is copied to the "${BACKUPS}" folder first. The map's files are saved in Data/${DATA_HOME}.</p>
+      <p class="notes">${regional?"First build the detailed map tiles. Next, choose its parent realm and coverage outline. Parent POIs inside that outline will appear on the regional map; review their positions and trace its detailed roads.":"Nothing is read from the picture: the realm starts empty and you add places, roads, rivers and regions with the editors."} The scene is copied to the "${BACKUPS}" folder first. The map's files are saved in Data/${DATA_HOME}.</p>
       <p class="notes">Pictures over ${MAX_PICTURE.toLocaleString()} px on a side are shrunk to fit (a browser limit); the picture file is never changed.</p>
     </div>`,
-    buttons: [{ action: "make", label: "Make realm world", icon: "fa-solid fa-earth-europe", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
+    buttons: [{ action: "make", label: regional?"Build regional map":"Make realm world", icon: regional?"fa-solid fa-map-location-dot":"fa-solid fa-earth-europe", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
   });
   if (!values || typeof values !== "object") return;
   const name = String(values.name ?? "").trim() || scene.name, miles = Number(values.miles);
@@ -483,9 +483,10 @@ async function revert(scene) {
 
 async function worldSettings(scene) {
   const def = homebrewOf(scene); if (!def) return;
+  const regional=!!game.settings.get(ID,"regionalMaps")?.[def.id];
   const values = await foundry.applications.api.DialogV2.wait({
     window: { title: `${def.title}: settings`, icon: "fa-solid fa-gear" }, position: { width: 420 }, rejectClose: false,
-    content: `<div class="form-group"><label>World name</label><input name="name" type="text" value="${esc(def.title)}"></div>
+    content: `<div class="form-group"><label>${regional?"Regional map name":"World name"}</label><input name="name" type="text" value="${esc(def.title)}"></div>
       <div class="form-group"><label>Map width in miles ${q("How far it is from the left edge of the picture to the right. Travel times and the day's distance on the route sheet use it.")}</label><input name="miles" type="number" min="1" step="any" value="${def.miles}"></div>`,
     buttons: [{ action: "save", label: "Save", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
   });
