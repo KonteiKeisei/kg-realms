@@ -15,11 +15,11 @@ export function interruptedCampPhases(plan, started, ended) {
 }
 
 /** Try a random heading, then other headings at the same distance; never silently reduce it. */
-export function randomCampEscape(from, miles, milesPerPixel, valid = () => true, random = Math.random) {
+export function randomCampEscape(from, miles, milesPerPixel, valid = () => true, random = Math.random, pointForBearing = null) {
   const distance = Math.max(.1, Math.min(100, Number(miles) || 5)), radius = distance / milesPerPixel, angle = random() * Math.PI * 2;
   for (let i = 0; i < 32; i++) {
     const bearing = angle + i * 2.399963229728653;
-    const at = [from[0] + Math.cos(bearing) * radius, from[1] + Math.sin(bearing) * radius];
+    const at = pointForBearing ? pointForBearing(bearing,distance) : [from[0] + Math.cos(bearing) * radius, from[1] + Math.sin(bearing) * radius];
     if (Array.from({ length: 8 }, (_, k) => [from[0] + (at[0] - from[0]) * (k + 1) / 8, from[1] + (at[1] - from[1]) * (k + 1) / 8]).every(valid)) return { at, distance, bearing: ((bearing * 180 / Math.PI) % 360 + 360) % 360 };
   }
   return null;

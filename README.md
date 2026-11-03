@@ -61,3 +61,7 @@ Hooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld({
 - Mapbox vector-tile, pbf and point-geometry (BSD 3-Clause, ISC), `lib/mvt`.
 - [Basis Universal](https://github.com/BinomialLLC/basis_universal) encoder by Binomial LLC (Apache 2.0, with BSD and MIT parts), `lib/basis`. See `lib/basis/README.txt`. KG Realms is not affiliated with Binomial LLC.
 - Noto Sans glyphs (SIL Open Font License), `data/fonts`.
+
+## Regional maps
+
+Link a detailed regional map beneath a realm. Regional scale and terrain control travel inside its coverage, including journeys that enter and leave it. Both map views share one journey. See [Regional map setup and travel](docs/regional-maps.md).

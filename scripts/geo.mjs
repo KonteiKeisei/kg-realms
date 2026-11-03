@@ -51,10 +51,11 @@ export function sceneToWorld(frame, { x, y }) {
 }
 
 export function latLonToScene(frame, lat, lon) {
-  return worldToScene(frame, toWorld(lat, lon));
+  return frame.project ? frame.project(lat,lon) : worldToScene(frame, toWorld(lat, lon));
 }
 
 export function sceneToLatLon(frame, p) {
+  if(frame.unproject)return frame.unproject(p);
   const w = sceneToWorld(frame, p);
   return fromWorld(w.x, w.y);
 }

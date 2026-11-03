@@ -1,5 +1,15 @@
 # KG Realms changelog
 
+## 0.92.0: connected regional maps
+
+- Add a regional travel-map type beneath a realm, with independent scale, coverage and three-landmark alignment. Create it from a scene picture with Make regional map, or link an existing map through Regional map settings.
+- Combine realm and regional roads in one journey. Regions own distance and terrain inside their outline, including through-travel, reverse travel, several regions and repeated entry/exit. Route selection compares true travel costs, including roads around coverage.
+- Share canonical POI metadata while retaining separate marker positions. Inherit parent POIs, optionally publish approximate regional markers to the realm, and find regional destinations from the Travel panel.
+- Share the parent journey, camps and party controls across realm and regional views. Regional group-token mirrors follow the selected party during entry and exit. Linked views do not insert an away pause.
+- Use regional encounter reach distances and record border transitions in the travel log. The HUD identifies the current scale and opens either map view.
+- Save new itineraries at departure so map edits cannot retime active regional travel. Existing journeys retain their earlier calculation. Missing regional data blocks new plans instead of silently using realm distances.
+- First version: one regional level, separate non-touching outlines, affine alignment, and realm-based water routes. Regional-only waterway routing and automatic cross-map boat suggestions are deferred. Setup and validation details are in docs/regional-maps.md.
+
 ## 0.91.4: journey, map and panel fixes
 
 - **Fixed:** background journeys use their own world's coordinates and distance scale, including shoreline and lake checks, when the GM views another world.

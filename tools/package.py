@@ -26,6 +26,7 @@ INCLUDE = [
     "README.md",
     "CHANGELOG.md",
     "docs/rest-recovery-clock.md",
+    "docs/regional-maps.md",
     "scripts/**/*.mjs",
     "styles/*.css",
     "lib/**/*",
@@ -78,7 +79,7 @@ packaged = {p.relative_to(ROOT).as_posix(): p for p in files}
 base_time = int(git("log", "-1", "--format=%ct", since).strip())
 changed_names |= {n for n, p in packaged.items() if p.stat().st_mtime > base_time}
 changed = sorted(n for n in changed_names if n in packaged)
-shipped = ("scripts/", "styles/", "lib/", "data/", "assets/", "docs/rest-recovery-clock.md", "module.json", "README.md", "CHANGELOG.md", "tools/migrate-poi-images.mjs")
+shipped = ("scripts/", "styles/", "lib/", "data/", "assets/", "docs/rest-recovery-clock.md", "docs/regional-maps.md", "module.json", "README.md", "CHANGELOG.md", "tools/migrate-poi-images.mjs")
 removed = {n for n in git("diff", "--name-only", "--diff-filter=D", since).splitlines() if n.startswith(shipped) and n not in packaged}
 # Files the previous release's zip shipped that this one no longer does (dropped from packaging).
 previous = ROOT / "dist" / f"{module_id} {since}.zip"

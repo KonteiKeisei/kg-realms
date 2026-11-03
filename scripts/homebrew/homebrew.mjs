@@ -164,6 +164,7 @@ function contextOptions(options) {
   const gm = () => game.user.isGM;
   options.push(
     { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li); return gm() && !!s?.background?.src && !isVideo(s.background.src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
+    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene);if(scene?.getFlag(ID,"world"))await game.modules.get(ID).api.regionalMaps.configure(scene);} },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
     { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => exportModule(homebrewOf(sceneOf(li))) }

@@ -2041,3 +2041,6 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-travel .tr-vias small { flex: 1 0 auto; font-size: 11px; color: var(--kgr-muted); }
 .kgr-travel .tr-vias .tr-via-del { flex: none; width: 20px; height: 20px; margin: 0; padding: 0; line-height: 18px; border: 0; background: none; color: var(--kgr-muted); font-size: 11px; }
 .kgr-travel .tr-vias .tr-via-del:hover { background: none; color: var(--kgr-danger); }
+
+.kgr-travel .tr-regional { padding: 8px 12px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; border-bottom:1px solid var(--kgr-line); }
+.kgr-travel .tr-regional small { flex:1; color:var(--kgr-text-2); }

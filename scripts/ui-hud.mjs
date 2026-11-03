@@ -10,6 +10,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 // The journey is kept on the scene (flags.kg-realms.journey), so every client draws the same.
 import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
+import { regionalPointAtDistance } from "./regional-maps.mjs";
 import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, portVoyage, riverAt, riverLabel, boatOptions, voyageParts, pathCrossing, WAY_LABELS } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
 import { CampPanel, showDC } from "./ui-camp.mjs";
@@ -327,9 +328,10 @@ export class TravelHud {
       if (this.graphFor !== routes) {
         // Roads are named from the map's road and trail labels.
         const labels = this.getPlaces().filter((p) => ['Road', 'Trail'].includes(p.class)).map((p) => ({ name: p.name, at: this.toSource(p.lon, p.lat) }));
-        this.graph = buildGraph(routes.features, this.toSource, labels);
+        this.graph = this.baseGraph = buildGraph(routes.features, this.toSource, labels);
         this.graphFor = routes;
       }
+      this.graph=this.baseGraph??this.graph;
       const grid = await this.getTerrain();
       if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
       this.prepareBiomes(grid);
@@ -339,7 +341,15 @@ export class TravelHud {
       const travelBiomes=s.trip?(previousBiomes?.version?previousBiomes:freezeBiomeTravel(previousBiomes??{},true)):freezeBiomeTravel(this.getBiomes?.()??{});
       const travelKey=JSON.stringify(travelBiomes);
       if(this.travelBiomeGrid!==grid||this.travelBiomeKey!==travelKey){this.travelBiomeGrid=grid;this.travelBiomeKey=travelKey;this.travelBiomeQuery=biomeLookup(travelBiomes,terrainLookup(grid),this.toSource,{legacyPriority:!!travelBiomes.legacyPriority});}
-      const terrainAt = this.travelBiomeQuery.terrain;
+      let terrainAt = this.travelBiomeQuery.terrain;
+      const regionalKey=JSON.stringify([this.stops(),s.waypoints,s.legModes,s.legMethods,s.legVessels,s.legWays,s.method,s.methodMph,s.coachMph,s.pace,s.hours,this.rules]);
+      const frozen=s.trip?.regionalPlan;
+      const network=(!s.trip||frozen)&&!(frozen?.key===regionalKey)?await this.getRegionalNetwork?.():null;
+      if(generation!==this.refreshGeneration||this.scene!==scene||this.el!==element)return;
+      this.regionalNetwork=network;
+      if(network){this.graph=network.graph;terrainAt=network.terrainAt(terrainAt);}
+      this.regionalTerrain=terrainAt;
+      this.regionalKey=regionalKey;
       if(s.trip&&!previousBiomes?.version&&this.leader&&this.canSync?.()!==false){
         await writeJourney(scene,fresh=>fresh.trip&&JSON.stringify(fresh.trip.biomeTravel??null)===JSON.stringify(previousBiomes??null)?{"trip.biomeTravel":structuredClone(travelBiomes)}:null,{trip:journeyKey(s),valid:()=>this.scene===scene&&generation===this.refreshGeneration&&this.canSync?.()!==false});
         if(generation!==this.refreshGeneration||this.scene!==scene||this.el!==element)return;
@@ -358,7 +368,13 @@ export class TravelHud {
         seaFallback: s.legModes?.[i] === "direct" ? null : { vessel: this.vessel(s.legVessels?.[i]) }
       }));
       this.landArgs = { terrainAt, baseMph };
-      result = itinerary(this.graph, pts, { stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph });
+      result = frozen?.key===regionalKey ? structuredClone(frozen.result) : itinerary(this.graph, pts, { segments:network?.segments, stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph });
+      this.regionalSnapshot=result&&(network||frozen)?{key:regionalKey,result:JSON.parse(JSON.stringify(result))}:null;
+      // A route edit deliberately replans the remaining itinerary; map edits alone use the snapshot.
+      if(s.trip&&frozen&&frozen.key!==regionalKey&&this.leader&&result){
+        await writeJourney(scene,()=>({"trip.regionalPlan":this.regionalSnapshot??{key:regionalKey,result:JSON.parse(JSON.stringify(result))}}),{trip:journeyKey(s),valid:()=>this.scene===scene&&generation===this.refreshGeneration});
+        if(generation!==this.refreshGeneration||this.scene!==scene)return;
+      }
       // No way found: which leg, and what lies under its ends (the panel says, and the console).
       this.noRouteWhy = null;
       if (!result) {
@@ -381,7 +397,7 @@ export class TravelHud {
     }
     if (result && walking) {
       const raw = result;
-      result = retimeWalking(raw, walking, { terrainAt: this.travelBiomeQuery.terrain });
+      result = retimeWalking(raw, walking, { terrainAt: this.regionalTerrain??this.travelBiomeQuery.terrain });
       const lastFeet = walking.changes.at(-1)?.feet ?? walking.baseFeet;
       const lastFavored = walking.changes.findLast(c => Array.isArray(c.favored))?.favored ?? walking.favored ?? [], favored = this.favoredTerrains();
       const favoredChanged = JSON.stringify(lastFavored) !== JSON.stringify(favored);
@@ -398,7 +414,7 @@ export class TravelHud {
         if (JSON.stringify(updated) !== previous) await writeJourney(scene, (fresh) => JSON.stringify(fresh.trip?.walking ?? null) === previous ? { "trip.walking": updated } : null,
           { trip, valid: () => this.scene === scene && generation === this.refreshGeneration && this.canSync?.() !== false });
         if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
-        result = retimeWalking(raw, this.state.trip?.walking ?? walking, { terrainAt: this.travelBiomeQuery.terrain });
+        result = retimeWalking(raw, this.state.trip?.walking ?? walking, { terrainAt: this.regionalTerrain??this.travelBiomeQuery.terrain });
       }
     }
     const r = this.result = result;
@@ -411,7 +427,7 @@ export class TravelHud {
     if (r) {
       // Miles done at each point of the track, for "x mi of y".
       let m = 0;
-      this.trackMiles = r.track.map((p, i) => (m += i ? Math.hypot(p.at[0] - r.track[i - 1].at[0], p.at[1] - r.track[i - 1].at[1]) * this.sourceMap.milesPerPixel : 0));
+      this.trackMiles = r.track.map((p, i) => Number.isFinite(p.miles)?(m=p.miles):(m += i ? Math.hypot(p.at[0] - r.track[i - 1].at[0], p.at[1] - r.track[i - 1].at[1]) * this.sourceMap.milesPerPixel : 0));
       const scale = r.miles / (m || 1);
       this.trackMiles = this.trackMiles.map((v) => v * scale);
       this.#projectProgress();
@@ -421,9 +437,9 @@ export class TravelHud {
         .map((p) => ({ name: p.name, at: this.toSource(p.lon, p.lat), settlement: p.kind === "settlement" }));
       const nums = this.#numbers();
       this.sheet = routeSheet(r, { stops: sts.map((w, i) => ({ name: w.name ?? "Stop", keep: i === 0 || nums[i - 1] != null })), places, milesPerPixel: this.sourceMap.milesPerPixel });
-      this.shipHints = this.headless ? [] : this.#shipHints();
-      this.legChoices = this.headless || !game.user.isGM ? [] : this.#legChoices();
-      this.riverOffers = this.headless || !game.user.isGM ? [] : this.#riverOffers();
+      this.shipHints = this.headless || this.regionalSnapshot ? [] : this.#shipHints();
+      this.legChoices = this.headless || this.regionalSnapshot || !game.user.isGM ? [] : this.#legChoices();
+      this.riverOffers = this.headless || this.regionalSnapshot || !game.user.isGM ? [] : this.#riverOffers();
     } else { this.sheet = null; this.shipHints = []; this.legChoices = []; this.riverOffers = []; }
     // Port availability is independent of whether sailing would beat the road. Cache it with
     // the route sheet, so clock updates and camp redraws do not rescan the world's ports.
@@ -463,7 +479,8 @@ export class TravelHud {
   currentBiome() {
     if(!this.biomeQuery)return null;
     const p=this.progress(),stop=!p?this.#partyStop():null,at=p?this.#at(p.hour):stop?this.toSource(stop.lon,stop.lat):null;
-    return at?biomeFlag(this.biomeQuery(...at),{world:this.getWorld?.(),scene:this.scene?.id}):null;
+    const sample=p?this.result?.track.findLast(q=>q.hour<=p.hour):null;
+    return at?biomeFlag(sample?.regionTitle ? sample.terrain?.biome : this.biomeQuery(...at),{world:sample?.worldId??this.getWorld?.(),scene:this.scene?.id}):null;
   }
   async syncBiome() {
     if(!this.getBiomes||!this.leader||this.canSync?.()===false)return;
@@ -817,14 +834,16 @@ export class TravelHud {
 
   async planCampEscape(miles) {
     const from = this.#at(this.progress()?.hour ?? 0); if (!from) return null;
-    const grid=await this.getTerrain();this.prepareBiomes(grid);const terrain=this.biomeQuery.terrain;
+    const grid=await this.getTerrain();this.prepareBiomes(grid);const network=await this.getRegionalNetwork?.(),terrain=network?network.terrainAt(this.biomeQuery.terrain):this.biomeQuery.terrain;
     const valid = ([x, y]) => x >= 0 && y >= 0 && x <= this.sourceMap.width && y <= this.sourceMap.height && !terrain(x, y).water;
-    const escape = randomCampEscape(from, miles, this.sourceMap.milesPerPixel, valid); if (!escape) return null;
+    const escape = randomCampEscape(from, miles, this.sourceMap.milesPerPixel, valid, Math.random, network?(bearing,distance)=>regionalPointAtDistance(from,bearing,distance,network.segments,this.sourceMap.milesPerPixel):null); if (!escape) return null;
     const mph = Math.max(.1, this.speed().feet / 10 * PACES[this.state.pace].mph / 3);
     let seconds = 0;
     for (let i = 0; i < 8; i++) {
       const x = from[0] + (escape.at[0] - from[0]) * (i + .5) / 8, y = from[1] + (escape.at[1] - from[1]) * (i + .5) / 8;
-      seconds += escape.distance / 8 / (mph * speedFactor("offroad", terrain(x, y), { rules: this.rules, pace: this.state.pace })) * 3600;
+      const a=[from[0]+(escape.at[0]-from[0])*i/8,from[1]+(escape.at[1]-from[1])*i/8],b=[from[0]+(escape.at[0]-from[0])*(i+1)/8,from[1]+(escape.at[1]-from[1])*(i+1)/8];
+      const distance=network?network.segments(a,b).reduce((n,s)=>n+s.miles,0):escape.distance/8;
+      seconds += distance / (mph * speedFactor("offroad", terrain(x, y), { rules: this.rules, pace: this.state.pace })) * 3600;
     }
     return { ...escape, origin: from, returnSeconds: Math.ceil(seconds) };
   }
@@ -1126,6 +1145,14 @@ export class TravelHud {
 
   /* ------------------------------------------------------------------ panel */
 
+  regionalBanner(progress) {
+    const sample=this.result?.track.findLast(q=>q.hour<=(progress?.hour??0));
+    if((!game.user.isGM&&this.state.show==="none")||!this.result?.track.some(q=>q.regionTitle))return "";
+    const regional=sample?.regionTitle,gm=game.user.isGM;
+    const title=regional?`In ${regional}: regional scale applies`:'Realm scale applies outside regional coverage';
+    return `<div class="tr-regional"><small>${esc(title)}</small>${gm?`<button type="button" data-act="regional-view" data-world="${esc(regional?sample.worldId:'')}">${regional?'Open regional map':'View realm map'}</button>${regional?'<button type="button" data-act="regional-view" data-world="">View realm map</button>':''}`:''}</div>`;
+  }
+
   render() {
     if (!this.el || this.gripDrag) return;
     const scroll = captureScroll(this.el);
@@ -1154,7 +1181,7 @@ export class TravelHud {
     const parties=sceneParties(this.scene?.realScene??this.scene);
     const partyTabs=parties.length>1?`<nav class="kgr-party-tabs" aria-label="Travel party">${parties.map(t=>`<button data-party-focus="${esc(t.actor.id)}" class="${t.actor.id===this.scene.partyId?'on':''}" ${this.leader?'':'disabled'}>${esc(t.name)}${(this.scene.realScene??this.scene).getFlag(MODULE_ID,'partyJourneys')?.[t.actor.id]?.now?.status==='encounter'?' !':''}</button>`).join('')}</nav>`:'';
     // The shell's header (ui-shell.mjs); the party pills sit under it.
-    const head = shellHead({ icon: "fa-person-hiking", eyebrow: "Travel", title, lock: { attr: 'data-act="lock"', on: this.locked }, min: { attr: 'data-act="collapse"', on: this.collapsed } }) + partyTabs;
+    const head = shellHead({ icon: "fa-person-hiking", eyebrow: "Travel", title, lock: { attr: 'data-act="lock"', on: this.locked }, min: { attr: 'data-act="collapse"', on: this.collapsed } }) + partyTabs + this.regionalBanner(p);
     if (rulesOnly) { this.panelHtml = null; renderPanel(this.el, head + (this.collapsed ? "" : `<nav class="kgr-tabs"><button data-tab="rules" class="on">Rules</button></nav><div class="body">${this.#rulesTab()}</div>`)); this.#place(); restoreScroll(this.el, scroll); return; }
     if (this.collapsed) { this.panelHtml = null; renderPanel(this.el, head + this.#pinned(this.camp.stage(p) === "decide" ? this.camp.html(p) : "")); this.#place(); restoreScroll(this.el, scroll); return; }
     const pace = PACES[s.pace], sp = this.speed(), base = sp.feet / 10, mph = base * pace.mph / 3;
@@ -1173,7 +1200,7 @@ export class TravelHud {
     const biome=this.currentBiome(), favored=this.favoredTerrains().includes(biome?.type);
     // The setup, in one line: how the party travels, and the day.
     const aboard = p?.sailing ? this.result?.legs.find((l) => l.sea && l.start <= p.hour + 1e-6 && l.start + l.hours > p.hour) : null, aboardIdx = aboard ? this.result.legs.indexOf(aboard) : -1;
-    const summary = `<div class="tr-setup"><div class="grow"><b>${esc(METHODS[method].short)}, ${esc(pace.label.toLowerCase())} pace</b><small>${aboard ? `This leg: ${esc(this.vessel(s.legVessels?.[aboardIdx]).label.toLowerCase())}` : `${both(daily(s.pace))} a day · ${s.hours} h road · ${s.rest} h camp · ${how}`}</small></div>${gm ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
+    const summary = `${gm&&this.getDestinations?'<button type="button" data-act="find-destination" class="wide">Find destination in realm or region</button>':''}<div class="tr-setup"><div class="grow"><b>${esc(METHODS[method].short)}, ${esc(pace.label.toLowerCase())} pace</b><small>${aboard ? `This leg: ${esc(this.vessel(s.legVessels?.[aboardIdx]).label.toLowerCase())}` : `${both(daily(s.pace))} a day · ${s.hours} h road · ${s.rest} h camp · ${how}`}</small></div>${gm ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
     const fr = { ...DEFAULT.fares, ...(s.fares ?? {}) };
     const settings = open ? `${summary}
       <div class="row"><label>Name<input type="text" name="name" value="${esc(s.name)}" placeholder="${esc(title)}"></label></div>
@@ -1538,10 +1565,19 @@ export class TravelHud {
     }
     if (act === "lock") { await this.#set("travelHudLocked", !this.locked); return this.render(); }
     if (act === "undo") return this.undo();
+    if(act==="regional-view")return this.openRegionalView?.(btn.dataset.world||null);
     if (act === "goto") { const [lon, lat] = this.toLonLat(Number(btn.dataset.x), Number(btn.dataset.y)), c = latLonToScene(this.getLayer().frame, lat, lon); canvas.animatePan({ x: c.x, y: c.y, duration: 400 }); if (btn.dataset.i !== "") { this.selected = i; this.draw(); this.render(); } return; }
     if (!game.user.isGM) return;
     if (!this.leader) return ui.notifications.info(`KG Realms: ${primaryGM()?.name ?? "the primary GM"} controls the journey.`);
     const s = this.state, now = this.clock;
+    if(act==="find-destination"){
+      const places=(this.getDestinations?.()??[]).filter(p=>!p.hidden&&!['territory','domain'].includes(p.kind)&&!['Road','Trail'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
+      if(!places.length)return ui.notifications.info("No destinations on the linked maps yet.");
+      const targetScene=this.scene,targetTrip=journeyKey(this.state);
+      const picked=await foundry.applications.api.DialogV2.wait({window:{title:"Travel destination"},rejectClose:false,content:`<div class="form-group"><label>Find a place</label><input name="filter" type="search" placeholder="Type a name"></div><div class="form-group"><label>Destination</label><select name="place" size="10">${places.map((p,i)=>`<option value="${i}">${esc(p.name)}${p.regionalTitle?` (${esc(p.regionalTitle)})`:''}</option>`).join('')}</select></div>`,render:(_e,d)=>{const el=d.element;el.querySelector('input').oninput=e=>{const options=[...el.querySelectorAll('option')];options.forEach(o=>o.hidden=!o.textContent.toLowerCase().includes(e.target.value.toLowerCase()));const first=options.find(o=>!o.hidden);if(first)el.querySelector('select').value=first.value;const add=el.querySelector('[data-action=add]');if(add)add.disabled=!first;};},buttons:[{action:'add',label:'Add destination',callback:(_e,b)=>b.form.elements.place.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
+      if(picked==null||picked===false||picked===''||this.scene!==targetScene||journeyKey(this.state)!==targetTrip)return;const place=places[Number(picked)];if(!place)return;
+      return this.save({waypoints:[...this.state.waypoints,{lon:place.lon,lat:place.lat,name:place.name,stop:true}]},{scene:targetScene,expectedTrip:targetTrip});
+    }
     if (btn.dataset.set) return this.save({ [btn.dataset.set]: btn.dataset.value });
     if (act === "edit") { this.addingStop = false; this.#setMode(this.mode === "route" ? null : "route"); return this.render(); }
     // Add stop: map clicks add stops while editing; the search box is there too.
@@ -1607,7 +1643,7 @@ export class TravelHud {
         // A new trip's nights count from 1 again: the last trip's camps (made, their checks, the
         // watcher's check, the camp scene) go; the party's watch order, hours, tasks and scenes stay.
         const w = s.watch ?? {};
-        await this.save({ start: this.#partyStop(), trip: { departed: now, decisions: [], resumed: {}, halts: [], walking: { ...walkingHistory(null, this.speed().feet), favored: this.favoredTerrains() }, biomeTravel:freezeBiomeTravel(this.getBiomes?.()??{}) }, now: null, watch: { ...w, setup: null, campId: null, checks: null, asks: {}, scene: null, encWatch: {} } });
+        await this.save({ start: this.#partyStop(), trip: { departed: now, decisions: [], resumed: {}, halts: [], walking: { ...walkingHistory(null, this.speed().feet), favored: this.favoredTerrains() }, biomeTravel:freezeBiomeTravel(this.getBiomes?.()??{}), ...(this.regionalSnapshot?{regionalPlan:structuredClone(this.regionalSnapshot)}:{}) }, now: null, watch: { ...w, setup: null, campId: null, checks: null, asks: {}, scene: null, encWatch: {} } });
         return this.#log(null);
       }
       if (s.trip.escape) await this.advanceClock(s.trip.escape.returnSeconds ?? 0);
@@ -1760,7 +1796,7 @@ export class TravelHud {
     if (!t || !layer?.frame) return null;
     const d=t.document,g=this.scene?.grid?.size??100;
     const center=Number.isFinite(d?.x)&&Number.isFinite(d?.y)?{x:d.x+(d.width??1)*g/2,y:d.y+(d.height??1)*g/2}:t.center;
-    const { lon, lat } = sceneToLatLon(layer.frame, center);
+    const { lon, lat } = sceneToLatLon(this.getTokenFrame?.(this.scene)??layer.frame, center);
     return { lon, lat, name: this.placeName(lon, lat) };
   }
 
@@ -1780,8 +1816,9 @@ export class TravelHud {
 
   /** Move the party's tokens, keeping their spread, to a sheet point. Skips moves under a few pixels. */
   async #moveTo(at, { scene = this.scene, duration = 800 } = {}) {
-    const frame = this.getLayer()?.frame;
+    const frame = this.getTokenFrame?.(scene)??this.getLayer()?.frame;
     if (!frame || !at) return;
+    try{await this.onTravelPosition?.(scene,at,this.partyTokens(scene).map(t=>t.document.id));this.regionalPositionError=null;}catch(error){console.warn("kg-realms | regional token mirror:",error);if(this.regionalPositionError!==error.message)ui.notifications.warn(`KG Realms: regional token could not be updated: ${error.message}`);this.regionalPositionError=error.message;}
     const tokens = this.partyTokens(scene).map((t) => {
       const doc = t.document, grid = scene.grid.size;
       // Token's id/w/h are prototype getters, so spreading the placeable loses them.
@@ -2007,7 +2044,7 @@ export class TravelHud {
     const layer = this.getLayer();
     // A place whose name or marker is drawn under the pointer (clicking its name picks it).
     const drawn = layer.placeAt?.(canvas.stage.worldTransform.applyInverse({ x: g[0], y: g[1] }), 6);
-    const named = typeof drawn === "string" && !drawn.includes(":") ? this.getPlaces().find((q) => q.id === drawn && !q.hidden) : null;
+    const named = typeof drawn === "string" && !/^(encounter|river-hazard):/.test(drawn) ? this.getPlaces().find((q) => q.id === drawn && !q.hidden) : null;
     if (named) return { lon: named.lon, lat: named.lat, name: named.name };
     let best = null, bd = SNAP_PX;
     for (const p of this.getPlaces()) {

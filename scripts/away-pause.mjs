@@ -26,11 +26,11 @@ const underWay = (state) => !!state?.trip?.departed && !state?.done;
  * Bring every realm map's journeys up to date with the active scene (the primary GM).
  * isRealm(scene): a realm map; write(scene, transform): the journey writer (journey-write.mjs).
  */
-export async function reconcileAway({ isRealm, write, now = game.time.worldTime }) {
+export async function reconcileAway({ isRealm, write, sameMap = (a,b)=>a===b, now = game.time.worldTime }) {
   const active = game.scenes.active;
   for (const real of game.scenes) {
     if (!isRealm(real)) continue;
-    const away = real !== active;
+    const away = !sameMap(real,active);
     for (const scene of journeyScenes(real)) {
       const state = scene.getFlag(ID, "journey");
       if (!underWay(state)) continue;

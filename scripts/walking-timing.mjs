@@ -35,7 +35,7 @@ export function retimeWalking(result, value, { terrainAt } = {}) {
     while (sample + 1 < result.track.length && result.track[sample + 1].hour <= h + 1e-9) sample++;
     const p = result.track[sample];
     if (favored.length && terrainAt && !l?.sea && l?.method !== "flying" && !["river", "sea", "wind", "lane"].includes(p?.kind)) {
-      const biome = terrainAt(...p.at)?.biome, key = p.kind === "road" || p.kind === "trail" ? p.kind : "offroad", before = biome?.[key] ?? 1;
+      const biome = (p.terrain ?? terrainAt(...p.at))?.biome, key = p.kind === "road" || p.kind === "trail" ? p.kind : "offroad", before = biome?.[key] ?? 1;
       ratio *= before / favoredBiomeMultiplier(before, biome?.type, favored);
     }
     const knot = { base: h, hour: clock, ratio };
@@ -54,7 +54,7 @@ export function retimeWalking(result, value, { terrainAt } = {}) {
     const i = track.findIndex((p) => p.baseHour > c.hour);
     const at = pointAtHour(result.track, c.hour);
     const sample=result.track.findLast(p=>p.hour<=c.hour);
-    track.splice(i < 0 ? track.length : i, 0, { kind:sample?.kind, waterway:sample?.waterway, at, baseHour: c.hour, hour: timeAt(c.hour), leg: Math.max(0, result.legs.findLastIndex((l) => l.start <= c.hour)), timingBoundary: true });
+    track.splice(i < 0 ? track.length : i, 0, { kind:sample?.kind, waterway:sample?.waterway, terrain:sample?.terrain, worldId:sample?.worldId, regionTitle:sample?.regionTitle, miles: (()=>{const next=result.track.find(p=>p.hour>c.hour);const t=(c.hour-(sample?.hour??0))/Math.max(1e-9,(next?.hour??c.hour)-(sample?.hour??0));return sample?.miles==null?undefined:sample.miles+((next?.miles??sample.miles)-sample.miles)*t;})(), at, baseHour: c.hour, hour: timeAt(c.hour), leg: Math.max(0, result.legs.findLastIndex((l) => l.start <= c.hour)), timingBoundary: true });
   }
   const legs = result.legs.map((l) => {
     const start = timeAt(l.start), hours = timeAt(l.start + l.hours) - start;
