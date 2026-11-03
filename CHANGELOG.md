@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.91.3: Background Image back in the scene config
+
+- **Fixed:** Foundry's Background Image is back in a realm map's scene config, and saves with the scene as usual. The Map picture box that replaced it is gone: it could not be saved.
+- **Regenerate map tiles from this picture** sits right under Background Image and uses the picture there, saved or not. Once the tiles are made, the field empties again, and the panel notes which picture they came from.
+- If a picture cannot be read, the message now says which path it tried.
+
 ## 0.91.2: new art keeps its detail
 
 - **Changed:** Regenerate map tiles keeps all the detail of a bigger picture, as finer levels of tiles shown when you zoom in. The canvas, the map's scale and everything on it stay exactly as they are. Any picture is fitted to the map's shape.

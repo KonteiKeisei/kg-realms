@@ -3,6 +3,7 @@
 // Universal, lib/basis), and a world with nothing on it yet is saved in Foundry's Data folder
 // (KG Realms Data/World/<id>/) and registered on every load from a world setting.
 // The scene then draws as a realm map. Afterwards: settings, revert to the backup, export as module.
+import { backgroundOf, setBackground } from "../local-maps.mjs";
 import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
@@ -366,29 +367,26 @@ async function convertScene(scene, id, { miles, backup = null }) {
 /* ------------------------------------------------------------------ a better picture */
 
 /**
- * The scene config of a made realm map: its picture, and a button to rebuild the map's tiles from it.
- * Foundry's own Background Image must stay empty on a realm map (the tiles are its picture), so this
- * row stands in its place. It has no form name: nothing here is saved by the scene's Save button.
+ * The scene config of a made realm map: a button under Foundry's own Background Image, which makes the
+ * map's tiles from the picture there. The field is Foundry's, so it saves with the scene as always.
+ * Once the tiles are made it is emptied again: the tiles are the map's picture.
  */
 export function sceneMapPicture(root, scene) {
   if (!root || !scene || !homebrewOf(scene) || root.querySelector("[data-kgr-map-picture]")) return;
-  const native = root.querySelector('[name$="background.src"]')?.closest(".form-group");
-  const basics = root.querySelector('.tab[data-tab="basics"]') ?? root.querySelector("form") ?? root;
-  const original = scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
+  const field = root.querySelector('[name$="background.src"]');
+  const used = scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
   const row = document.createElement("div");
   row.dataset.kgrMapPicture = "true";
-  row.innerHTML = `<div class="form-group"><label>Map picture ${q("The picture this realm map's tiles are made from. It is fitted to this map's shape, and a bigger picture keeps its detail when you zoom in. Places, roads, rivers and everything else stay where they are, on top of the new art. Foundry's Background Image is not used on a realm map.")}</label><div class="form-fields"><input type="text" data-map-src placeholder="Choose a picture"><button type="button" class="icon fa-solid fa-file-import" data-map-browse aria-label="Browse for a picture" data-tooltip="Browse"></button></div></div>
-    <div class="form-group"><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button></div><p class="hint">Makes new tiles for the whole map. The current map keeps working until they are ready, then everyone's game reloads.</p></div>`;
-  const input = row.querySelector("[data-map-src]"), button = row.querySelector("[data-map-regen]");
-  input.value = original;
-  const ready = () => { button.disabled = !input.value.trim(); };
-  input.addEventListener("input", ready); ready();
-  row.querySelector("[data-map-browse]").addEventListener("click", () => {
-    new (FilePickerImpl())({ type: "image", current: input.value, callback: (path) => { input.value = path; ready(); } }).render(true);
+  row.className = "form-group";
+  row.innerHTML = `<label>Map tiles ${q("Makes this realm map's tiles from the picture in Background Image. It is fitted to this map's shape, and a bigger picture keeps its detail when you zoom in. Places, roads, rivers and everything else stay where they are, on top of the new art.")}</label><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button></div><p class="hint">Choose the new picture in Background Image, then click this. The current map keeps working until the tiles are ready, then everyone's game reloads.${used ? ` Tiles last made from: ${esc(used)}` : ""}</p>`;
+  row.querySelector("[data-map-regen]").addEventListener("click", () => {
+    const src = String(field?.value ?? "").trim() || backgroundOf(scene) || used;
+    if (!src) return ui.notifications.warn("KG Realms: choose a picture in Background Image first.");
+    regenerateMap(scene, src);
   });
-  button.addEventListener("click", () => regenerateMap(scene, input.value.trim()));
-  if (native) { native.after(row); native.hidden = true; native.style.display = "none"; }
-  else basics.prepend(row);
+  const native = field?.closest(".form-group");
+  if (native) native.after(row);
+  else (root.querySelector('.tab[data-tab="basics"]') ?? root.querySelector("form") ?? root).prepend(row);
 }
 
 async function regenerateMap(scene, src) {
@@ -402,7 +400,7 @@ async function regenerateMap(scene, src) {
     const res = await fetch(foundry.utils.getRoute(src), { cache: "no-store" });
     if (!res.ok) throw Error(`HTTP ${res.status}`);
     blob = await res.blob(); bitmap = await createImageBitmap(blob);
-  } catch (err) { console.error(`${ID} | reading a new map picture`, err); return ui.notifications.error(`KG Realms: could not read that picture: ${err?.message ?? err}`); }
+  } catch (err) { console.error(`${ID} | reading a new map picture`, err); return ui.notifications.error(`KG Realms: could not read the picture ${src}: ${err?.message ?? err}`); }
   // The picture is fitted to the map as it is: only the tiles change, nothing else has to. A bigger
   // picture keeps its detail, in finer levels of tiles on the same sheet.
   const sheet = index.sourceMap, detail = detailLevels(sheet, bitmap.width, bitmap.height), f = 2 ** detail;
@@ -438,6 +436,8 @@ async function regenerateMap(scene, src) {
     win.set("save", "done");
     win.finished = true; win.message = "Done. Reloading..."; win.render();
     forgetWorld(def.id);
+    // The tiles are the map's picture now: the field goes back to empty, and the scene never draws it too.
+    if (backgroundOf(scene)) await setBackground(scene, null);
     await scene.update({ [`flags.${ID}.homebrewOriginal.background`]: src, [`flags.${ID}.mapVersion`]: Date.now() });
   } catch (err) {
     encoder?.stop();

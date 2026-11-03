@@ -54,10 +54,15 @@ test("only the tiles change: not the world's sheet, the scene's size or anything
   assert.ok(!/scene\.update\(\{[^}]*(width|height|grid)/.test(body), "the scene keeps its size and grid");
 });
 
-test("the scene config: the picture and the button, only on a made realm map, saved by nothing but the button", () => {
+test("the scene config: Foundry's Background Image stays and saves as always, with the button under it", () => {
   const brew = readFileSync(new URL("../scripts/homebrew/homebrew.mjs", import.meta.url), "utf8");
   assert.ok(brew.includes("Regenerate map tiles from this picture"));
   assert.ok(brew.includes("!homebrewOf(scene) ||"));
-  assert.ok(/<input type="text" data-map-src/.test(brew), "no form name");
+  assert.ok(brew.includes('root.querySelector(\'[name$="background.src"]\')'), "it reads Foundry's field");
+  assert.ok(brew.includes("native.after(row)"), "under it");
+  assert.ok(!brew.includes("native.hidden") && !brew.includes('native.style.display'), "the field is not hidden");
+  assert.ok(!brew.includes("data-map-src"), "no box of its own, which the scene's Save could not keep");
+  assert.ok(brew.includes('String(field?.value ?? "").trim() || backgroundOf(scene) || used'), "what is in the field, saved or not");
+  assert.ok(brew.indexOf("await setBackground(scene, null)") < brew.indexOf("flags.${ID}.mapVersion`]: Date.now()"), "emptied before everyone reloads");
   assert.ok(readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8").includes("sceneMapPicture(root, scene);"));
 });
