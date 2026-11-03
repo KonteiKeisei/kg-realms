@@ -103,9 +103,10 @@ export function detailLevels(sheet, width, height) {
   return k;
 }
 /** The folder for a rebuild's tiles: new each time, so the old map stays whole until the new one is ready. */
-export function nextTileFolder(pack) {
-  const used = (pack?.lods ?? []).flatMap((l) => l.tiles.map((t) => Number(/^assets\/terrain\/v(\d+)\//.exec(t.path ?? "")?.[1] ?? 1)));
-  return `assets/terrain/v${Math.max(1, ...used) + 1}`;
+export function nextTileFolder(pack, buildId = "") {
+  const used = (pack?.lods ?? []).flatMap((l) => l.tiles.map((t) => Number(/^assets\/terrain\/v(\d+)(?:-[\w-]+)?\//.exec(t.path ?? "")?.[1] ?? 1)));
+  if (buildId && !/^[\w-]+$/.test(buildId)) throw Error("Invalid map build ID");
+  return `assets/terrain/v${Math.max(1, ...used) + 1}${buildId ? `-${buildId}` : ""}`;
 }
 
 /** The pack manifest (terrain-pack.json) once every tile has its `ktxBytes` and `hash`. */

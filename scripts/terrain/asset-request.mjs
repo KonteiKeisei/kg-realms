@@ -19,8 +19,8 @@ export class MapRequests {
     // Recheck after waiting: another request may have extended the shared cooldown.
     for(;;){const delay=Math.max(this.cooldown,paced?this.nextStart:0)-Date.now();if(delay<=0){if(paced)this.nextStart=Date.now()+this.intervalMs;return;}await new Promise(r=>setTimeout(r,delay));}
   }
-  async read(tile,{paced=false,onProgress=()=>{},onRetry=()=>{}}={}){
-    const url=this.route(`${this.base}/${tile.path}`);
+  async read(tile,{base=this.base,paced=false,onProgress=()=>{},onRetry=()=>{}}={}){
+    const url=this.route(`${base}/${tile.path}`);
     try{
       for(let attempt=0;;attempt++){
         await this.gate(paced);onProgress(0);

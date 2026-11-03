@@ -66,3 +66,21 @@ test("the scene config: Foundry's Background Image stays and saves as always, wi
   assert.ok(brew.indexOf("await setBackground(scene, null)") < brew.indexOf("flags.${ID}.mapVersion`]: Date.now()"), "emptied before everyone reloads");
   assert.ok(readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8").includes("sceneMapPicture(root, scene);"));
 });
+
+
+test("overlapping rebuilds cannot share upload filenames, including abandoned builds", async () => {
+  const {runMapBuild}=await import("../scripts/homebrew/map-build.mjs");
+  const {packFiles}=await import("../scripts/terrain/asset-store.mjs");
+  const pack={lods:[]},one=nextTileFolder(pack,"first-build"),two=nextTileFolder(pack,"second-build");
+  assert.notEqual(one,two);
+  const lods=planTiles(old,{folder:one});
+  for(const lod of lods)for(const tile of lod.tiles){tile.hash="a".repeat(64);tile.ktxBytes=10;}
+  assert.doesNotThrow(()=>packFiles({schema:1,id:"test-terrain",fingerprint:"b".repeat(64),sourceMap:old,lods}));
+  assert.equal(nextTileFolder({lods},"next"),"assets/terrain/v3-next");
+  let finish;
+  const pending=runMapBuild("test",()=>new Promise(r=>finish=r));
+  await assert.rejects(runMapBuild("test",()=>assert.fail("second build ran")),/already/);
+  finish();await pending;
+  await assert.rejects(runMapBuild("test",()=>Promise.reject(Error("failed"))),/failed/);
+  assert.equal(await runMapBuild("test",async()=>"retry"),"retry");
+});

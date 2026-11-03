@@ -29,23 +29,48 @@ export class MapAssets {
     // One world's pack at a time: another world's scene loads its own (homebrew worlds, 0.74).
     const wanted=this.context?.world??defaultWorldId();
     if(this.loadingWorld!==wanted){this.loading=null;this.loadingWorld=wanted;}
-    this.loading??=(async()=>{
-      await this.store.restore();
-      try{
-        // The world's terrain download (its definition's terrainPack, worlds.mjs): tiles come from its
-        // module, or from beside a homebrew world's data (its assetBase).
-        const world=worldDef(wanted);
-        if(!world?.terrainPack)throw Error('This world has no realm terrain to download.');
-        this.packWorld=world.id;this.store.base=this.store.requests.base=world.assetBase??`modules/${world.module}`;
-        const route=worldUrl(world.id,world.terrainPack);
-        const res=await fetch(route,{cache:'no-cache'});if(!res.ok)throw Error(`Map manifest HTTP ${res.status}`);
-        this.store.setManifest(await res.json());
-      }catch(e){
-        if(this.store.installed)this.store.setManifest(this.store.installed);
-        else{this.loadError=e.message;this.store.issue=e.message;this.store.emit();console.warn('kg-realms | map assets',e);}
-      }
-    })();
-    await this.loading;
+    if(!this.loading){
+      const epoch=this.loadEpoch=(this.loadEpoch??0)+1;
+      this.loading=(async()=>{
+        await this.store.restore();
+        if(this.loadEpoch!==epoch)return;
+        // Finish only the current transfers before changing the package. Saved files resume later.
+        if(this.store.active){
+          this.store.pause();
+          globalThis.ui?.notifications?.info('KG Realms: map download paused while switching worlds. Completed files are saved.');
+          await this.store.active.catch(()=>{});
+        }
+        if(this.loadEpoch!==epoch)return;
+        this.packWorld=null;
+        this.store.manifest=null;this.store.files=new Map();this.store.emit();
+        try{
+          const world=worldDef(wanted);
+          if(!world?.terrainPack)throw Error('This world has no realm terrain to download.');
+          const base=world.assetBase??`modules/${world.module}`;
+          const res=await fetch(worldUrl(world.id,world.terrainPack),{cache:'no-cache'});
+          if(!res.ok)throw Error(`Map manifest HTTP ${res.status}`);
+          const manifest=await res.json();
+          if(this.loadEpoch!==epoch)return;
+          this.store.base=this.store.requests.base=base;
+          this.store.setManifest(manifest);this.packWorld=world.id;this.loadError=null;this.store.issue=null;
+        }catch(e){
+          if(this.loadEpoch!==epoch)return;
+          // An offline fallback must belong to the requested world, never the previously viewed one.
+          const saved=this.store.worldPacks?.[wanted],installed=saved&&this.store.installedAll?.[saved.id];
+          if(installed){this.store.base=this.store.requests.base=saved.base;this.store.setManifest(installed);this.packWorld=wanted;}
+          else{this.loadError=e.message;this.store.issue=e.message;this.store.emit();console.warn('kg-realms | map assets',e);}
+        }
+        if(this.packWorld){
+          const saved={id:this.store.manifest.id,base:this.store.base};
+          if(JSON.stringify(this.store.worldPacks?.[wanted])!==JSON.stringify(saved)){
+            (this.store.worldPacks??={})[wanted]=saved;await this.store.remember();
+          }
+        }
+      })();
+    }
+    const loading=this.loading;
+    await loading;
+    if(this.loading!==loading||this.loadingWorld!==wanted)return null;
     // The world's map moved since its pack was read (a homebrew world's settings, 0.74.2's move): read it again, once.
     if(this.context?.sourceMap&&this.context.world===this.packWorld&&this.store.manifest&&!sameGeometry({sourceMap:this.context.sourceMap},this.store.manifest)&&!this.reread){
       this.reread=true;this.loading=null;try{return await this.prepare();}finally{this.reread=false;}
@@ -58,8 +83,9 @@ export class MapAssets {
     if(context&&(context.world!==this.packWorld||!context.sourceMap||!sameGeometry({sourceMap:context.sourceMap},this.store.manifest)))return null;
     const installed=this.store.choice==='local'&&this.store.installed;
     const catalog=installed&&sameGeometry(installed,this.store.manifest)?installed:this.store.manifest;
+    const source={base:this.store.base,network:!(this.store.choice==='local'&&this.store.installed)};
     return {makeLayer:()=>new TerrainLayer({catalog,budgetBytes:(Number(game.settings.get(ID,'realmTerrainBudget'))||128)*1048576,
-      loadKtx:t=>this.decoder.acquire(t),releaseKtx:t=>this.decoder.release(t),onStatus:s=>{
+      loadKtx:t=>this.decoder.acquire(t,source),releaseKtx:t=>this.decoder.release(t),onStatus:s=>{
         this.rendererStatus=s;
         if(s.state==='failed'){this.rendererError=s.error??s.errors?.[0]?.error??'Compressed map rendering is unavailable on this client.';this.store.issue=this.rendererError;this.store.emit();}
         else if(s.state==='ready'&&this.rendererError){if(this.store.issue===this.rendererError)this.store.issue=null;this.rendererError=null;this.store.emit();}

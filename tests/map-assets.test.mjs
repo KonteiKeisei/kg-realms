@@ -132,3 +132,64 @@ test('download details count transferred bytes once and reset when reusing saved
  await new Promise(r=>setTimeout(r,10));assert.equal(f.store.status().transfer.elapsedMs,elapsed);
  await f.store.download();assert.equal(f.store.status().transfer.transferredBytes,0);assert.equal(f.store.status().transfer.sessionFiles,0);assert.equal(f.calls.length,3);
 });
+
+
+test('switching worlds pauses and drains the old download before changing its package',async()=>{
+ const {MapAssets}=await import('../scripts/terrain/map-assets.mjs');
+ const {registerWorld}=await import('../scripts/worlds.mjs');
+ const f=await setup(),other=await manifest(['new-first','new-second','new-third']);other.m.id='other-terrain';
+ registerWorld({id:'download-first',module:'first',terrainPack:'terrain-pack.json'});
+ registerWorld({id:'download-other',module:'other',terrainPack:'terrain-pack.json'});
+ const originalFetch=globalThis.fetch;globalThis.fetch=async url=>({ok:true,json:async()=>String(url).includes('/other/')?other.m:f.m});
+ const service=new MapAssets({store:f.store});
+ try{
+  const config=await service.prepare({world:'download-first',sourceMap:f.m.sourceMap});
+  let release,started;const wait=new Promise(r=>started=r);const ordinary=f.store.fetcher;
+  f.store.fetcher=async(...args)=>{started();await new Promise(r=>release=r);return ordinary(...args);};
+  // One worker makes the pause boundary deterministic.
+  f.store.queue.active=1;
+  const downloading=f.store.download();await wait;
+  assert.throws(()=>f.store.setManifest(other.m),/Pause/);
+  const switching=service.prepare({world:'download-other',sourceMap:other.m.sourceMap});await new Promise(setImmediate);
+  assert.equal(f.store.manifest.id,f.m.id);assert.ok(f.store.pauseRequested);
+  // Both already scheduled transfers may finish, but they must use the first package.
+  f.store.fetcher=ordinary;release();await downloading;f.store.queue.active=0;
+  await switching;
+  assert.equal(f.store.manifest.id,'other-terrain');assert.equal(f.store.installed,null);
+  assert.ok(f.store.receipts[f.m.lods[0].tiles[0].hash]);
+  // A layer prepared before switching retains the old source even if it starts later.
+  let source;service.decoder.acquire=(tile,options)=>{source=options;};
+  globalThis.game={settings:{get:()=>128}};config.makeLayer().loadKtx(f.m.lods[0].tiles[0]);
+  assert.equal(source.base,'modules/first');
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test('out-of-order world manifests cannot replace the active world',async()=>{
+ const {MapAssets}=await import('../scripts/terrain/map-assets.mjs');const {registerWorld}=await import('../scripts/worlds.mjs');
+ const f=await setup(),other=await manifest(['other']);other.m.id='second-terrain';
+ registerWorld({id:'race-first',module:'race-first',terrainPack:'terrain-pack.json'});registerWorld({id:'race-second',module:'race-second',terrainPack:'terrain-pack.json'});
+ const originalFetch=globalThis.fetch,pending=new Map();globalThis.fetch=url=>new Promise(resolve=>pending.set(String(url),resolve));
+ const service=new MapAssets({store:f.store});
+ try{
+  const one=service.prepare({world:'race-first',sourceMap:f.m.sourceMap});await new Promise(setImmediate);
+  const two=service.prepare({world:'race-second',sourceMap:other.m.sourceMap});await new Promise(setImmediate);
+  const resolve=(name,m)=>[...pending].find(([url])=>url.includes(name))[1]({ok:true,json:async()=>m});
+  resolve('race-second',other.m);assert.ok(await two);resolve('race-first',f.m);assert.equal(await one,null);
+  assert.equal(service.packWorld,'race-second');assert.equal(f.store.manifest.id,'second-terrain');assert.equal(f.store.base,'modules/race-second');
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test('a failed manifest load restores only the requested worlds saved package after reload',async()=>{
+ const {MapAssets}=await import('../scripts/terrain/map-assets.mjs');const {registerWorld}=await import('../scripts/worlds.mjs');
+ const f=await setup();registerWorld({id:'offline-world',module:'offline-world',terrainPack:'terrain-pack.json'});
+ registerWorld({id:'missing-world',module:'missing-world',terrainPack:'terrain-pack.json'});
+ const originalFetch=globalThis.fetch;globalThis.fetch=async()=>({ok:true,json:async()=>f.m});
+ try{
+  const first=new MapAssets({store:f.store});await first.prepare({world:'offline-world',sourceMap:f.m.sourceMap});await f.store.download();
+  globalThis.fetch=async()=>({ok:false,status:503});
+  const store=new MapAssetStore({record:f.saved}),fresh=new MapAssets({store});
+  assert.ok(await fresh.prepare({world:'offline-world',sourceMap:f.m.sourceMap}));assert.equal(store.manifest.id,f.m.id);
+  assert.equal(await fresh.prepare({world:'missing-world',sourceMap:f.m.sourceMap}),null);assert.equal(store.manifest,null);
+ }finally{globalThis.fetch=originalFetch;}
+});

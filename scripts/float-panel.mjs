@@ -12,7 +12,8 @@ export function applyHeight(el, h) {
   if (!el) return;
   if (h > 0) {
     const top = el.getBoundingClientRect().top;
-    el.style.height = `${Math.max(MIN_H, Math.min(h, window.innerHeight - top - 8))}px`;
+    const available = Math.max(0, window.innerHeight - top - 8);
+    el.style.height = `${Math.min(available, Math.max(MIN_H, h))}px`;
     el.style.maxHeight = "none";
   } else { el.style.height = ""; el.style.maxHeight = ""; }
   el.classList.toggle("kgr-sized", h > 0);
@@ -75,5 +76,5 @@ export function dragByHeader(el, { locked, save }) {
 /** x, y kept so the panel stays on screen (its header at least). */
 export function clampTo(el, x, y) {
   const w = el?.offsetWidth || 400, h = el?.offsetHeight || 200;
-  return [Math.max(0, Math.min(x, window.innerWidth - w)), Math.max(0, Math.min(y, window.innerHeight - Math.min(h, 60)))];
+  return [Math.max(0, Math.min(x, window.innerWidth - w)), Math.max(0, Math.min(y, window.innerHeight - Math.min(h + 8, window.innerHeight)))];
 }

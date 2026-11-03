@@ -1,11 +1,17 @@
 import {fromWorld,toWorld} from './geo.mjs';
 // A flat sheet in tile space. Source pixels remain square at every zoom.
 export const SOURCE_MAP={width:12840,height:9150,tileSize:512,nativeZoom:7,detailZoom:9,maxZoom:22,minZoom:0,x:16384,y:16384,worldSize:65536,milesPerPixel:500/1700,archive:'tapestry.pmtiles'};
-export function sourceToLonLat(x,y){const p=fromWorld((SOURCE_MAP.x+x)/SOURCE_MAP.worldSize,(SOURCE_MAP.y+y)/SOURCE_MAP.worldSize);return [p.lon,p.lat];}
-export function lonLatToSource(lon,lat){const p=toWorld(lat,lon);return [p.x*SOURCE_MAP.worldSize-SOURCE_MAP.x,p.y*SOURCE_MAP.worldSize-SOURCE_MAP.y];}
+export function sourceToLonLat(x,y,sheet=SOURCE_MAP){const p=fromWorld((sheet.x+x)/sheet.worldSize,(sheet.y+y)/sheet.worldSize);return [p.lon,p.lat];}
+export function lonLatToSource(lon,lat,sheet=SOURCE_MAP){const p=toWorld(lat,lon);return [p.x*sheet.worldSize-sheet.x,p.y*sheet.worldSize-sheet.y];}
 export function sourceMiles(a,b){const p=lonLatToSource(a.lon,a.lat),q=lonLatToSource(b.lon,b.lat);return Math.hypot(q[0]-p[0],q[1]-p[1])*SOURCE_MAP.milesPerPixel;}
 function sheetBounds(){const nw=sourceToLonLat(0,0),se=sourceToLonLat(SOURCE_MAP.width,SOURCE_MAP.height);SOURCE_MAP.bounds={west:nw[0],north:nw[1],east:se[0],south:se[1],mapWidthMiles:SOURCE_MAP.width*SOURCE_MAP.milesPerPixel};}
 sheetBounds();
+const DEFAULT_SHEET = structuredClone(SOURCE_MAP);
+/** A projection owned by one world, independent of the displayed map. */
+export function sourceProjection(sheet = DEFAULT_SHEET) {
+ const sourceMap = structuredClone(sheet ?? DEFAULT_SHEET);
+ return { sourceMap, toSource: (lon, lat) => lonLatToSource(lon, lat, sourceMap), toLonLat: (x, y) => sourceToLonLat(x, y, sourceMap) };
+}
 /**
  * The sheet of the world being drawn (its index's sourceMap): the values above are Toril's, used until
  * a world gives its own. One realm map is drawn at a time, so the sheet is shared (0.71).

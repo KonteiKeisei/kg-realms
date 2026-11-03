@@ -1,3 +1,5 @@
+import { sendCampMessage, validWatchChanges } from "./camp-messages.mjs";
+import { groupMembers } from "./party-groups.mjs";
 import {partyScene,focusedScene} from './party-groups.mjs';
 import { ruleTooltip } from "./travel-rules.mjs";
 // Making camp, in the travel panel: at the end of a day's travel (the GM's and the players' view)
@@ -18,7 +20,7 @@ import { ruleTooltip } from "./travel-rules.mjs";
 //  - Checks a player makes (the watcher's Wisdom (Perception), the forager's Wisdom (Survival)):
 //    the GM asks, the player rolls the system's own check with the DC on it (so Tenacity can be
 //    spent on its chat card), and the GM confirms the result or allows a reroll.
-// Players' changes go to the GM's client over the module's socket; the GM writes the journey.
+// Players' changes use their User document; the primary GM validates and writes the journey.
 import { SLEEP, FORAGE, WATCH_HOURS, sleepOf, planWatches, awakeAt, campPhases, campSchedule } from "./camp.mjs";
 import { TASKS, ALARM_DC, SHIFT_BONUS, leaderWithHelp, concealed, setupWork, pastTaskSummary } from "./camp-tasks.mjs";
 import { promptCompletedCampRest } from "./rest-recovery.mjs";
@@ -32,7 +34,7 @@ import { WATCH_ROLL_MS, ambientWatchResult } from "./watch-outcomes.mjs";
 import { rollingWatchHtml, watchResultsHtml } from "./watch-roll-view.mjs";
 import { CAMP_RESOLUTIONS, encounterTimeRemaining, interruptedCampPhases } from "./camp-resolution.mjs";
 
-const MODULE_ID = "kg-realms", SOCKET = `module.${MODULE_ID}`;
+const MODULE_ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const HOLD_MS = 2 * 60 * 1000; // a hold left idle this long lapses
 const commands = new Set();
@@ -149,7 +151,7 @@ export class CampPanel {
     if (!this.practice) return;
     const sent = this.practice.players && !this.practice.view;
     this.practice = null;
-    if (sent) game.socket.emit(SOCKET, { type: "practice", from: game.user.id, end: true });
+    if (sent) sendCampMessage({ type: "practice", end: true });
     this.renderScene(this.hud.progress());
     this.onPracticeEnd?.();
   }
@@ -158,7 +160,7 @@ export class CampPanel {
   #practiceChanged() {
     const P = this.practice;
     if (!P) return;
-    if (P.players && !P.view && !P.setup) game.socket.emit(SOCKET, { type: "practice", from: game.user.id, data: { state: P.state, clock: P.clock, camped: P.camped } });
+    if (P.players && !P.view && !P.setup) sendCampMessage({ type: "practice", data: { state: P.state, clock: P.clock, camped: P.camped } });
     if (P.state.watch?.scene?.step === "done") return this.endPractice();
     this.renderScene(this.prog());
     this.onPracticeChange?.();
@@ -350,27 +352,29 @@ export class CampPanel {
   async write(changes) {
     if (this.practice) return this.save({ watch: { ...this.watch, ...changes } });
     if (game.user.isGM) return this.save(Object.fromEntries(Object.entries(changes).map(([key, value]) => [`watch.${key}`, value])));
-    game.socket.emit(SOCKET, { type: "watch", scene: this.hud.scene.id, partyId:this.hud.scene.partyId, user: game.user.id, changes });
+    return this.request({ changes });
   }
   /** Take hold of the watch order (a player), or let it go. */
   hold(on) {
     const lock = on ? { user: game.user.id, at: Date.now() } : null;
     if (game.user.isGM) return this.write({ lock });
-    game.socket.emit(SOCKET, { type: "watch", scene: this.hud.scene.id, partyId:this.hud.scene.partyId, user: game.user.id, changes: { lock }, hold: on ? "take" : "release" });
+    return this.request({ hold: on ? "take" : "release" });
   }
   /**
-   * Socket messages. On every client: a watch change banner a GM sent (the practice night). On the
+   * Authenticated User document messages. On every client: a watch change banner a GM sent (the practice night). On the
    * GM's client (the one active GM): a player's change to a journey's watch, if they may make it.
    */
-  onSocket(m, userId) {
-    this.socketQueue = (this.socketQueue ?? Promise.resolve()).then(() => this.#onSocket(m, userId)).catch((err) => console.warn("kg-realms | camp request:", err));
+  request(data) { return sendCampMessage({ type: "watch", scene: this.hud.scene.id, partyId: this.hud.scene.partyId, trip: journeyKey(this.st), campId: this.watch.campId ?? null, ...data }); }
+
+  onMessage(m, userId) {
+    this.socketQueue = (this.socketQueue ?? Promise.resolve()).then(() => this.#onMessage(m, userId)).catch((err) => console.warn("kg-realms | camp request:", err));
     return this.socketQueue;
   }
-  async #onSocket(m, userId) {
-    if (m?.type === "banner") { if (game.users.get(userId ?? m.from)?.isGM) showBanner(m.data); return; }
+  async #onMessage(m, userId) {
+    if (m?.type === "banner") { if (game.users.get(userId)?.isGM) showBanner(m.data); return; }
     // A GM's practice night, shown to the players (who watch it; they cannot act in it).
     if (m?.type === "practice") {
-      const from = userId ?? m.from;
+      const from = userId;
       if (!game.users.get(from)?.isGM || from === game.user.id || (this.practice && !this.practice.view)) return;
       if (m.end) { this.practice = null; this.renderScene(this.hud.progress()); return; }
       this.practice = { ...m.data, view: true };
@@ -379,22 +383,26 @@ export class CampPanel {
     }
     if (m?.type !== "watch" || !isPrimaryGM()) return;
     const scene = partyScene(game.scenes.get(m.scene),m.partyId), j = scene?.getFlag(MODULE_ID, "journey");
-    if (!j || (scene.partyId&&focusedScene(scene.realScene)!==scene)) return;
+    const sender = game.users.get(userId);
+    if (!sender?.active || !j || m.trip !== journeyKey(j) || m.campId !== (j.watch?.campId ?? null) || (scene.partyId&&focusedScene(scene.realScene)!==scene)) return;
+    const members = scene === this.hud.scene ? this.hud.members() : (this.hud.partyTokens?.(scene) ?? []).flatMap(t => groupMembers(t.actor));
+    const ids = new Set(members.map(a => a.id));
     const w = j.watch ?? {}, h = this.holder(w);
     const put = (changes) => writeJourney(scene, (fresh) => ({ watch: { ...fresh.watch, ...changes } }), { trip: journeyKey(j), campId: w.campId });
     // A player's pick of task for a character of theirs (no hold: each picks their own).
     if (m.taskSet) {
-      const user = game.users.get(m.user), actor = game.actors.get(m.taskSet.id);
-      if (user && actor?.testUserPermission?.(user, "OWNER") && TASKS[m.taskSet.task]) await put({ tasks: { ...(w.tasks ?? {}), [m.taskSet.id]: m.taskSet.task } });
+      const user = sender, actor = game.actors.get(m.taskSet.id);
+      if (ids.has(m.taskSet.id) && actor?.testUserPermission?.(user, "OWNER") && this.taskOn(m.taskSet.task)) await put({ tasks: { ...(w.tasks ?? {}), [m.taskSet.id]: m.taskSet.task } });
       return;
     }
     if (w.gmLock) return;
-    if (m.hold === "take") { if (!h || h.id === m.user) await put({ lock: { user: m.user, at: Date.now() } }); return; }
-    if (m.hold === "release") { if (h?.id === m.user) await put({ lock: null }); return; }
+    if (m.hold === "take") { if (!h || h.id === userId) await put({ lock: { user: userId, at: Date.now() } }); return; }
+    if (m.hold === "release") { if (h?.id === userId) await put({ lock: null }); return; }
     // Changes only from whoever holds it (a hold is taken by the first change).
-    if (h && h.id !== m.user) return;
-    const allowed = ["order", "hours", "sleep", "join"], c = Object.fromEntries(Object.entries(m.changes ?? {}).filter(([k]) => allowed.includes(k)));
-    await put({ ...c, lock: { user: m.user, at: Date.now() } });
+    if (h && h.id !== userId) return;
+    if (!validWatchChanges(m.changes, ids)) return;
+    const c = m.changes;
+    await put({ ...c, lock: { user: userId, at: Date.now() } });
   }
 
   /* ------------------------------------------------------------------ drawing */
@@ -1100,7 +1108,7 @@ export class CampPanel {
       if (!this.taskOn(el.value)) return;
       const id = el.dataset.id, actor = game.actors.get(id);
       if (game.user.isGM) return this.write({ tasks: { ...(w.tasks ?? {}), [id]: el.value } });
-      if (actor?.isOwner) game.socket.emit(SOCKET, { type: "watch", scene: this.hud.scene.id, partyId:this.hud.scene.partyId, user: game.user.id, taskSet: { id, task: el.value } });
+      if (actor?.isOwner) return this.request({ taskSet: { id, task: el.value } });
       return;
     }
     if (!game.user.isGM || (!this.practice && !isPrimaryGM())) return;

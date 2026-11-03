@@ -48,3 +48,13 @@ test("the scene trail stays below navigation and centered clear of the sidebar",
   assert.equal(el.style.top,"68px");assert.equal(el.style.left,"590px");
   assert.equal(el.style.maxWidth,"996px");
 });
+
+
+test("a resized panel and its lower controls stay inside a short viewport", async () => {
+  const {applyHeight,clampTo}=await import("../scripts/float-panel.mjs");
+  globalThis.window={innerWidth:800,innerHeight:400};
+  const el={offsetWidth:360,offsetHeight:300,style:{},classList:{toggle(){}},getBoundingClientRect:()=>({top:350})};
+  assert.deepEqual(clampTo(el,750,390),[440,92]);
+  applyHeight(el,300);assert.equal(el.style.height,"42px");
+  window.innerHeight=100;assert.equal(clampTo(el,0,90)[1],0);
+});

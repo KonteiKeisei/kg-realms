@@ -9,7 +9,7 @@ export function packFiles(manifest){
   if(manifest.lods.some((l,i)=>!Number.isInteger(l.z)||!Array.isArray(l.tiles)||!l.tiles.length||(i>0&&l.z<=manifest.lods[i-1].z)))throw Error('Invalid map detail levels');
   const files=new Map(),ids=new Set();
   for(const lod of manifest.lods)for(const t of lod.tiles??[]){
-    if(t.lod!==lod.z||ids.has(t.id)||!/^assets\/terrain\/(v\d+\/)?z\d+-\d+-\d+\.ktx2(\.fbx)?$/.test(t.path??'')||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216)throw Error('Invalid map package entry');
+    if(t.lod!==lod.z||ids.has(t.id)||!/^assets\/terrain\/(v\d+(?:-[\w-]+)?\/)?z\d+-\d+-\d+\.ktx2(\.fbx)?$/.test(t.path??'')||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216)throw Error('Invalid map package entry');
     for(const k of ['x','y','width','height','textureWidth','textureHeight','frameX','frameY','frameWidth','frameHeight'])if(!Number.isFinite(t[k])||t[k]<0)throw Error('Invalid map geometry');
     if(!t.width||!t.height||t.textureWidth>4096||t.textureHeight>4096||t.frameX+t.frameWidth>t.textureWidth||t.frameY+t.frameHeight>t.textureHeight)throw Error('Invalid map frame');
     ids.add(t.id);if(files.has(t.hash)&&files.get(t.hash).ktxBytes!==t.ktxBytes)throw Error('Conflicting map package hashes');files.set(t.hash,t);
@@ -49,23 +49,25 @@ export class MapAssetStore {
   on(fn){this.listeners.add(fn);return()=>this.listeners.delete(fn);}
   emit(){if(this.emitPending)return;this.emitPending=true;setTimeout(()=>{this.emitPending=false;const s=this.status();for(const fn of this.listeners)fn(s);},50);}
   setManifest(m){
+    if(this.active)throw Error('Pause the current download before changing map packages.');
     this.files=packFiles(m);this.manifest=m;
     this.largest=Math.max(...[...this.files.values()].map(t=>t.ktxBytes));
     this.metadataAllowance=new TextEncoder().encode(JSON.stringify(m)).byteLength*2+this.files.size*320+4096;
     this.emit();
   }
-  async restore(){
+  restore(){return this.restoring??=this.#restore();}
+  async #restore(){
     if(this.restored)return;this.restored=true;
     let saved={};try{saved=await this.record.get();}catch{this.rememberWarning='This browser could not restore its saved folder connection.';}
     // Before 0.75.6 one choice served every world; it was made for Toril's map.
-    this.choices={...(saved.choices??{})};const legacy=saved.choice&&saved.choice!=='ask'?saved.choice:null;
+    this.worldPacks={...(saved.worldPacks??{})};this.choices={...(saved.choices??{})};const legacy=saved.choice&&saved.choice!=='ask'?saved.choice:null;
     if(legacy&&!saved.choices)this.choices['faerun-terrain']=legacy;
     this.handle=saved.handle;
     if(!this.handle)return;
     try{if(await this.permission('read')!=='granted'){this.state='reconnect';this.emit();return;}await this.openFolder(false);}catch(e){this.issue=e.message;this.state='reconnect';}
   }
   async permission(mode){return this.handle?.queryPermission?this.handle.queryPermission({mode}):'granted';}
-  async remember(){try{await this.record.set({choices:{...this.choices},handle:this.handle});}catch{this.rememberWarning='The files are saved, but this browser could not remember the folder. Reconnect it next time.';}}
+  async remember(){try{await this.record.set({choices:{...this.choices},handle:this.handle,worldPacks:{...this.worldPacks}});}catch{this.rememberWarning='The files are saved, but this browser could not remember the folder. Reconnect it next time.';}}
   async choose(){const pending=this.picker();const h=await pending;await this.adopt(h);}
   async reconnect(){
     if(!this.handle)return this.choose();
@@ -118,20 +120,20 @@ export class MapAssetStore {
     if(!this.verified.has(signature)){if(await sha256(bytes)!==t.hash)throw Error('A local map file is damaged. Use Repair download.');this.verified.add(signature);}
     return bytes;
   }
-  async bytes(t,{network=!(this.choice==='local'&&this.installed),priority=1}={}){
+  async bytes(t,{network=!(this.choice==='local'&&this.installed),priority=1,base=this.base}={}){
     if(this.objects){try{return await this.#read(t);}catch(e){if(!missing(e)){this.issue=e.message;this.emit();}delete this.receipts[t.hash];}}
     // This world's own saved map is never quietly swapped for downloads: a missing file is a repair.
     // Any other world's map (streamed, or not saved yet) comes from the server (0.75.6).
     if(!network&&!this.writing){this.issue='A required local map file is unavailable. Reconnect the folder or use Repair download.';this.emit();throw Error(this.issue);}
-    return (await this.#fetch(t,priority)).slice(0);
+    return (await this.#fetch(t,priority,base)).slice(0);
   }
-  async #fetch(t,priority){
+  async #fetch(t,priority,base=this.base){
     if(this.jobs.has(t.hash))return this.jobs.get(t.hash);
     const promise=this.queue.run(async()=>{
       this.requests.timeoutMs=this.timeoutMs;
       let bytes;
       let received=0;
-      try{bytes=await this.requests.read(t,{paced:this.writing,onProgress:length=>{if(this.writing)this.progress.network(Math.max(0,length-received));received=length;this.transfers.set(t.hash,length);this.emit();},onRetry:info=>{if(info)this.retrying.set(t.hash,info);else this.retrying.delete(t.hash);this.emit();}});}
+      try{bytes=await this.requests.read(t,{base,paced:this.writing,onProgress:length=>{if(this.writing)this.progress.network(Math.max(0,length-received));received=length;this.transfers.set(t.hash,length);this.emit();},onRetry:info=>{if(info)this.retrying.set(t.hash,info);else this.retrying.delete(t.hash);this.emit();}});}
       catch(e){this.failedRequest={path:t.path,status:e.status??null};throw e;}
       const length=bytes.byteLength;
       if(await sha256(bytes)!==t.hash)throw Error(`Map download failed its integrity check: ${t.path}`);
@@ -158,6 +160,7 @@ export class MapAssetStore {
   }
   download(){
     if(this.active)return this.active;
+    if(!this.manifest)return Promise.reject(Error("Wait for the map package to load."));
     this.pauseRequested=false;this.cancelRequested=false;this.issue=null;this.failedRequest=null;
     const pending=(async()=>{
       if(!this.objects)throw Error('Choose or reconnect a folder first.');

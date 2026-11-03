@@ -94,7 +94,7 @@ test("a player following progress does not see the stops ahead", () => {
   game.user.isGM = false;
   flags.journey = { waypoints: wps, stays: [0, 0], legModes: ["sea", null], show: "progress", start: { lon: 0, lat: 0, name: "Arine" }, trip: { started: 0 } };
   const html = draw(newHud(), states.moving);
-  assert.doesNotMatch(html, /<b title="Karackas"/); assert.doesNotMatch(html, /Next:/);
+  assert.doesNotMatch(html, /Karackas|Wakeflow/); assert.doesNotMatch(html, /Next:/);
   game.user.isGM = true;
 });
 

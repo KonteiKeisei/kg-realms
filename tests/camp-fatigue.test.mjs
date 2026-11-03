@@ -39,13 +39,13 @@ test("Take a watch can be switched off and on without losing setup activity or o
 
 test("player duty changes use the primary GM's existing write path and respect its lock",async()=>{
   const x=setup(),gm=game.user,player={id:"player",active:true,isGM:false};game.users.push(player);
-  const sent=[];game.socket={emit:(channel,message)=>sent.push(message)};game.user=player;
+  const sent=[];player.setFlag=async (_module,_key,body)=>sent.push(JSON.parse(body));game.user=player;
   x.state.watch.gmLock=true;
   await x.camp.change({dataset:{camp:"watch-duty",id:"a"},checked:false});assert.equal(sent.length,0);
   x.state.watch.gmLock=false;
   await x.camp.change({dataset:{camp:"watch-duty",id:"a"},checked:false});
   assert.equal(sent.length,1);assert.equal(x.state.watch.hours.a,2);assert.equal(sent[0].changes.hours.a,0);
-  game.user=gm;await x.camp.onSocket(sent[0],player.id);
+  game.user=gm;await x.camp.onMessage(sent[0],player.id);
   assert.equal(x.state.watch.hours.a,0);assert.equal(x.state.watch.tasks.a,"forage");
 });
 

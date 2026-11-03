@@ -1,5 +1,15 @@
 # KG Realms changelog
 
+## 0.91.4: journey, map and panel fixes
+
+- **Fixed:** background journeys use their own world's coordinates and distance scale, including shoreline and lake checks, when the GM views another world.
+- **Fixed:** switching worlds pauses an active map download after its current transfers finish. Saved files can be resumed later. Late manifest responses and queued tile requests retain the correct world and file source.
+- **Fixed:** overlapping map rebuilds cannot overwrite each other's tile files. Regeneration runs on the primary GM, blocks a second build of the same world, and checks for a newer map before publishing. The Background Image changes from 0.91.3 are retained.
+- **Fixed:** player camp requests use Foundry's User document updates to identify their sender. Watch edits validate party members and values, task choices check actor ownership, and requests from an earlier camp are rejected.
+- **Fixed:** Progress only no longer names the final destination in the travel panel's title.
+- **Changed:** travel updates reuse unchanged controls and update the changed parts of the panel, preserving keyboard focus during clock updates.
+- **Fixed:** floating panels stay within the viewport when moved or resized near its bottom edge.
+
 ## 0.91.3: Background Image back in the scene config
 
 - **Fixed:** Foundry's Background Image is back in a realm map's scene config, and saves with the scene as usual. The Map picture box that replaced it is gone: it could not be saved.

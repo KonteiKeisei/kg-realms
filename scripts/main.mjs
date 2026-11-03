@@ -1,3 +1,4 @@
+import { receiveCampMessage } from "./camp-messages.mjs";
 import { PartyTokenFit } from "./party-token-fit.mjs";
 import { registerShell } from "./ui-shell.mjs";
 import { worldUrl, registerWorld, allWorlds, collectWorlds, defaultWorldId, worldDef } from "./worlds.mjs";
@@ -68,7 +69,7 @@ import { EncounterBox } from "./ui-encounter-box.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
 import { seasonOf, buildSea, automaticPort, terrainHarbours } from "./waterways.mjs";
 import { TravelHud } from "./ui-hud.mjs";
-import { SOURCE_MAP, lonLatToSource, sourceToLonLat, applySourceMap } from "./source-map.mjs";
+import { SOURCE_MAP, lonLatToSource, sourceToLonLat, applySourceMap, sourceProjection } from "./source-map.mjs";
 import { PlaceCards } from "./place-card.mjs";
 import { registerKinds } from "./card-kinds.mjs";
 import { TradeMarkets } from "./trade.mjs";
@@ -450,8 +451,9 @@ function blankTerrain(sheet) {
 /** A world's terrain grid with the water its shorelines mark (a shoreline's water side, 0.75). */
 async function terrainFor(worldId, world) {
   const base = await baseTerrain(worldId, world);
+  const { toSource } = sourceProjection(world.sourceMap);
   if (!base) return null;
-  const shores = Object.entries(waterwaysOf(worldId)).filter(([, w]) => w?.kind === "shore" && w.water && w.pts?.length > 1).map(([id, w]) => ({ id, water: w.water, closed: !!w.closed, pts: w.pts.map((c) => lonLatToSource(c[0], c[1])) }));
+  const shores = Object.entries(waterwaysOf(worldId)).filter(([, w]) => w?.kind === "shore" && w.water && w.pts?.length > 1).map(([id, w]) => ({ id, water: w.water, closed: !!w.closed, pts: w.pts.map((c) => toSource(c[0], c[1])) }));
   if (!shores.length) return base;
   const key = JSON.stringify(shores), was = shoreGrids.get(worldId);
   if (was?.base === base && was.key === key) return was.grid;
@@ -518,7 +520,8 @@ let inlandMemo = null;
 async function biomeOrLake(world, biome, x, y, query) {
   if (biome || !query) return biome;
   const places = await realmPlaces(world), own = setting("waterways");
-  if (inlandMemo?.places !== places || inlandMemo?.own !== own || inlandMemo?.world !== world) inlandMemo = { places, own, world, rings: inlandWaters(places, waterwaysOf(world)).map((r) => r.map((c) => lonLatToSource(c[0], c[1]))) };
+  const { toSource } = sourceProjection((await loadWorld(world)).sourceMap);
+  if (inlandMemo?.places !== places || inlandMemo?.own !== own || inlandMemo?.world !== world) inlandMemo = { places, own, world, rings: inlandWaters(places, waterwaysOf(world)).map((r) => r.map((c) => toSource(c[0], c[1]))) };
   return lakeBiome(x, y, inlandMemo.rings, query);
 }
 const onBiome = async (scene, biome, here, query) => {
@@ -587,17 +590,20 @@ async function syncJourney(scene, { force = false } = {}) {
       const region = regionOf(scene), state = scene.getFlag(MODULE_ID, "journey");
       if (!isPrimaryGM() || !state?.trip) return;
       const world = await loadWorld(region.world);
+      const { sourceMap, toSource, toLonLat } = sourceProjection(world.sourceMap);
       await loadShippedWaterways(region.world);
       await loadShippedBiomes(region.world);
       if (!isPrimaryGM()) return;
       if (!routeLoads.has(region.world)) routeLoads.set(region.world, fetch(worldUrl(region.world, world.routes)).then((r) => { if (!r.ok) throw new Error(`Routes: HTTP ${r.status}`); return r.json(); }).catch((e) => { routeLoads.delete(region.world); throw e; }));
       const base = await routeLoads.get(region.world);
+      const worldKey = JSON.stringify([region.world, sourceMap]);
+      if (entry.worldKey !== worldKey) { entry.hud = null; entry.key = null; entry.worldKey = worldKey; }
       if (!entry.hud) {
         const bounds = world.sourceMap?.bounds ?? region.bounds, d = scene.dimensions;
         let rect = d.sceneRect ?? { x: d.sceneX, y: d.sceneY, width: d.sceneWidth, height: d.sceneHeight };
         if (world.sourceMap) { const ratio = aspect(bounds), width = Math.min(rect.width, rect.height / ratio), height = width * ratio; rect = { x: rect.x + (rect.width - width) / 2, y: rect.y + (rect.height - height) / 2, width, height }; }
         const frame = makeFrame(bounds, rect);
-        entry.hud = new TravelHud({ headless: true, onBiome, getScene: () => scene, getLayer: () => ({ frame }),
+        entry.hud = new TravelHud({ headless: true, onBiome, getSourceMap: () => sourceMap, getScene: () => scene, getLayer: () => ({ frame }),
           getBiomes:()=>biomesOf(region.world),getWorld:()=>region.world,discoverHazard:id=>discoverHazard(region.world,id),
           onCampWorkEnded: (scene) => campWorkEnded(scene),
           canSync: () => !(hud.scene===scene&&hud.el),
@@ -605,8 +611,8 @@ async function syncJourney(scene, { force = false } = {}) {
           openEncounter:(id,own,options)=>openCard(own?{kind:'journey',scene:scene.id,partyId:scene.partyId,id}:{kind:'encounter',world:region.world,id},options),
           getPlaces: () => entry.places, getRoutes: () => entry.routes,
           getTerrain: () => terrainFor(region.world, world), getWaterways: () => waterwaysOf(region.world), getSeason: currentSeason,
-          getEncounters: () => Object.entries(encountersOf(region.world)).map(([id, e]) => ({ id, ...e, at: lonLatToSource(e.lon, e.lat), reach: (e.radius ?? 3) / (world.sourceMap?.milesPerPixel ?? 1) })),
-          getTowns: () => entry.places.flatMap((p) => { const local = p.scene ? game.scenes.get(p.scene)?.getFlag(MODULE_ID, "localMap") : null; return local?.placeId === p.id && !p.hidden ? [{ id: `town-${p.id}`, kind: "town", name: p.name, sceneId: p.scene, at: lonLatToSource(p.lon, p.lat), radius: (p.kind === "settlement" ? 1.5 : .75) / (world.sourceMap?.milesPerPixel ?? 1) }] : []; })
+          getEncounters: () => Object.entries(encountersOf(region.world)).map(([id, e]) => ({ id, ...e, at: toSource(e.lon, e.lat), reach: (e.radius ?? 3) / (world.sourceMap?.milesPerPixel ?? 1) })),
+          getTowns: () => entry.places.flatMap((p) => { const local = p.scene ? game.scenes.get(p.scene)?.getFlag(MODULE_ID, "localMap") : null; return local?.placeId === p.id && !p.hidden ? [{ id: `town-${p.id}`, kind: "town", name: p.name, sceneId: p.scene, at: toSource(p.lon, p.lat), radius: (p.kind === "settlement" ? 1.5 : .75) / (world.sourceMap?.milesPerPixel ?? 1) }] : []; })
         });
       }
       entry.hud.unfocused=!!scene.partyId&&focusedScene(scene.realScene)!==scene;
@@ -616,7 +622,7 @@ async function syncJourney(scene, { force = false } = {}) {
       if (key !== entry.key) {
         entry.places = placesFor(region.world, world.places, region.level);
         const routes = applyRouteEdits(base, routeEditsOf(region.world));
-        entry.routes = world.sourceMap ? smoothRoutes(routes, lonLatToSource, sourceToLonLat) : routes;
+        entry.routes = world.sourceMap ? smoothRoutes(routes, toSource, toLonLat) : routes;
         await entry.hud.refresh();
         entry.key = key; entry.projection = projection;
       } else if (entry.projection !== projection) { await entry.hud.refreshProgress(); entry.projection = projection; }
@@ -1319,14 +1325,15 @@ function teardown() {
 
 Hooks.on("canvasReady", () => { drawRegion(); enforceWeatherFilter(regionOf); refreshEncounterBox(); });
 Hooks.once("ready", () => installWeatherFilter(regionOf));
-// Players' changes to the watch order reach the GM's client here.
+Hooks.on("updateUser", (user, changes, _options, userId) => receiveCampMessage(user, changes, userId, (message, sender) => hud.camp.onMessage(message, sender)));
+// Explicit journey sync requests are read-only requests; only the primary GM writes state.
 Hooks.once("ready", () => game.socket.on(`module.${MODULE_ID}`, (m, userId) => {
   if (m?.type === "request-sync") {
     const user = game.users.get(userId ?? m.user), scene = game.scenes.get(m.scene);
     if (isPrimaryGM() && user?.active && scene && regionOf(scene)) syncJourney(scene, { force: true });
     return;
   }
-  hud.camp.onSocket(m, userId);
+  // Camp changes arrive through authenticated User document updates.
 }));
 Hooks.once("ready", () => migrateWaterways().catch((err) => console.warn(`${MODULE_ID} | waterways migration:`, err)));
 // A check the camp asked for, rolled (or raised by a Tenacity spend): the GM's panel follows its chat card.

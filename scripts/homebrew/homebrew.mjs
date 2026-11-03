@@ -3,6 +3,8 @@
 // Universal, lib/basis), and a world with nothing on it yet is saved in Foundry's Data folder
 // (KG Realms Data/World/<id>/) and registered on every load from a world setting.
 // The scene then draws as a realm map. Afterwards: settings, revert to the backup, export as module.
+import { isPrimaryGM } from "../authority.mjs";
+import { runMapBuild } from "./map-build.mjs";
 import { backgroundOf, setBackground } from "../local-maps.mjs";
 import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
@@ -390,6 +392,14 @@ export function sceneMapPicture(root, scene) {
 }
 
 async function regenerateMap(scene, src) {
+  if (!isPrimaryGM()) return ui.notifications.warn("KG Realms: the primary GM must regenerate map tiles.");
+  const id = homebrewOf(scene)?.id;
+  if (!id) return;
+  try { return await runMapBuild(id, () => rebuildMap(scene, src)); }
+  catch (error) { ui.notifications.warn(`KG Realms: ${error.message}`); }
+}
+
+async function rebuildMap(scene, src) {
   const def = homebrewOf(scene);
   if (!def || !src) return;
   if (isVideo(src)) return ui.notifications.warn("KG Realms: a video cannot be made into map tiles. Choose a picture.");
@@ -412,7 +422,7 @@ async function regenerateMap(scene, src) {
       <p>Places, roads, rivers and everything else stay exactly where they are. When it finishes, everyone's game reloads.</p>`
   });
   if (!go) return;
-  let stopped = false, encoder = null, step = "read";
+  let stopped = false, encoder = null, step = "read", published = false;
   const win = new BuildWindow(def.title, () => { stopped = true; win.message = "Stopping..."; win.render(); encoder?.stop(); }, { title: `New map tiles: ${def.title}`, steps: [["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Switch the map to them"]] });
   win.render({ force: true });
   const halt = () => { if (stopped) throw Error("stopped"); };
@@ -422,7 +432,7 @@ async function regenerateMap(scene, src) {
     win.set("read", "done", size(bitmap.width, bitmap.height));
     step = "tiles"; halt();
     // A folder of their own: the map in use is not touched until every new tile is saved.
-    const folder = nextTileFolder(oldPack), tileDir = `${def.root}/${folder}`;
+    const folder = nextTileFolder(oldPack, crypto.randomUUID()), tileDir = `${def.root}/${folder}`;
     await ensureDir(tileDir);
     await checkUploads(tileDir);
     const lods = planTiles(sheet, { folder, detail }), tiles = lods.flatMap((l) => l.tiles);
@@ -432,7 +442,11 @@ async function regenerateMap(scene, src) {
     step = "save"; win.set("save", "now"); halt();
     const clean = lods.map((l) => ({ ...l, tiles: l.tiles.map(({ crop, ...t }) => t) }));
     const pack = packManifest(def.id, sheet, lods, await sha256(new TextEncoder().encode(JSON.stringify(clean))));
+    if (!isPrimaryGM()) throw Error("GM authority changed. Ask the primary GM to rebuild the map.");
+    const latest = await read("terrain-pack.json");
+    if (latest.fingerprint !== oldPack.fingerprint) throw Error("The map changed during this build. Rebuild from the current map.");
     await uploadJson(def.root, "terrain-pack.json", pack);
+    published = true;
     win.set("save", "done");
     win.finished = true; win.message = "Done. Reloading..."; win.render();
     forgetWorld(def.id);
@@ -441,8 +455,10 @@ async function regenerateMap(scene, src) {
     await scene.update({ [`flags.${ID}.homebrewOriginal.background`]: src, [`flags.${ID}.mapVersion`]: Date.now() });
   } catch (err) {
     encoder?.stop();
+    bitmap?.close();
     win.set(step, "failed");
     win.finished = true;
+    if (published) { win.message = `The new tiles were saved, but the scene could not refresh: ${err?.message ?? err}. Reload the game to use the new map.`; win.render(); return; }
     if (stopped) { win.message = "Stopped. The map is unchanged."; win.render(); return; }
     console.error(`${ID} | regenerating map tiles`, err);
     const memory = /memory|allocation|RangeError/i.test(String(err?.message ?? err));
