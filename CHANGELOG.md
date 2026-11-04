@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.93.11: fit the layer rail to the Travel HUD
+
+- Keep the layer rail within the Travel HUD's height when the HUD is collapsed or resized. Its buttons shrink to fit and return to their normal size when space is available.
+- Keep buttons usable on exceptionally short panels with scrolling, and remove the HUD height limit when the rail stands alone. Preserve each viewer's selected filters and fold preference.
+
 ## 0.93.10: skip unnecessary integration prompts
 
 - Skip automatic integration setup when all installed integrations are already enabled. Only offer setup when an installed, disabled integration can be enabled with its available dependencies and compatible versions.

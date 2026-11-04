@@ -104,10 +104,10 @@ export class LayersRail {
     const shown = panel && !panel.hidden && panel.isConnected;
     if (shown) {
       const r = panel.getBoundingClientRect();
-      Object.assign(this.el.style, { left: "auto", right: `${window.innerWidth - r.left - 1}px`, top: `${r.top + 18}px` });
+      Object.assign(this.el.style, { left: "auto", right: `${window.innerWidth - r.left - 1}px`, top: `${r.top + 18}px`, maxHeight: `${Math.max(0, r.height - 18)}px` });
     } else {
       const sidebar = document.getElementById("sidebar")?.getBoundingClientRect();
-      Object.assign(this.el.style, { left: "auto", right: `${(sidebar ? window.innerWidth - sidebar.left : 0) + 8}px`, top: "90px" });
+      Object.assign(this.el.style, { left: "auto", right: `${(sidebar ? window.innerWidth - sidebar.left : 0) + 8}px`, top: "90px", maxHeight: "" });
     }
     this.el.classList.toggle("on-panel", !!shown);
   }

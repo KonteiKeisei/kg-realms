@@ -1874,15 +1874,15 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-ui .kgr-leak-warn { color: var(--kgr-danger, #ff9b8f); font-size: 12.5px; margin: 4px 0; }
 
 /* The layers rail (0.77): a tab on the travel panel's left edge, unfolding into the map's layers. */
-.kgr-layers-rail { position: fixed; z-index: 66; top: 90px; display: flex; flex-direction: column; background: var(--kgr-panel); border: 1px solid var(--kgr-line-2); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 14px var(--kgr-shadow); }
-.kgr-layers-rail.on-panel { border-right: 0; border-radius: 8px 0 0 8px; }
-.kgr-layers-rail button { all: unset; box-sizing: border-box; width: 38px; height: 38px; display: grid; place-items: center; color: var(--kgr-muted-2); cursor: pointer; }
+.kgr-layers-rail { position: fixed; z-index: 66; top: 90px; display: flex; flex-direction: column; box-sizing: border-box; width: 40px; background: var(--kgr-panel); border: 1px solid var(--kgr-line-2); border-radius: 8px; overflow: hidden auto; scrollbar-width: thin; box-shadow: 0 4px 14px var(--kgr-shadow); }
+.kgr-layers-rail.on-panel { width: 39px; border-right: 0; border-radius: 8px 0 0 8px; }
+.kgr-layers-rail button { all: unset; box-sizing: border-box; flex: 0 1 38px; min-height: 24px; width: 100%; height: 38px; display: grid; place-items: center; color: var(--kgr-muted-2); cursor: pointer; }
 .kgr-layers-rail button + button { border-top: 1px solid var(--kgr-line); }
 .kgr-layers-rail button:hover { color: var(--kgr-text); background: var(--kgr-hover); }
 .kgr-layers-rail button.on:not(.fold) { color: var(--kgr-gold-ink); background: var(--kgr-accent); }
 .kgr-layers-rail button.fold.on { color: var(--kgr-accent); }
 .kgr-layers-rail button:focus-visible { outline: 2px solid var(--kgr-accent); outline-offset: -2px; }
-.kgr-layers-rail svg { width: 20px; height: 20px; }
+.kgr-layers-rail svg { width: 20px; height: 20px; max-height: calc(100% - 8px); }
 .kgr-ui .kgr-area-rows { display: grid; gap: 6px; margin: 6px 0; padding: 8px; border: 1px solid var(--kgr-line); border-radius: 6px; }
 .kgr-ui .kgr-seg-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .kgr-ui .kgr-seg-row > button { min-height: 32px !important; padding: 4px 6px !important; }
