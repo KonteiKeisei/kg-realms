@@ -28,8 +28,10 @@ test('the placement tool drags, resizes with Alt-wheel, and saves a fixed-aspect
   const {window,document}=parseHTML('<html><body><canvas></canvas></body></html>');Object.assign(globalThis,{window,document});
   const view=document.querySelector('canvas');view.getBoundingClientRect=()=>({left:0,top:0});globalThis.canvas={app:{view}};
   const layer={frame:{},fromScreen:(x,y)=>p.toLonLat(x,y),setAreaEdit:()=>{}};
-  const pending=placeRegionalRectangle({parentScene:{view:async()=>{}},parentSheet:parent,regionalSheet:child,getLayer:()=>layer});await new Promise(resolve=>setImmediate(resolve));
+  const place={id:'dale',name:'Icewind Dale',area:[[1,2],[3,4],[5,1]]},before=structuredClone(place);
+  const pending=placeRegionalRectangle({parentScene:{view:async()=>{}},parentSheet:parent,regionalSheet:child,placeChoices:[place],placeId:'dale',getLayer:()=>layer});await new Promise(resolve=>setImmediate(resolve));
   const fire=(type,props)=>{const e=new window.Event(type,{bubbles:true,cancelable:true});Object.assign(e,props);view.dispatchEvent(e);};
   fire('wheel',{altKey:true,deltaY:-100});fire('pointerdown',{button:0,clientX:500,clientY:500});fire('pointermove',{clientX:600,clientY:550});fire('pointerup',{});
   document.querySelector('[data-finish]').click();const result=await pending;near(result.placement.center[0],600);near(result.placement.center[1],550);assert.ok(result.placement.width>200);near(result.placement.width/result.placement.height,2);
+  assert.equal(result.placeId,'dale');assert.deepEqual(place,before,'placement stores the place link without changing its outline');
 });

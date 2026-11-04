@@ -38,10 +38,10 @@ const legacyImage = (uuid) => { const doc = uuid ? fromUuidSync(uuid, { strict: 
 /** "" and null both mean: nothing. */
 const val = (v) => (v === "" || v === undefined ? null : v);
 /** The scene button for a linked scene: Enter (a local map) or Go to. */
-function enterFor(sceneId, name) {
+function enterFor(sceneId, name, regional = false) {
   const scene = sceneId ? game.scenes.get(sceneId) : null;
   if (!scene) return null;
-  return { scene: scene.id, label: localMapOf(scene) ? `Enter ${name}` : `Go to ${scene.name}` };
+  return { scene: scene.id, label: regional || localMapOf(scene) ? `Enter ${name}` : `Go to ${scene.name}` };
 }
 
 /**
@@ -72,7 +72,8 @@ export function registerKinds(cards, deps) {
     async get(ref) {
       const p = await realm(ref);
       if (!p) return null;
-      const scene = p.scene ? game.scenes.get(p.scene) : null, map = localMapOf(scene);
+      const sceneId = p.scene || p.regionalMapScene;
+      const scene = sceneId ? game.scenes.get(sceneId) : null, map = localMapOf(scene);
       const local = map?.placeId === p.id;
       // Where it sits in the realms, worked out from their borders and links. Hidden ones only for the GM.
       const line = hierarchyLine(p, hierarchyOf(p, await deps.realmPlaces(ref.world), { showHidden: game.user.isGM }));
@@ -88,7 +89,7 @@ export function registerKinds(cards, deps) {
         name: p.name, type: p.class ?? "Place", icon: iconFor(p), subtitle: [line, known_as].filter(Boolean).join(" · "),
         img: p.img || legacyImage(p.page), known, gmNotes: p.gmNotes ?? "", rumours: p.rumours ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"),
         actor: p.actor ?? null, url: p.url ?? null, locate: true,
-        enter: enterFor(p.scene, p.name),
+        enter: enterFor(sceneId, p.name, !!p.regionalMapScene),
         rows: [["Factions", p.factions ? p.factions.split(",").slice(0, 5).join(", ") : null]],
         gmActions: preset ? [{ act: "setup", label: `Set up the local map (${preset.places} places)`, icon: "fa-map-location-dot" }] : [],
         // Any place can go: one the GM added is deleted, one the module ships is removed from this
@@ -119,7 +120,7 @@ export function registerKinds(cards, deps) {
     },
     remove: (ref) => deps.removePlace(ref.world, ref.id),
     async enter(ref, all) {
-      const p = await realm(ref), scene = p?.scene ? game.scenes.get(p.scene) : null;
+      const p = await realm(ref), sceneId = p?.scene || p?.regionalMapScene, scene = sceneId ? game.scenes.get(sceneId) : null;
       if (!game.user.isGM || !scene) return;
       return all ? scene.activate() : scene.view();
     },

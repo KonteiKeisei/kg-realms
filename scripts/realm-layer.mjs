@@ -207,10 +207,10 @@ export class RealmLayer {
     return canvas.animatePan({ x: at.x, y: at.y, scale: Math.max(canvas.stage.scale.x, want), duration });
   }
 
-  /** The layer the map shows (map-layers.mjs): "places", "realms" or "geo". This viewer's own. */
-  setMapLayer(name) {
-    this.mapLayer = name;
-    this.#whenLoaded((map) => { try { map.setGlobalStateProperty("mapLayer", name); } catch { /* an old style without it */ } });
+  /** The layers this viewer shows (map-layers.mjs): any combination of places, realms and geo. */
+  setMapLayers(names) {
+    this.mapLayers = [...names];
+    this.#whenLoaded((map) => { try { map.setGlobalStateProperty("mapLayers", this.mapLayers); } catch { /* an old style without it */ } });
   }
 
   setPlaces(geojson) {
@@ -235,7 +235,7 @@ export class RealmLayer {
     this.#whenLoaded((map) => {
       map.setGlobalStateProperty("editing", this.editing);
       map.setGlobalStateProperty("gm", !!globalThis.game?.user?.isGM);
-      if (this.mapLayer) map.setGlobalStateProperty("mapLayer", this.mapLayer);
+      if (this.mapLayers) map.setGlobalStateProperty("mapLayers", this.mapLayers);
       if (this.places) map.getSource("places")?.setData(this.places);
     });
     if (this.areas) this.setAreas(this.areas);
@@ -265,7 +265,7 @@ export class RealmLayer {
     if(this.riverNames)this.setRiverNames(this.riverNames);
     if(this.biomes)this.setBiomes(...this.biomes);
     if(this.areas)this.setAreas(this.areas);
-    if(this.mapLayer)this.setMapLayer(this.mapLayer);
+    if(this.mapLayers)this.setMapLayers(this.mapLayers);
   }
 
   #mountTerrain() {
@@ -402,7 +402,7 @@ export class RealmLayer {
     });
     if (this.places) style.sources.places.data = this.places;
     if (this.areas && style.sources.areas) { style.sources.areas.data = this.areas.areas; style.sources['area-labels'].data = this.areas.labels; }
-    if (this.mapLayer && style.state?.mapLayer) style.state.mapLayer.default = this.mapLayer;
+    if (this.mapLayers && style.state?.mapLayers) style.state.mapLayers.default = this.mapLayers;
     // Hide the raster in the initial style, before MapLibre can request WebP tiles.
     if(o.terrain){const ground=style.layers.find(l=>l.id==='tapestry');if(ground)ground.layout={...ground.layout,visibility:'none'};}
     if (part === "ground") style.layers = style.layers.filter((l) => !onTop(l));
@@ -514,7 +514,7 @@ export class RealmLayer {
     this.ready = true;
     if (this.places) this.setPlaces(this.places);
     if (this.areas) this.setAreas(this.areas);
-    if (this.mapLayer) this.setMapLayer(this.mapLayer);
+    if (this.mapLayers) this.setMapLayers(this.mapLayers);
     this.setEditing(this.editing);
     this.#startPulse();
     this.update();

@@ -5,7 +5,7 @@
 
 import { MAP_LAYERS, LAYER_NAMES } from "./map-layers.mjs";
 
-const KEY = "kgr-map-layer", OPEN = "kgr-map-layers-open";
+const KEY = "kgr-map-layers", LEGACY_KEY = "kgr-map-layer", OPEN = "kgr-map-layers-open";
 const ICONS = {
   fold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="m2 13 10 5 10-5"/><path d="m2 18 10 5 10-5" opacity=".5"/></svg>',
   places: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>',
@@ -20,11 +20,21 @@ const TIPS = {
 const read = (k, fallback) => { try { return localStorage.getItem(k) ?? fallback; } catch { return fallback; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage off */ } };
 
-/** This viewer's chosen layer (Places until they choose). */
-export function chosenLayer() { const v = read(KEY, "places"); return MAP_LAYERS.includes(v) ? v : "places"; }
+/** This viewer's visible layers. Keep their old single-layer choice until they change it. */
+export function chosenLayers() {
+  const stored = read(KEY, null);
+  if (stored !== null) {
+    try {
+      const values = JSON.parse(stored);
+      if (Array.isArray(values) && values.every(k => MAP_LAYERS.includes(k))) return MAP_LAYERS.filter(k => values.includes(k));
+    } catch { /* fall back to the previous choice */ }
+  }
+  const old = read(LEGACY_KEY, "places");
+  return [MAP_LAYERS.includes(old) ? old : "places"];
+}
 
 export class LayersRail {
-  /** getPanel(): the travel panel's element (or null); onChange(layer). */
+  /** getPanel(): the travel panel's element (or null); onChange(layers). */
   constructor({ getPanel, onChange }) { Object.assign(this, { getPanel, onChange }); this.el = null; }
 
   get open() { return read(OPEN, "0") === "1"; }
@@ -53,28 +63,33 @@ export class LayersRail {
 
   render() {
     if (!this.el) return;
-    const on = chosenLayer(), open = this.open;
+    const on = chosenLayers(), open = this.open;
     this.el.classList.toggle("open", open);
-    this.el.innerHTML = `<button type="button" data-fold class="fold ${open ? "" : "on"}" aria-expanded="${open}" aria-label="${open ? "Fold the layers" : "Map layers"}" data-tooltip="${open ? "Fold the layers" : `Map layers: ${LAYER_NAMES[on]}`}" data-tooltip-direction="LEFT">${ICONS.fold}</button>`
-      + (open ? MAP_LAYERS.map((k) => `<button type="button" data-layer="${k}" class="${k === on ? "on" : ""}" aria-pressed="${k === on}" aria-label="${LAYER_NAMES[k]}" data-tooltip="${TIPS[k]}" data-tooltip-direction="LEFT">${ICONS[k]}</button>`).join("") : "");
+    this.el.innerHTML = `<button type="button" data-fold class="fold ${open ? "" : "on"}" aria-expanded="${open}" aria-label="${open ? "Fold the layers" : "Map layers"}" data-tooltip="${open ? "Fold the layers" : `Map layers: ${on.map(k => LAYER_NAMES[k]).join(", ") || "None"}`}" data-tooltip-direction="LEFT">${ICONS.fold}</button>`
+      + (open ? MAP_LAYERS.map((k) => `<button type="button" data-layer="${k}" class="${on.includes(k) ? "on" : ""}" aria-pressed="${on.includes(k)}" aria-label="${LAYER_NAMES[k]}" data-tooltip="${TIPS[k]} Click to ${on.includes(k) ? "hide" : "show"}. Other layers stay as chosen." data-tooltip-direction="LEFT">${ICONS[k]}</button>`).join("") : "");
   }
 
-  /** Show a layer (the map editor selected a place on it). */
+  /** Ensure a layer is visible without hiding others (the editor selected a place on it). */
   setLayer(k) {
-    if (!MAP_LAYERS.includes(k) || k === chosenLayer()) return;
-    write(KEY, k);
+    const on = chosenLayers();
+    if (!MAP_LAYERS.includes(k) || on.includes(k)) return;
+    this.#save([...on, k]);
+  }
+
+  #save(values) {
+    const on = MAP_LAYERS.filter(k => values.includes(k));
+    write(KEY, JSON.stringify(on));
     this.render();
-    this.onChange?.(k);
+    this.onChange?.(on);
   }
 
   #click(b) {
     if (!b) return;
     if (b.dataset.fold !== undefined) { write(OPEN, this.open ? "0" : "1"); return this.render(); }
     const k = b.dataset.layer;
-    if (!MAP_LAYERS.includes(k) || k === chosenLayer()) return;
-    write(KEY, k);
-    this.render();
-    this.onChange?.(k);
+    if (!MAP_LAYERS.includes(k)) return;
+    const on = chosenLayers();
+    this.#save(on.includes(k) ? on.filter(v => v !== k) : [...on, k]);
   }
 
   /** Stand on the travel panel's left edge, a little below its top; else at the screen's right. */

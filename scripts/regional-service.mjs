@@ -8,6 +8,8 @@ import { applyEdits } from './places.mjs';
 import { focusedScene } from './party-groups.mjs';
 import { onCanvas } from './canvas-input.mjs';
 import { isPrimaryGM } from './authority.mjs';
+import { regionalPlace } from './regional-place.mjs';
+import { placeLayer } from './map-layers.mjs';
 const ID='kg-realms', KEY='regionalMaps';
 const clone=x=>structuredClone(x), esc=x=>foundry.utils.escapeHTML(String(x??''));
 export class RegionalMaps {
@@ -34,6 +36,10 @@ export class RegionalMaps {
   entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
   followRoutes(world,routes){return this.links[world]?followCrossingRoads(routes,this.entrances(world)):routes;}
   places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes);const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
+    for(const link of Object.values(this.links).filter(l=>l.parent===id)){
+      const place=regionalPlace(link,result),scene=game.scenes?.get(link.scene);
+      if(place&&!place.scene&&scene)place.regionalMapScene=scene.id;
+    }
     const relevant=this.links[id]?[this.links[id]]:Object.values(this.links).filter(l=>l.parent===id);
     for(const link of relevant)for(const entry of this.entrances(link.world)){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:'Linked realm/regional road crossing. Draw regional roads to this marker. Drag this marker on the regional map to align its trail. The realm-side crossing remains fixed.'});}return result;}
   destinations(id){
@@ -162,7 +168,9 @@ export class RegionalMaps {
     if(!choice)return;if(choice==='advanced')return this.configureAdvanced(scene);
     const parentScene=game.scenes.get(choice),parent=parentScene.getFlag(ID,'world'),revision=JSON.stringify(this.links);
     await this.prepare(parent);await this.load(world);
-    let placement;try{placement=await placeRegionalRectangle({parentScene,parentSheet:this.indexes[parent].sourceMap,regionalSheet:this.indexes[world].sourceMap,existing:existing?.parent===parent?existing:null,getLayer:this.getLayer,onStart:this.onPlacementStart});}finally{this.onPlacementEnd?.();}
+    const parentPlaces=this.places(parent),sameParent=existing?.parent===parent?existing:null;
+    const place=regionalPlace({...sameParent,title:scene.name},parentPlaces);
+    let placement;try{placement=await placeRegionalRectangle({parentScene,parentSheet:this.indexes[parent].sourceMap,regionalSheet:this.indexes[world].sourceMap,existing:sameParent,placeChoices:parentPlaces.filter(p=>placeLayer(p)==='realms'),placeId:place?.id??null,getLayer:this.getLayer,onStart:this.onPlacementStart});}finally{this.onPlacementEnd?.();}
     if(!placement)return;
     const link={...existing,world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,...placement,publish:existing?.publish??[]};
     link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,this.indexes[world].sourceMap);
@@ -175,26 +183,21 @@ export class RegionalMaps {
   async configureAdvanced(scene){
     if(!isPrimaryGM())throw Error('The primary GM configures regional maps.');
     const world=scene.getFlag(ID,'world'),existing=this.links[world];
-    if(!existing&&(scene.getFlag(ID,'journey')?.trip||Object.values(scene.getFlag(ID,'partyJourneys')??{}).some(j=>j.trip)))throw Error("Finish or clear this map's independent journeys before linking it to a parent.");
-    const parents=Array.from(game.scenes).filter(s=>s.id!==scene.id&&s.getFlag(ID,'world')&&!this.links[s.getFlag(ID,'world')]&&s.getFlag(ID,'world')!==world);
-    if(!parents.length)throw Error('Create a parent realm scene first. Use Make realm world on the detailed picture, then link it here.');
-    const choice=await foundry.applications.api.DialogV2.wait({window:{title:'Regional map: parent realm'},rejectClose:false,content:`<p>Link this detailed map beneath a realm. Its own width in miles controls travel inside the linked outline.</p><div class="form-group"><label>Parent realm scene</label><select name="parent">${parents.map(s=>`<option value="${s.id}" ${existing?.parentScene===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>`,buttons:[{action:'next',label:'Choose coverage and alignment',callback:(_e,b)=>b.form.elements.parent.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
-    if(!choice||choice==='cancel')return;const parentScene=game.scenes.get(choice),parent=parentScene.getFlag(ID,'world');
-    if(Object.values(this.links).some(l=>l.parent===world))throw Error('A map with regional children cannot itself become a region.');
+    if(!existing?.footprint)throw Error('Place and save the regional picture rectangle before refining its alignment. Territory borders are drawn separately in Map editor > Places > Draw region border.');
+    const parent=existing.parent,parentScene=game.scenes.get(existing.parentScene);
+    if(!parentScene)throw Error('The parent realm scene is missing. Repair the rectangular placement first.');
     await this.prepare(parent);await this.load(world);
-    const areas=this.rawPlaces(parent,this.indexes[parent].places).filter(p=>p.area?.length>=3&&p.areaClosed!==false);
-    if(existing?.footprint&&!areas.some(a=>a.id===existing.outline))areas.unshift({id:existing.outline??"regional-rectangle",name:existing.title,area:existing.footprint});
-    if(!areas.length)throw Error('On the parent map, open Map editor > Places > Draw regional coverage. Draw and close its outline, then reopen this dialog.');
-    const selected=areas.find(p=>p.id===existing?.outline)??areas[0],p=sourceProjection(this.indexes[parent].sourceMap),child=this.indexes[world].sourceMap;
-    const defaults=area=>{const pts=area.area.map(q=>p.toSource(...q)),xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]);return [{parent:[Math.min(...xs),Math.min(...ys)],region:[0,0]},{parent:[Math.max(...xs),Math.min(...ys)],region:[child.width,0]},{parent:[Math.min(...xs),Math.max(...ys)],region:[0,child.height]}];};
-    const anchors=existing?.parent===parent?existing.anchors:defaults(selected),raw=this.rawPlaces(world,this.indexes[world].places);
+    const parentPlaces=this.places(parent),placeChoices=parentPlaces.filter(p=>placeLayer(p)==='realms'),selected=regionalPlace(existing,parentPlaces);
+    const p=sourceProjection(this.indexes[parent].sourceMap),child=this.indexes[world].sourceMap;
+    const defaults=()=>{const pts=existing.footprint.map(q=>p.toSource(...q)),xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]);return [{parent:[Math.min(...xs),Math.min(...ys)],region:[0,0]},{parent:[Math.max(...xs),Math.min(...ys)],region:[child.width,0]},{parent:[Math.min(...xs),Math.max(...ys)],region:[0,child.height]}];};
+    const anchors=existing.anchors,raw=this.rawPlaces(world,this.indexes[world].places);
     let draft;const revision=JSON.stringify(this.links);
     do{
       const result=await foundry.applications.api.DialogV2.wait({window:{title:`${scene.name}: regional map`},position:{width:660},rejectClose:false,
-        content:`<p>Regional map width: <b>${Math.round(child.width*child.milesPerPixel)} miles</b>. Change this in Realm world settings. The outline does not have to fit the picture exactly. Beyond the picture, regional scale still applies and realm roads and terrain fill the gaps.</p><div class="form-group"><label>Parent outline</label><select name="outline">${areas.map(a=>`<option value="${a.id}" ${a.id===(draft?.outline??selected.id)?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><p>Fit the picture to the outline to start. For maps with different shapes, match three non-collinear landmarks using image pixel coordinates. Pick on each map, switching scenes as needed.</p><button type="button" data-fit>Fit picture to outline</button><table><thead><tr><th>Landmark</th><th>Parent X / Y</th><th>Regional X / Y</th></tr></thead><tbody>${anchors.map((a,i)=>`<tr><td>${i+1}</td>${['parent','region'].map(side=>`<td><input aria-label="Landmark ${i+1} ${side} X" name="${side}-${i}-0" type="number" step="any" value="${draft?.[`${side}-${i}-0`]??a[side][0]}" style="width:90px"><input aria-label="Landmark ${i+1} ${side} Y" name="${side}-${i}-1" type="number" step="any" value="${draft?.[`${side}-${i}-1`]??a[side][1]}" style="width:90px"><button type="button" data-pick="${side}" data-i="${i}">Pick</button></td>`).join('')}</tr>`).join('')}</tbody></table><p data-pick-status role="status"></p><details><summary>Regional places to show approximately on the realm</summary>${raw.map(q=>`<label style="display:block"><input type="checkbox" name="publish-${esc(q.id)}" ${existing?.publish?.includes(q.id)?'checked':''}> ${esc(q.name)}</label>`).join('')||'<p>No regional-only places yet. Add them with the map editor and return here.</p>'}</details><p>Existing parent POIs inside the outline remain linked. Adjust their regional markers after saving. Journeys remain stored on ${esc(parentScene.name)}.</p>`,
+        content:`<p>Regional map width: <b>${Math.round(child.width*child.milesPerPixel)} miles</b>. Change this in Realm world settings. This refines the picture alignment within its saved coverage; the domain or territory border is a separate shape.</p><div class="form-group"><label>Region place</label><select name="placeId"><option value="">No linked place</option>${placeChoices.map(a=>`<option value="${esc(a.id)}" ${a.id===(draft?.placeId??selected?.id)?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><p>Match three non-collinear landmarks using image pixel coordinates. Pick on each map, switching scenes as needed. To resize or move coverage, return to Place rectangle on realm.</p><button type="button" data-fit>Reset alignment to coverage bounds</button><table><thead><tr><th>Landmark</th><th>Parent X / Y</th><th>Regional X / Y</th></tr></thead><tbody>${anchors.map((a,i)=>`<tr><td>${i+1}</td>${['parent','region'].map(side=>`<td><input aria-label="Landmark ${i+1} ${side} X" name="${side}-${i}-0" type="number" step="any" value="${draft?.[`${side}-${i}-0`]??a[side][0]}" style="width:90px"><input aria-label="Landmark ${i+1} ${side} Y" name="${side}-${i}-1" type="number" step="any" value="${draft?.[`${side}-${i}-1`]??a[side][1]}" style="width:90px"><button type="button" data-pick="${side}" data-i="${i}">Pick</button></td>`).join('')}</tr>`).join('')}</tbody></table><p data-pick-status role="status"></p><details><summary>Regional places to show approximately on the realm</summary>${raw.map(q=>`<label style="display:block"><input type="checkbox" name="publish-${esc(q.id)}" ${existing?.publish?.includes(q.id)?'checked':''}> ${esc(q.name)}</label>`).join('')||'<p>No regional-only places yet. Add them with the map editor and return here.</p>'}</details><p>Existing parent POIs inside the outline remain linked. Adjust their regional markers after saving. Journeys remain stored on ${esc(parentScene.name)}.</p>`,
         render:(_e,dialog)=>{
           const el=dialog.element,form=el.querySelector('form');
-          el.querySelector('[data-fit]').onclick=()=>{const a=defaults(areas.find(a=>a.id===form.elements.outline.value));a.forEach((v,i)=>['parent','region'].forEach(side=>v[side].forEach((n,j)=>form.elements[`${side}-${i}-${j}`].value=n)));};
+          el.querySelector('[data-fit]').onclick=()=>{const a=defaults();a.forEach((v,i)=>['parent','region'].forEach(side=>v[side].forEach((n,j)=>form.elements[`${side}-${i}-${j}`].value=n)));};
           el.querySelectorAll('[data-pick]').forEach(button=>button.onclick=()=>{const side=button.dataset.pick,id=side==='parent'?parent:world;
             if(canvas.scene?.getFlag(ID,'world')!==id)return ui.notifications.warn(`View the ${side==='parent'?parentScene.name:scene.name} scene before picking.`);
             const status=el.querySelector('[data-pick-status]');status.textContent='Click the landmark on the map. Escape cancels.';
@@ -205,12 +208,13 @@ export class RegionalMaps {
         buttons:[{action:'save',label:'Save regional map',callback:(_e,b)=>new foundry.applications.ux.FormDataExtended(b.form).object},{action:'cancel',label:'Cancel',callback:()=>null}]});
       if(!result||typeof result!=='object')return;draft=result;
       try{
-        const footprint=areas.find(a=>a.id===result.outline).area,link={world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,outline:result.outline,footprint:clone(footprint),anchors:[0,1,2].map(i=>Object.fromEntries(['parent','region'].map(side=>[side,[0,1].map(j=>Number(result[`${side}-${i}-${j}`]))]))),publish:raw.filter(q=>result[`publish-${q.id}`]).map(q=>q.id)};
+        const link={...existing,world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,placeId:result.placeId||null,footprint:clone(existing.footprint),anchors:[0,1,2].map(i=>Object.fromEntries(['parent','region'].map(side=>[side,[0,1].map(j=>Number(result[`${side}-${i}-${j}`]))]))),publish:raw.filter(q=>result[`publish-${q.id}`]).map(q=>q.id)};
+        link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,child);
         const all=clone(this.links);all[world]=link;
         const preview=compileRegions({...this.indexes[parent],id:parent},Object.values(all).filter(l=>l.parent===parent).map(l=>({link:l,data:this.indexes[l.world],terrainAt:()=>({})})));
         if(!isPrimaryGM())throw Error('The primary GM changed. Reopen the dialog.');
         if(JSON.stringify(this.links)!==revision)throw Error('Regional links changed while this dialog was open. Cancel and reopen it.');
-        await game.settings.set(ID,KEY,all);ui.notifications.info(preview.regions.find(r=>r.world===world)?.uncovered?'Regional map linked. Some coverage extends beyond the picture: regional scale still applies, with realm roads and terrain filling those areas.':'Regional map linked. Review inherited POI positions and trace the regional roads.');return;
+        await game.settings.set(ID,KEY,all);this.entryPoints[world]=link.entrances;ui.notifications.info(preview.regions.find(r=>r.world===world)?.uncovered?'Regional map linked. Some coverage extends beyond the picture: regional scale still applies, with realm roads and terrain filling those areas.':'Regional map linked. Review inherited POI positions and trace the regional roads.');return;
       }catch(error){ui.notifications.error(error.message);}
     }while(true);
   }

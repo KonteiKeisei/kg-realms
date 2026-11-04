@@ -62,7 +62,7 @@ export function regionalJourneyParts(path,wet,link,parentSheet,regionalSheet){
 }
 
 /** A local placement tool. It changes no settings until its Finish button is used. */
-export async function placeRegionalRectangle({parentScene,parentSheet,regionalSheet,existing,getLayer,onStart}){
+export async function placeRegionalRectangle({parentScene,parentSheet,regionalSheet,existing,placeChoices=[],placeId=null,getLayer,onStart}){
   await parentScene.view();onStart?.();
   let layer=getLayer();
   const expected=parentScene.getFlag?.('kg-realms','world');
@@ -74,9 +74,15 @@ export async function placeRegionalRectangle({parentScene,parentSheet,regionalSh
   if(!old&&canvas.app?.renderer?.screen){const screen=canvas.app.renderer.screen,a=p.toSource(...layer.fromScreen(screen.width*.25,screen.height/2)),b=p.toSource(...layer.fromScreen(screen.width*.75,screen.height/2)),c=p.toSource(...layer.fromScreen(screen.width/2,screen.height/2));center.splice(0,2,...c);width=Math.abs(b[0]-a[0]);}
   const el=document.createElement('div');el.className='kgr-ui kgr-panel';el.style.cssText='position:fixed;top:100px;left:80px;width:370px;z-index:110;';
   el.innerHTML='<div class="body" style="padding:14px"><b>Place regional map on the realm</b><p>Drag inside the rectangle to move it. Alt + mouse wheel makes it larger or smaller. The picture aspect ratio stays fixed; regional miles do not change.</p><button type="button" data-finish>Use this rectangle</button><button type="button" data-cancel>Cancel</button></div>';document.body.append(el);
+  const label=document.createElement('label');label.textContent='Region place';
+  const select=document.createElement('select');select.name='regional-place';
+  for(const p of [{id:'',name:'No linked place'},...placeChoices]){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;if(p.id===(placeId??''))option.setAttribute('selected','');select.append(option);}
+  label.append(select);
+  const hint=document.createElement('p');hint.textContent="This place's card opens the regional scene. Draw its territory outline separately in Places; resizing this rectangle keeps that outline unchanged.";
+  const finish=el.querySelector('[data-finish]');finish.before(label,hint);
   return new Promise(resolve=>{
     let off;
-    const result=()=>rectangleLink(center,width,parentSheet,regionalSheet),render=()=>layer.setAreaEdit(result().footprint,true);
+    const result=()=>({...rectangleLink(center,width,parentSheet,regionalSheet),placeId:select.value||null}),render=()=>layer.setAreaEdit(result().footprint,true);
     const point=e=>{const rect=canvas.app.view.getBoundingClientRect(),ll=layer.fromScreen(e.clientX-rect.left,e.clientY-rect.top);return p.toSource(...ll);};
     const stop=e=>{e.preventDefault();e.stopImmediatePropagation();};
     const cleanup=value=>{off?.();window.removeEventListener('keydown',key,true);el.remove();layer.setAreaEdit(null);resolve(value);};

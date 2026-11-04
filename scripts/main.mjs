@@ -47,7 +47,7 @@ import { LocalMapRenderer } from "./local-map-renderer.mjs";
 import { mapSnowEnabled, SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
 import { areasGeoJSON, outlinedIds, placeLayer, withFollowedBorders, placeFromShore, placeFromZone, inlandWaters, canBeBiome } from "./map-layers.mjs";
 import { borderChoices, followOf, waterwaysWithBorders, zonesWithBorders } from "./borders.mjs";
-import { LayersRail, chosenLayer } from "./ui-layers.mjs";
+import { LayersRail, chosenLayers } from "./ui-layers.mjs";
 import { shoreWater } from "./waterways.mjs";
 const snow = new SnowCover();
 const nightLights = new NightLights();
@@ -1259,7 +1259,7 @@ async function drawRegion() {
   current.places = placesFor(region.world, world.places, region.level);
   layer.places = placesGeoJSON(current.places, outlinedIds(current.places, world.regions));
   layer.areas = areasGeoJSON(current.places, world.regions);
-  layer.mapLayer = chosenLayer();
+  layer.mapLayers = chosenLayers();
   if (world.routes) {
     current.routesBase = await fetch(worldUrl(region.world, world.routes)).then((r) => r.json()).catch(() => null);
     if (current?.scene !== scene) return;
@@ -1346,7 +1346,7 @@ async function refreshSnowGrid() {
 }
 
 // The layers rail on the travel panel's edge (ui-layers.mjs): which layer the map shows, this viewer's own.
-const layersRail = new LayersRail({ getPanel: () => hud.el, onChange: (name) => layer.setMapLayer(name) });
+const layersRail = new LayersRail({ getPanel: () => hud.el, onChange: (names) => layer.setMapLayers(names) });
 
 function teardown() {
   travelBounce.stop();

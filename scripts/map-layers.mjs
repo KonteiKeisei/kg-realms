@@ -1,6 +1,6 @@
 // The realm map's layers (0.77): Places (single points: settlements, sites, peaks), Realms (who holds
 // the land: kingdoms, regions) and Geography (what the land and water are: forests, ranges, seas,
-// lakes). The map shows one layer at a time; the journey, roads and rivers show on all of them.
+// lakes). Viewers can show several layers at once; the journey, roads and rivers show on all of them.
 // A place's type gives its layer and shape (a point, an area, or a line); either can be set on the
 // place itself. An area is drawn as a border (closed) or a line with two ends (a strait, a range's
 // spine). Pure: no Foundry.

@@ -6,16 +6,26 @@ A regional map is a detailed travel map beneath a realm and above settlements. I
 
 1. Put the detailed picture in a Foundry scene as its Background Image. Right-click that scene and choose **Make regional map**. Enter the picture's full width in miles, then click **Build regional map**.
 2. Choose the parent realm and click **Place rectangle on realm**. For an already built map, right-click its scene and choose **Regional map settings**. Its tiles do not need rebuilding.
-3. On the parent realm, **drag inside the rectangle** to move it. Hold **Alt and scroll the mouse wheel** to resize it. The rectangle keeps the picture's aspect ratio; resizing never changes regional miles.
+3. On the parent realm, **drag inside the rectangle** to move it. Hold **Alt and scroll the mouse wheel** to resize it. The rectangle keeps the picture's aspect ratio; resizing never changes regional miles. Choose **Region place** in the placement panel to connect an existing domain or territory's card to this scene.
 4. Click **Use this rectangle** to save. **Cancel** or **Escape** leaves the existing link unchanged. Four-corner alignment is automatic.
 5. Open the detailed scene, then **Map editor > Roads**. Every parent road or trail crossing the rectangle has a named crossing marker on both maps, such as **Trail crossing 1** and **Trail crossing 2**. Draw regional roads from these markers to POIs and other crossings. The road editor snaps to them.
 6. Review inherited POIs and move their regional markers onto the correct locations. Moving them does not move their realm markers. Journals, settlement links and discovery metadata remain shared.
 
-No territory outline is required first. Older polygon links remain supported; Regional map settings can replace them with a rectangular placement. Regional scenes open on the Places layer so the crossing markers are visible. Reopen or refresh a map after editing parent roads to refresh its crossing markers. Crossing markers can be dragged on the regional map to align them with the artwork. Their local positions are saved; realm-side crossings stay fixed. Regional road endpoints attached to crossing IDs follow those adjustments, and the mapping transfer adds no travel distance.
+No territory outline is required first. Older polygon links remain supported; Regional map settings can replace them with a rectangular placement. Regional scenes enable the Places layer so the crossing markers are visible, keeping other enabled filters. Reopen or refresh a map after editing parent roads to refresh its crossing markers. Crossing markers can be dragged on the regional map to align them with the artwork. Their local positions are saved; realm-side crossings stay fixed. Regional road endpoints attached to crossing IDs follow those adjustments, and the mapping transfer adds no travel distance.
+
+## Territory borders and scene entry
+
+The scene rectangle controls picture placement, travel coverage and map alignment. A domain or territory has its own independent border, which can have any shape. Resizing or aligning the scene never changes that border; redrawing the territory never changes scene coverage.
+
+To draw a territory, open **Map editor > Places > Draw region border**, choose the existing place or create one, then click the map to add corners. Click the first corner or **Finish closed border** to close it. To reshape an existing border, select the place and drag its corners, or use **Redraw border**. This drawing tool changes the territory marker only.
+
+The linked place's full card and hover preview offer **Enter** (activate the regional scene for everyone) and **View** (only the GM's view). Existing outline links are recognised automatically. Older rectangular links also recognise a uniquely matching region name, such as Icewind Dale and Map of the Icewind Dale. If the names differ, choose the place explicitly in **Regional map settings > Place rectangle on realm > Region place**. Manually selected place scenes retain priority. Scene controls remain GM-only.
+
+The Places, Realms and Geography filters toggle independently, so any combination can be visible. The combination is remembered in this browser. In the editor's place list, groups start collapsed each time the editor opens. Search expands matching groups temporarily; clearing the search collapses them again.
 
 ## Refine placement
 
-Choose **Advanced three-landmark alignment** in Regional map settings if the corner registration needs refinement. Match three non-collinear landmarks using each map's image pixel coordinates. **Pick** fills a coordinate pair from a click on the relevant map. Existing rectangular coverage is available for refinement without drawing a separate territory.
+After saving placement, choose **Advanced three-landmark alignment** in Regional map settings if the corner registration needs refinement. Match three non-collinear landmarks using each map's image pixel coordinates. **Pick** fills a coordinate pair from a click on the relevant map. Advanced alignment preserves the saved coverage and never copies a territory border into the scene rectangle. Return to **Place rectangle on realm** to move or resize coverage.
 
 Exact outline-to-picture containment is not required. For older polygon coverage extending beyond the picture, regional scale still applies, with realm roads and terrain filling unmatched areas.
 

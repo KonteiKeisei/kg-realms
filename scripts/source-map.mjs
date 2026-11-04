@@ -42,9 +42,9 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
  const ls=(v)=>typeof v==='number'?v*labelScale:v.map((x,i)=>i>=4&&i%2===0?x*labelScale:x);
  const empty={type:'FeatureCollection',features:[]},b=sourceMap.bounds;
  // Added places draw like every other place. Hidden places draw for the GM only, faded (global state gm).
- // The map's layer (map-layers.mjs, 0.77): a place shows on its own layer only; an area with an outline
+ // The map's layers (map-layers.mjs): a place shows when its layer is enabled; an area with an outline
  // shows its name from the areas source instead.
- const onLayer=['==',['get','layer'],['global-state','mapLayer']];
+ const onLayer=['in',['get','layer'],['global-state','mapLayers']];
  const seen=['any',['!', ['get','hidden']],['global-state','gm']];
  const visible=['all',seen,onLayer,['!',['get','outlined']]];
  const faded=['case',['get','hidden'],0.4,1];
@@ -74,7 +74,7 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   // Close in, every marker shows; names move to a free side, and hide only where there is no room.
   ...(fixed?{'text-variable-anchor':['left','right','top','bottom'],'text-radial-offset':0.9,'text-justify':'auto'}:{}),'symbol-sort-key':priority},
   paint:{'text-color':'#ffffff','text-halo-color':'#0b0b0b','text-halo-width':1.8,'text-halo-blur':0.3,'icon-opacity':faded,'text-opacity':faded}});
- return {version:8,glyphs,state:{editing:{default:false},gm:{default:false},travelRoutes:{default:[]},phase:{default:0},settledZoom:{default:0},mapLayer:{default:'places'}},sources:{
+ return {version:8,glyphs,state:{editing:{default:false},gm:{default:false},travelRoutes:{default:[]},phase:{default:0},settledZoom:{default:0},mapLayers:{default:['places']}},sources:{
   tapestry:{type:'raster',tiles:[tiles.tapestry],tileSize:sourceMap.tileSize,minzoom:0,maxzoom:sourceMap.detailZoom??sourceMap.nativeZoom,bounds:[b.west,b.south,b.east,b.north],attribution},
   ...(tiles.routes?{routes:{type:'geojson',data:tiles.routes}}:{}),
   places:{type:'geojson',data:empty},flash:{type:'geojson',data:empty},

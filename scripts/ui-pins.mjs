@@ -21,7 +21,6 @@ const KEY = [["faerun-city", "City"], ["faerun-town", "Town"], ["faerun-village"
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 // The list of places (0.75): a section for each kind, a group for each class inside it.
 const KINDS = [["settlement", "Settlements"], ["site", "Sites"], ["domain", "Domains"], ["territory", "Territories"], ["natural", "Natural features"]];
-const OPEN_KEY = "kgr-places-open";
 
 export class PinEditor {
   /** getLayer, getPlaces, getPlace(id), saveEdits(fn) (place edits: { edits, added }), preview(places). */
@@ -31,6 +30,7 @@ export class PinEditor {
     this.selected = null;
     this.press = null;     // { id, start: [x, y], moved }
     this.panel = null;
+    this.openGroups = new Set();
     this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), dblclick: (e) => { if (this.drawing) { this.#stop(e); this.#finishBorder(!!this.drawing.regional); } } };
     this.undoStack = [];
     this.lastClick = null;
@@ -53,8 +53,8 @@ export class PinEditor {
   /** What the editing bar says on this tab. */
   status() {
     const p = this.selected ? this.getPlace(this.selected) : null;
-    if (this.placing) return { hint: this.regionalName ? "Click inside the region to place its label, then draw its coverage" : "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
-    if (this.drawing?.regional) return {hint:`Draw regional coverage: click at least three corners, then click the first corner or Finish closed coverage`,esc:"cancels drawing",tip:"Click to add a coverage corner",crosshair:true};
+    if (this.placing) return { hint: this.regionalName ? "Click inside the region to place its label, then draw its border" : "Click the map where the new place goes", esc: "cancels adding", tip: "Click to put the new place here", crosshair: true };
+    if (this.drawing?.regional) return {hint:`Draw region border: click at least three corners, then click the first corner or Finish closed border`,esc:"cancels drawing",tip:"Click to add a border corner",crosshair:true};
     if (this.drawing) return { hint: `Drawing ${p?.name ?? "the"} border · click to add corners · click the first corner to close it · Enter or double-click leaves the ends apart`, esc: "cancels drawing", tip: this.drawing.pts.length > 2 ? "Click the first corner to close the border" : "Click to add a corner", crosshair: true };
     if (p && this.#editable(p)) return { hint: `${p.name} · drag a corner to move it · click an edge to add one · right-click a corner to remove it`, esc: "lets go of it", tip: "" };
     if (p) return { hint: `${p.name} · drag to move it · double-click for its card`, esc: "lets go of it", tip: "" };
@@ -82,6 +82,7 @@ export class PinEditor {
   async open() {
     if (this.active || !game.user.isGM || !this.getLayer()?.frame) return;
     this.active = true;
+    this.openGroups.clear(); this.filter = "";
     this.catalog = await markerCatalog(foundry.utils.getRoute("modules/kg-realms") + "/");
     this.offCanvas = onCanvas(this.handlers);
     window.addEventListener("keydown", this.onKey, { capture: true });
@@ -318,9 +319,9 @@ export class PinEditor {
 
   async drawRegionalCoverage() {
     const choices=this.getPlaces().filter(p=>['territory','domain'].includes(p.kind)||['Region','Macroregion'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
-    const result=await foundry.applications.api.DialogV2.wait({window:{title:"Draw regional coverage"},position:{width:480},rejectClose:false,
-      content:`<p>Use an existing region to keep its POI, or create a named coverage area. You will draw its outline directly on this realm map.</p><div class="form-group"><label>Region</label><select name="existing"><option value="">Create a new region</option>${choices.map(p=>`<option value="${esc(p.id)}" ${p.id===this.selected?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="form-group"><label>New region name</label><input name="name" type="text" placeholder="Icewind Dale"></div><p>Click at least three corners on the map, then click the first corner or Finish closed coverage. Escape cancels the outline.</p>`,
-      buttons:[{action:'draw',label:'Draw coverage on the map',callback:(_e,b)=>({existing:b.form.elements.existing.value,name:b.form.elements.name.value.trim()})},{action:'cancel',label:'Cancel',callback:()=>null}]});
+    const result=await foundry.applications.api.DialogV2.wait({window:{title:"Draw region border"},position:{width:480},rejectClose:false,
+      content:`<p>Use an existing region to keep its POI, or create a named territory. You will draw its outline directly on this realm map, independently of the regional scene rectangle.</p><div class="form-group"><label>Region</label><select name="existing"><option value="">Create a new region</option>${choices.map(p=>`<option value="${esc(p.id)}" ${p.id===this.selected?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="form-group"><label>New region name</label><input name="name" type="text" placeholder="Icewind Dale"></div><p>Click at least three corners on the map, then click the first corner or Finish closed border. Escape cancels the outline.</p>`,
+      buttons:[{action:'draw',label:'Draw border on the map',callback:(_e,b)=>({existing:b.form.elements.existing.value,name:b.form.elements.name.value.trim()})},{action:'cancel',label:'Cancel',callback:()=>null}]});
     if(!result||!this.active)return;
     if(result.existing){
       if(!this.getPlace(result.existing))return ui.notifications.warn("That region is no longer available. Choose it again.");
@@ -372,12 +373,12 @@ export class PinEditor {
       // A section opened draws its rows; it stays open (toggle does not bubble: listen as it goes down).
       this.panel.addEventListener("toggle", (e) => {
         const d = e.target, key = d.dataset?.placeOpen;
-        if (!key) return;
+        if (!key || (this.filter ?? "").trim()) return;
         const was = this.#open().has(key);
         this.#setOpen(key, d.open);
         if (d.open && !was && !d.querySelector(".kgr-enc-list-row, .kgr-enc-group")) this.#redrawList();
       }, true);
-      this.panel.addEventListener("input", (e) => { if (e.target.name === "place-filter") { this.filter = e.target.value; this.#redrawList(); } });
+      this.panel.addEventListener("input", (e) => { if (e.target.name === "place-filter") { this.filter = e.target.value; if (!this.filter.trim()) this.openGroups.clear(); this.#redrawList(); } });
     }
     const p = this.selected ? this.getPlace(this.selected) : null;
     const body = p ? `
@@ -390,21 +391,17 @@ export class PinEditor {
       <div class="row">${p.edited && !p.added ? `<button data-act="reset-pos"><i class="fa-solid fa-location-crosshairs"></i> Reset position</button><button data-act="reset" class="danger"><i class="fa-solid fa-rotate-left"></i> Reset all edits</button>` : ""}<button data-act="done">Done</button></div>
       <div class="row"><button data-act="remove-place" class="danger" title="${p.added ? "Delete this place you added" : "Gone from this world: off the map, out of search and journeys. It can be restored below the list of places, with its edits."}"><i class="fa-solid fa-eraser"></i> ${p.added ? "Delete place" : "Remove from the map"}</button></div>`
       : `<p class="hint">Click a place to select it (its kind and map marker show here). Double-click it for its card: name, art, what is known, scene, who sees it.</p>${Object.keys(this.getMarkers()).length ? `<h4 class="kgr-own">Your markers</h4><div class="kgr-own-list">${Object.entries(this.getMarkers()).map(([k, m]) => `<span title="${esc(m.name)}"><img src="${esc(foundry.utils.getRoute(m.src))}" alt=""> ${esc(m.name)}</span>`).join("")}</div><p class="hint">Click a place, then Change, to give it one of these.</p>` : ""}${this.#removedRow()}`;
-    const tools = `<div class="row"><button type="button" data-act="draw-region"><i class="fa-solid fa-draw-polygon"></i> Draw regional coverage</button></div><p class="hint">Outline the area covered by a detailed regional map. Choose an existing region or create one.</p><div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${!["site", "domain", "territory", "natural"].includes(this.newKind) ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="domain" ${this.newKind === "domain" ? "selected" : ""}>Domain</option><option value="territory" ${this.newKind === "territory" ? "selected" : ""}>Territory</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
+    const tools = `<div class="row"><button type="button" data-act="draw-region"><i class="fa-solid fa-draw-polygon"></i> Draw region border</button></div><p class="hint">Draw a custom domain or territory shape. This does not resize the regional scene rectangle.</p><div class="row"><button data-act="add-place" class="${this.placing ? "on" : ""}"><i class="fa-solid fa-location-dot"></i> Add place</button><button data-act="add-marker"><i class="fa-solid fa-plus"></i> Add marker</button></div>${this.placing ? `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> Click the map where the new place goes. Kind: <select name="new-kind"><option value="settlement" ${!["site", "domain", "territory", "natural"].includes(this.newKind) ? "selected" : ""}>Settlement</option><option value="site" ${this.newKind === "site" ? "selected" : ""}>Site</option><option value="domain" ${this.newKind === "domain" ? "selected" : ""}>Domain</option><option value="territory" ${this.newKind === "territory" ? "selected" : ""}>Territory</option><option value="natural" ${this.newKind === "natural" ? "selected" : ""}>Natural feature</option></select> Esc cancels.</p>` : ""}${this.adding ? this.#addForm() : ""}`;
     const files = `<div class="kgr-file-row"><button data-act="export" title="Save every place edit and your markers to a file"><i class="fa-solid fa-file-export"></i> Export places</button><button data-act="import" title="Load place edits from a file"><i class="fa-solid fa-file-import"></i> Import places</button></div>`;
     this.panel.innerHTML = `${tools}${body}${this.placing || this.adding ? "" : `<div class="kgr-enc-list kgr-place-list"><span class="cap">On this map (${this.getPlaces().length})</span><input type="search" name="place-filter" placeholder="Find a place" value="${esc(this.filter ?? "")}" aria-label="Find a place"><div class="kgr-place-groups">${this.#list()}</div></div>`}${files}`;
     this.onStatus?.();
   }
 
-  /** Which sections of the list are open (kept on this computer). */
-  #open() {
-    if (!this.openGroups) { try { this.openGroups = new Set(JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]")); } catch { this.openGroups = new Set(); } }
-    return this.openGroups;
-  }
+  /** Manual folds last for this editor visit. Search expansion is temporary. */
+  #open() { return this.openGroups; }
   #setOpen(key, on) {
     const s = this.#open();
     if (on) s.add(key); else s.delete(key);
-    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...s])); } catch { /* storage off */ }
   }
 
   /** Every place on this map: by kind, then by class, A to Z. A filter opens every match. */
@@ -419,11 +416,11 @@ export class PinEditor {
       if (kind === "domain") return this.#realmSection(places, q, open);
       const list = places.filter((p) => (known.has(p.kind) ? p.kind : "other") === kind);
       if (!list.length) return "";
-      const key = `kind:${kind}`, sel = list.some((p) => p.id === this.selected), isOpen = !!q || sel || open.has(key);
+      const key = `kind:${kind}`, isOpen = !!q || open.has(key);
       const classes = [...new Set(list.map((p) => p.class || "Unsorted"))].sort((a, b) => a.localeCompare(b));
       const inner = isOpen ? classes.map((c) => {
         const rows = list.filter((p) => (p.class || "Unsorted") === c).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-        const gkey = `${kind}|${c}`, gOpen = !!q || rows.some((p) => p.id === this.selected) || open.has(gkey);
+        const gkey = `${kind}|${c}`, gOpen = !!q || open.has(gkey);
         return `<details class="kgr-enc-group" data-place-open="${esc(gkey)}" ${gOpen ? "open" : ""}><summary><span>${esc(c)}</span><small>${rows.length}</small></summary>${gOpen ? rows.map((p) => this.#placeRow(p)).join("") : ""}</details>`;
       }).join("") : "";
       return `<details data-place-open="${key}" ${isOpen ? "open" : ""}><summary>${label}<small>${list.length}</small></summary>${inner}</details>`;
@@ -437,12 +434,11 @@ export class PinEditor {
   #realmSection(places, q, open) {
     const realms = places.filter((p) => p.kind === "domain" || p.kind === "territory");
     if (!realms.length) return "";
-    const key = "kind:realms", holdsSelected = realms.some((p) => p.id === this.selected), isOpen = !!q || holdsSelected || open.has(key);
-    const contains = (n) => n.place.id === this.selected || n.children.some(contains);
+    const key = "kind:realms", isOpen = !!q || open.has(key);
     const count = (n) => n.children.reduce((sum, c) => sum + 1 + count(c), 0);
     const node = (n) => {
       if (!n.children.length) return this.#placeRow(n.place, n.place.class);
-      const k = `realm:${n.place.id}`, on = n.children.some(contains) || open.has(k);
+      const k = `realm:${n.place.id}`, on = open.has(k);
       return `${this.#placeRow(n.place, n.place.class)}<details class="kgr-enc-group" data-place-open="${esc(k)}" ${on ? "open" : ""}><summary><span>Part of ${esc(n.place.name)}</span><small>${count(n)}</small></summary>${on ? n.children.map(node).join("") : ""}</details>`;
     };
     const inner = !isOpen ? "" : q ? realms.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((r) => this.#placeRow(r, r.class)).join("") : territoryTree(this.getPlaces()).map(node).join("");
@@ -461,10 +457,10 @@ export class PinEditor {
     const shape = placeShape(p), layer = placeLayer(p), o = this.#outline(p);
     const seg = (act, list, on) => `<div class="kgr-seg-row">${list.map(([v, l]) => `<button type="button" data-act="${act}" data-v="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</div>`;
     const shapeRule = ruleTooltip("<p><strong>Point</strong> A single place on the map: a marker and its name.</p><p><strong>Area</strong> A border that closes, with a light wash of colour inside: a kingdom, a forest, a sea.</p><p><strong>Line</strong> A line with two ends, named along it: a river, a strait, a mountain spine, a border line.</p><p><strong>Default</strong> Its type decides; this changes it for this place only.</p>");
-    const layerRule = ruleTooltip("<p><strong>Places</strong> Settlements, sites, peaks: where a party can stand.</p><p><strong>Realms</strong> Kingdoms, empires and regions: who holds the land.</p><p><strong>Geography</strong> Forests, ranges, deserts, seas, lakes and rivers: what the land and water are.</p><p><strong>Showing</strong> The map shows one layer at a time (the layers rail on the travel panel). A place shows only on its own layer.</p>");
+    const layerRule = ruleTooltip("<p><strong>Places</strong> Settlements, sites, peaks: where a party can stand.</p><p><strong>Realms</strong> Kingdoms, empires and regions: who holds the land.</p><p><strong>Geography</strong> Forests, ranges, deserts, seas, lakes and rivers: what the land and water are.</p><p><strong>Showing</strong> Toggle any combination of layers on the travel panel. A place shows when its own layer is enabled.</p>");
     const follow = this.#shoreRow(p);
     const border = p.shoreLine ? `<p class="hint">Its border is shared: ${o?.pts.length ?? 0} corners, ${o?.closed ? "closed" : "ends apart"}. Reshape it in ${borderHome(p.followRef)}.</p>` : shape === "point" ? "" : this.drawing
-      ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. ${this.drawing.regional?"Click the first corner, Finish closed coverage, or press Enter to close it.":"Click the first corner to close the border; Enter or double-click leaves its ends apart."} Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> ${this.drawing.regional?"Finish closed coverage":"Finish as a line"}</button><button data-act="border-cancel">Cancel</button></div>`
+      ? `<p class="kgr-sel node"><i class="fa-solid fa-draw-polygon"></i> Click the map to add corners. ${this.drawing.regional?"Click the first corner, Finish closed border, or press Enter to close it.":"Click the first corner to close the border; Enter or double-click leaves its ends apart."} Esc cancels.</p><div class="row"><button data-act="border-finish"><i class="fa-solid fa-check"></i> ${this.drawing.regional?"Finish closed border":"Finish as a line"}</button><button data-act="border-cancel">Cancel</button></div>`
       : `<p class="hint">${o ? `${o.pts.length} corners, ${o.closed ? "closed" : "ends apart"}${o.fromRecord ? " (the world's rectangle: draw or reshape it)" : ""}.` : "No border yet: its name shows at its point on its layer."}</p>
         <div class="row"><button data-act="border-draw"><i class="fa-solid fa-draw-polygon"></i> ${o && !o.fromRecord ? "Redraw border" : "Draw border"}</button>${o && !o.fromRecord && shape === "area" ? `<button data-act="border-toggle">${o.closed ? "Open the shape" : "Close the shape"}</button>` : ""}${p.area ? `<button data-act="border-remove" class="danger">Remove border</button>` : ""}</div>`;
     return `<div class="kgr-area-rows">${p.shoreLine ? "" : `<div class="row"><span>Shape ${shapeRule}</span></div>${seg("shape", Object.entries(SHAPES), shape)}`}

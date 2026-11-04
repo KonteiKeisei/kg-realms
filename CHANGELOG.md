@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.93.4: combined map filters, regional scene entry and independent territory borders
+
+- Toggle Places, Realms and Geography independently. Remember the combination per browser, retain older single-filter preferences, and enable a selected place's layer without hiding others.
+- Regional place cards and hover previews offer Enter and View for the linked scene. Recognise older outline links and uniquely matching region/map names. A Region place selector explicitly associates a place with a scene; manual scene links retain priority.
+- Keep the picture's sizing rectangle separate from the domain or territory's custom border. Advanced alignment preserves saved scene coverage, and the Places editor's Draw region border tool explains which shape it changes.
+- Start the editor's place groups collapsed on every visit. Search expands matches temporarily, and clearing it collapses all groups again, including nested groups and the selected place's group.
+
 ## 0.93.3: adjustable crossings and independent regional snow
 
 - Save regional crossing-marker coordinate adjustments instead of discarding them during place edits. Realm-side crossing positions remain fixed, and regional roads attached by crossing ID follow the adjusted endpoint.

@@ -207,6 +207,10 @@ export class PlaceCard {
         event.preventDefault(); event.stopPropagation();
         const p = this.getPlace(this.hovered);
         if (action === "trade-edit") { if (p && game.user.isGM) { this.hide(); this.editTrade?.(p); } }
+        else if (action === "enter-region" || action === "view-region") {
+          const scene = game.user.isGM && p?.regionalMapScene ? game.scenes.get(p.regionalMapScene) : null;
+          if (scene) { this.hide(); Promise.resolve(action === "enter-region" ? scene.activate() : scene.view()).catch(error => ui.notifications.error(error.message)); }
+        }
         else if (action === "trade-more" || action === "trade-price") this.open(this.hovered);
       });
       this.el.addEventListener?.("dblclick", event => { event.preventDefault(); event.stopPropagation(); this.open(this.hovered); });
@@ -270,12 +274,14 @@ export class PlaceCard {
   #foot(p) {
     const open = `<span><i class="fa-solid fa-id-card"></i> Double-click for the card</span>`;
     if (!game.user.isGM) return `<div class="foot">${open}</div>`;
-    const scene = p.scene ? game.scenes.get(p.scene) : null;
+    const sceneId = p.scene || p.regionalMapScene;
+    const scene = sceneId ? game.scenes.get(sceneId) : null;
     const gm = p.visibility && p.visibility !== "discovered" ? `<span class="badge gm">${p.visibility === "hidden" ? "Hidden from" : "Rumoured to"} players</span>` : "";
     const local = localMap(p);
     const text = local ? `<span><i class="fa-solid fa-map-location-dot"></i> Local map, ${local.places} place${local.places === 1 ? "" : "s"}</span>`
       : scene ? `<span><i class="fa-solid fa-film"></i> ${esc(scene.name)}</span>` : "";
-    return `<div class="foot">${open}${text}${gm}</div>`;
+    const regional = p.regionalMapScene && scene ? `<button type="button" data-act="enter-region" title="Activate the regional scene for everyone">Enter ${esc(p.name)}</button><button type="button" data-act="view-region" title="View the regional scene, only you">View</button>` : "";
+    return `<div class="foot">${open}${text}${gm}${regional}</div>`;
   }
 
   #down(event) {
