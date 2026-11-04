@@ -16,6 +16,7 @@ export function moduleMarkers(defaults = {}, custom = {}) {
 
 /** MapLibre zoom from which a place shows, by kind and class: cities first, then towns, then the rest. */
 export function placeMinZoom(p) {
+  if(p.regionalMapEntry)return 0;
   if (p.kind === "settlement") return p.class === "City" ? 3 : p.class === "Town" ? 4.5 : 6;
   if (p.kind === "site") return p.rank <= 4 ? 5 : 5.5;
   return 5.5;
@@ -70,7 +71,7 @@ export function placesGeoJSON(list, outlined = new Set()) {
     features: list.filter((p) => !p.unnamed || p.edited).map((p) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [p.lon, p.lat] },
-      properties: { layer: placeLayer(p) ?? 'none', outlined: outlined.has(p.id), labelPolygons:p.labelPolygons??[], printed:!!p.labelPolygons?.length, added: !!p.added, symbol: symbolFor(p), icon: iconFor(p), fallback: symbolFor(p) ? `faerun-${symbolFor(p)}` : '', id: p.id, name: p.name, kind: p.kind, class: p.class, rank: p.rank ?? 5, gold: !!p.gold, hidden: !!p.hidden, edited: !!p.edited, unnamed: !!p.unnamed && !p.edited, minzoom: placeMinZoom(p), seed: [...String(p.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 6283, 7) / 1000 }
+      properties: { layer: placeLayer(p) ?? 'none', regionalMapEntry:!!p.regionalMapEntry,regionalEntry:!!p.regionalEntry,outlined: outlined.has(p.id), labelPolygons:p.labelPolygons??[], printed:!!p.labelPolygons?.length, added: !!p.added, symbol: symbolFor(p), icon: iconFor(p), fallback: symbolFor(p) ? `faerun-${symbolFor(p)}` : '', id: p.id, name: p.name, kind: p.kind, class: p.class, rank: p.rank ?? 5, gold: !!p.gold, hidden: !!p.hidden, edited: !!p.edited, unnamed: !!p.unnamed && !p.edited, minzoom: placeMinZoom(p), seed: [...String(p.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 6283, 7) / 1000 }
     }))
   };
 }
@@ -100,7 +101,7 @@ export function searchWorld(query, { places = [], regions = [], locals = [] }, l
   };
   const rank = { City: 3, Town: 2, Village: 1 };
   const results = [
-    ...places.filter((p) => !p.hidden && !(p.unnamed && !p.edited)).map((p) => ({ type: "place", item: p, score: score(p.name, p.alt) + (rank[p.class] ?? 0) + (p.gold ? 4 : 0) })),
+    ...places.filter((p) => !p.regionalEntry && !p.hidden && !(p.unnamed && !p.edited)).map((p) => ({ type: "place", item: p, score: score(p.name, p.alt) + (rank[p.class] ?? 0) + (p.gold ? 4 : 0) })),
     ...regions.map((r) => ({ type: "region", item: r, score: score(r.name) + 5 }))
   ].filter((r) => r.score >= 30);
   const realm = results.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, limit);

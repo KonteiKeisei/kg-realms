@@ -36,14 +36,16 @@ export class RegionalMaps {
   entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
   followRoutes(world,routes){return this.links[world]?followCrossingRoads(routes,this.entrances(world)):routes;}
   places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes);const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
+    for(const place of result)place.regionalMapEntry=false;
     for(const link of Object.values(this.links).filter(l=>l.parent===id)){
       const place=regionalPlace(link,result),scene=game.scenes?.get(link.scene);
+      if(place&&link.scene)place.regionalMapEntry=true;
       if(place&&!place.scene&&scene)place.regionalMapScene=scene.id;
     }
     const relevant=this.links[id]?[this.links[id]]:Object.values(this.links).filter(l=>l.parent===id);
     for(const link of relevant)for(const entry of this.entrances(link.world)){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:'Linked realm/regional road crossing. Draw regional roads to this marker. Drag this marker on the regional map to align its trail. The realm-side crossing remains fixed.'});}return result;}
   destinations(id){
-    const out=this.places(id),byId=new Map(out.map((p,i)=>[p.id,i]));
+    const out=this.places(id).filter(p=>!p.regionalEntry),byId=new Map(out.map((p,i)=>[p.id,i]));
     for(const link of Object.values(this.links).filter(l=>l.parent===id)){
       if(!this.indexes[link.world]||!this.indexes[id])continue;
       const parent=sourceProjection(this.indexes[id].sourceMap),child=sourceProjection(this.indexes[link.world].sourceMap),t=affine(link.anchors);

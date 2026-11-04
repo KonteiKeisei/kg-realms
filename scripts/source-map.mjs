@@ -1,4 +1,5 @@
 import {fromWorld,toWorld} from './geo.mjs';
+import {crossingVisible,placeSeen,placeOnLayer,ordinaryPlaceVisible,regionalMapEntryLayer} from './place-display.mjs';
 // A flat sheet in tile space. Source pixels remain square at every zoom.
 export const SOURCE_MAP={width:12840,height:9150,tileSize:512,nativeZoom:7,detailZoom:9,maxZoom:22,minZoom:0,x:16384,y:16384,worldSize:65536,milesPerPixel:500/1700,archive:'tapestry.pmtiles'};
 export function sourceToLonLat(x,y,sheet=SOURCE_MAP){const p=fromWorld((sheet.x+x)/sheet.worldSize,(sheet.y+y)/sheet.worldSize);return [p.lon,p.lat];}
@@ -44,11 +45,11 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
  // Added places draw like every other place. Hidden places draw for the GM only, faded (global state gm).
  // The map's layers (map-layers.mjs): a place shows when its layer is enabled; an area with an outline
  // shows its name from the areas source instead.
- const onLayer=['in',['get','layer'],['global-state','mapLayers']];
+ const onLayer=placeOnLayer;
  const journeyMarkVisible=['any',['!=',['get','kind'],'encounter'],['global-state','gm']];
  const encounterVisible=['any',['global-state','gm'],['all',['get','hazard'],['get','public']]];
- const seen=['any',['!', ['get','hidden']],['global-state','gm']];
- const visible=['all',seen,onLayer,['!',['get','outlined']]];
+ const seen=placeSeen;
+ const visible=['all',ordinaryPlaceVisible,['!',['get','outlined']]];
  const faded=['case',['get','hidden'],0.4,1];
  const color=['match',['get','class'],'Sea','#d9e9e8','Lake','#cce0df','River','#cce0df','Forest','#f2ead5','Marsh','#f2ead5','Swamp','#f2ead5','#332d26'];
  // A place marker in the map key's style beside its name; natural features
@@ -91,7 +92,7 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   ...(night&&mapLights?(()=>{
    const size=['match',['get','class'],'City',1,'Town',0.62,'Village',0.42,'Hamlet',0.3,['match',['get','kind'],'settlement',0.34,0.22]];
    const flick=['+',0.78,['*',0.16,['sin',['+',['*',['global-state','phase'],1.7],['*',['get','seed'],5]]]],['*',0.08,['sin',['+',['*',['global-state','phase'],4.3],['get','seed']]]]];
-   const lit=['all',['!',['get','hidden']],['!=',['slice',['get','name'],0,5],'Ruins'],['!=',['get','symbol'],'ruin'],['any',['==',['get','kind'],'settlement'],['in',['get','class'],['literal',['Fortification','Keep','Fort','Castle','Temple','Inn']]]]];
+   const lit=['all',onLayer,crossingVisible,['!',['get','hidden']],['!=',['slice',['get','name'],0,5],'Ruins'],['!=',['get','symbol'],'ruin'],['any',['==',['get','kind'],'settlement'],['in',['get','class'],['literal',['Fortification','Keep','Fort','Castle','Temple','Inn']]]]];
    const r=(k)=>['interpolate',['exponential',1.6],['zoom'],3,['*',k*14,size],7,['*',k*44,size],10,['*',k*120,size],13,['*',k*320,size]];
    return [
     {id:'night-glow',type:'circle',source:'places',filter:lit,paint:{'circle-color':'#ff8a2a','circle-radius':r(1),'circle-blur':0.9,'circle-opacity':['*',0.8,flick],'circle-pitch-scale':'map'}},
@@ -135,9 +136,10 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   poi('poi-labels-overview',0,zooms.regional,['all',...visible.slice(1),['any',['<=',['get','rank'],3],['==',['get','class'],'City']]],15),
   poi('poi-labels-regional',zooms.regional,zooms.local,['all',...visible.slice(1),['<=',['get','rank'],4]],15),
   poi('poi-labels-local',zooms.local,null,visible,['interpolate',['linear'],['zoom'],zooms.local,14,zooms.local+1.5,16,zooms.local+4.5,19],true),
+  regionalMapEntryLayer({markerScale,labelScale}),
   {id:'settlements',type:'circle',source:'places',filter:['all',visible,['==',['get','kind'],'settlement']],paint:{'circle-radius':8,'circle-opacity':0}},
   {id:'sites',type:'circle',source:'places',filter:['all',visible,['!=',['get','kind'],'settlement']],paint:{'circle-radius':7,'circle-opacity':0}},
-  {id:'place-glow',type:'circle',source:'places',filter:['all',['get','gold'],['!', ['get','hidden']],onLayer],paint:{'circle-color':'#ffc94a','circle-opacity':.5,'circle-radius':15,'circle-blur':.7}},
+  {id:'place-glow',type:'circle',source:'places',filter:['all',['get','gold'],['!', ['get','hidden']],onLayer,crossingVisible],paint:{'circle-color':'#ffc94a','circle-opacity':.5,'circle-radius':15,'circle-blur':.7}},
   {id:'places-hidden',type:'circle',source:'places',filter:['all',['global-state','editing'],['get','hidden']],paint:{'circle-color':'transparent','circle-radius':4,'circle-stroke-color':'#e0707a','circle-stroke-width':1}},
   // The map editor's waterways (GM, Waterways tab only): shorelines gold and dashed, rivers blue,
   // Trade winds and currents green, sea routes pale; arrows along rivers, winds and currents the way they run.

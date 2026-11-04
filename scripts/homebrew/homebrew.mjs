@@ -202,8 +202,8 @@ export async function ensureDir(path) {
 export async function upload(dir, name, bytes, type) {
   const file = new File([bytes], name, { type });
   const result = await FilePickerImpl().upload("data", dir, file, {}, { notify: false });
-  if (result === false || result?.status === "error") throw Error(result?.message ?? `could not save ${name}`);
-  return `${dir}/${name}`;
+  if (!result || result.error || result.status === 'error' || typeof result.path !== 'string' || !result.path) throw Error(result?.message ?? result?.error ?? `The server did not confirm saving ${name}.`);
+  return result.path;
 }
 const uploadJson = (dir, name, value) => upload(dir, name, JSON.stringify(value), "application/json");
 

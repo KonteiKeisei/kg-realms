@@ -88,7 +88,7 @@ export function assetNamer(moduleId) {
 
 /** A place as a module ships it: everything but what applyEdits adds as it reads. */
 export function placeForExport(place) {
-  const { edited, added, original, removed, ...rest } = place;
+  const { edited, added, original, removed, regionalMapEntry, ...rest } = place;
   return rest;
 }
 

@@ -1,4 +1,5 @@
 import {sourceMapStyle} from './source-map.mjs';
+import {crossingVisible,placeSeen,placeOnLayer,ordinaryPlaceVisible,regionalMapEntryLayer} from './place-display.mjs';
 // MapLibre style for a fantasy world's tiles (the Toril GIS layers, as the Toril Explorer serves
 // them). Two looks from one set of layers: day (a parchment atlas) and night (ink on dark).
 // Zooms here are MapLibre's own, so labels thin out by how much of the world is on screen,
@@ -88,7 +89,7 @@ export function buildStyle({ tiles, glyphs, look = "day", level = "surface", att
   return {
     version: 8,
     glyphs,
-    state: { editing: { default: false } },
+    state: { editing: { default: false }, gm:{default:false},mapLayers:{default:['places']} },
     sources: {
       surface: { type: "vector", tiles: [tiles.surface], minzoom: 0, maxzoom: 6, attribution },
       global: { type: "vector", tiles: [tiles.global], minzoom: 0, maxzoom: 6 },
@@ -137,6 +138,7 @@ export function buildStyle({ tiles, glyphs, look = "day", level = "surface", att
       ...flashLayers(P),
       ...placeLayers(P),
       ...labelLayers(P, src, layer, surface, groundGeometry),
+      regionalMapEntryLayer(),
       ...(surface && groundGeometry?.frame ? [{id:'reference-frame',type:'fill',source:'ground-frame',paint:{'fill-color':'#191919','fill-antialias':false}}] : [])
     ]
   };
@@ -236,12 +238,12 @@ function underdarkGround(P) {
 /** Settlements and sites from the world's place list (so the GM's edits apply), with the gold glow. */
 function placeLayers(P) {
   const kind = (k) => ["==", ["get", "kind"], k];
-  const shown = ["!", ["get", "hidden"]];
+  const shown = ordinaryPlaceVisible;
   const radius = byClass([[3, 2.6, 1.5, 1.2], [6, 4.5, 3.2, 2.2], [10, 7, 5, 3.5]]);
   const glowRadius = byClass([[3, 8, 5, 4], [6, 14, 10, 7], [10, 22, 16, 11]]);
   return [
     {
-      id: "place-glow", type: "circle", source: "places", filter: ["all", shown, ["get", "gold"]],
+      id: "place-glow", type: "circle", source: "places", filter: ["all", placeSeen,placeOnLayer,crossingVisible,["get", "gold"]],
       paint: { "circle-color": P.goldGlow, "circle-opacity": 0.5, "circle-radius": glowRadius, "circle-blur": 1 }
     },
     {
@@ -260,7 +262,7 @@ function placeLayers(P) {
 }
 
 function labelLayers(P, src, layer, surface, groundGeometry) {
-  const shown = ["!", ["get", "hidden"]];
+  const shown = ordinaryPlaceVisible;
   const placeSize = byClass([[3, 12, 10, 9.5], [6, 15, 12.5, 11], [10, 19, 15, 13]], 1.3);
   return [
     {

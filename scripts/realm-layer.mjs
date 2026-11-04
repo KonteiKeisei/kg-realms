@@ -341,12 +341,13 @@ export class RealmLayer {
     // when its symbol was hidden by zoom or a label collision. They remain in
     // the style for editor use, but must not open hover cards.
     const ids = this.options.sourceMap
-      ? ["poi-labels-overview", "poi-labels-regional", "poi-labels-local", "area-names", "area-line-names", ...(this.editing ? ["places-hidden"] : [])]
-      : ["place-labels", "site-labels", "settlements", "sites", "places-hidden"];
+      ? ["regional-map-entries","poi-labels-overview", "poi-labels-regional", "poi-labels-local", "area-names", "area-line-names", ...(this.editing ? ["places-hidden"] : [])]
+      : ["regional-map-entries","place-labels", "site-labels", "settlements", "sites", "places-hidden"];
     const hits = query(ids);
     if (!hits.length) return null;
     const p = this.map.project.bind(this.map);
     hits.sort((a, b) => {
+      const priority=Number(!!b.properties.regionalMapEntry)-Number(!!a.properties.regionalMapEntry);if(priority)return priority;
       const pa = p(a.geometry.coordinates), pb = p(b.geometry.coordinates);
       return Math.hypot(pa.x - px, pa.y - py) - Math.hypot(pb.x - px, pb.y - py);
     });

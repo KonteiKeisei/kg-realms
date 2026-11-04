@@ -8,6 +8,7 @@ import {BuildWindow,ensureDir,upload} from './homebrew/homebrew.mjs';
 const ID='kg-realms';
 const hash=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');
 const esc=value=>foundry.utils.escapeHTML(String(value??''));
+const savedPath=(result,requested)=>typeof result==='string'?result:typeof result?.path==='string'?result.path:requested;
 
 /** Three detail levels in image pixel space. Scene dimensions, elevation and grid never change. */
 export function planLocalTiles(width,height,{sceneId,buildId,placed=false}={}) {
@@ -48,7 +49,9 @@ export async function buildLocalMapTiles(scene,src,io={}) {
     progress('read',1,1);
     if(io.prepare)await io.prepare(plan.tileDir);else await ensureDir(plan.tileDir);
     const write=io.write??(async(path,bytes,type)=>{const parts=path.split('/'),name=parts.pop();return upload(parts.join('/'),name,bytes,type);});
-    const read=io.read??(async path=>{const r=await fetch(foundry.utils.getRoute(path),{cache:'no-store'});if(!r.ok)throw Error(`Saved tile could not be read (HTTP ${r.status}).`);return new Uint8Array(await r.arrayBuffer());});
+    const read=io.read??(async path=>{const url=/^(?:https?:|blob:|data:)/i.test(path)?path:foundry.utils.getRoute(path);let r;
+      for(let attempt=0;attempt<3;attempt++){r=await fetch(url,{cache:'no-store'});if(r.ok)break;if(![404,503].includes(r.status)||attempt===2)throw Error(`Saved file could not be read (HTTP ${r.status}): ${path}`);await new Promise(resolve=>setTimeout(resolve,150*(attempt+1)));}
+      return new Uint8Array(await r.arrayBuffer());});
     await io.bitmapReady?.(bitmap,plan,{write,read});
     const workers=Math.max(1,Math.min(2,(globalThis.navigator?.hardwareConcurrency??2)-1));
     if(!io.encode){encoder=new TileEncoder(workers,`${location.origin}${foundry.utils.getRoute(`modules/${ID}`)}`);await encoder.ready;}
@@ -57,15 +60,15 @@ export async function buildLocalMapTiles(scene,src,io={}) {
       while(next<tiles.length){halt();const tile=tiles[next++];
         const bytes=await(io.encode?io.encode(bitmap,tile,worker):encoder.encode(worker,cutTile(bitmap,tile),tile.textureWidth,tile.textureHeight,{alpha:true}));halt();
         const head=ktx2Header(bytes);if(!head.magic||head.width!==tile.textureWidth||head.height!==tile.textureHeight||head.levels!==1)throw Error(`The encoder made an invalid tile: ${tile.id}.`);
-        tile.hash=await hash(bytes);tile.ktxBytes=bytes.byteLength;await write(tile.src,bytes,'application/octet-stream');
+        tile.hash=await hash(bytes);tile.ktxBytes=bytes.byteLength;tile.src=savedPath(await write(tile.src,bytes,'application/octet-stream'),tile.src);
         const stored=await read(tile.src);if(stored.byteLength!==tile.ktxBytes||await hash(stored)!==tile.hash)throw Error(`The server changed tile ${tile.id}.`);
         progress('tiles',++done,tiles.length);
       }
     }));halt();
     const lods=plan.lods.map(l=>({...l,tiles:l.tiles.map(({crop,...tile})=>tile)}));
     const manifest={schema:1,id:plan.id,width:plan.width,height:plan.height,lods};
-    const lodManifest=`${plan.dataRoot}/lods.json`,bytes=new TextEncoder().encode(JSON.stringify(manifest));
-    await write(lodManifest,bytes,'application/json');
+    let lodManifest=`${plan.dataRoot}/lods.json`;const bytes=new TextEncoder().encode(JSON.stringify(manifest));
+    lodManifest=savedPath(await write(lodManifest,bytes,'application/json'),lodManifest);
     if(await hash(await read(lodManifest))!==await hash(bytes))throw Error('The server changed the local-map catalogue.');
     halt();const latest=scene.getFlag(ID,'localMap');
     if(!latest||latest.world!==previous.world||latest.placeId!==previous.placeId||JSON.stringify(latest.tileAsset??null)!==revision||scene.width!==size[0]||scene.height!==size[1])throw Error('The local map changed during this build. Start again from its current settings.');
@@ -96,7 +99,7 @@ export async function stagePlacedMapTiles(scene,io={}){
       let bytes;
       if(io.preview)bytes=await io.preview(bitmap);
       else{const factor=Math.min(1,512/Math.max(bitmap.width,bitmap.height)),canvas=new OffscreenCanvas(Math.max(1,Math.round(bitmap.width*factor)),Math.max(1,Math.round(bitmap.height*factor)));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bytes=new Uint8Array(await(await canvas.convertToBlob({type:'image/png'})).arrayBuffer());}
-      preview=`${plan.dataRoot}/preview.png`;await write(preview,bytes,'image/png');if(await hash(await read(preview))!==await hash(bytes))throw Error('The server changed a tile preview.');
+      preview=`${plan.dataRoot}/preview.png`;preview=savedPath(await write(preview,bytes,'image/png'),preview);if(await hash(await read(preview))!==await hash(bytes))throw Error('The server changed a tile preview.');
     }});
     patches.push({_id:id,'texture.src':preview,[`flags.${ID}.tileAsset`]:{...asset,tileId:id,preview}});
     old.push({id,src:current,asset:structuredClone(previous)});

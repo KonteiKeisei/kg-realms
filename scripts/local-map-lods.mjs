@@ -1,6 +1,7 @@
 import { assetModules } from "./worlds.mjs";
 /** A tile picture may only come from the engine or a registered world's module, in that city's folder. */
 export function lodSrcAllowed(src, city, asset = {}) {
+  if(typeof src==='string')try{src=decodeURIComponent(src);}catch{return false;}
   if(!/^[\w-]+$/.test(city??''))return false;
   const m = /^modules\/([\w-]+)\/assets\/maps\/ktx2\/([\w-]+)\/[\w-]+\.ktx2$/.exec(src ?? "");
   if(m)return m[2] === city && assetModules().has(m[1]);

@@ -4,7 +4,7 @@
 //    tower, site), drawn on a canvas;
 //  - "mk-<id>": picture markers, the shipped catalog (data/markers/catalog.json) and the GM's
 //    own (a world setting), loaded from their image files.
-const SHAPES = ['city', 'town', 'village', 'keep', 'ruin', 'dungeon', 'peak', 'tower', 'site'];
+const SHAPES = ['city', 'town', 'village', 'keep', 'ruin', 'dungeon', 'peak', 'tower', 'site', 'regional'];
 
 /** Draw a key symbol on a 48 px canvas, then a halo of the opposite tone around it. */
 function keySymbol(shape) {
@@ -12,7 +12,8 @@ function keySymbol(shape) {
   const c = c0.getContext('2d'), ink = '#151515', paper = '#fbf6e6';
   c.translate(4, 4);
   const circle = (r, fill, stroke, w = 3) => { c.beginPath(); c.arc(20, 20, r, 0, Math.PI * 2); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = w; c.stroke(); } };
-  if (shape === 'city') { circle(12, ink); circle(8.5, paper); circle(5.5, ink); }
+  if (shape === 'regional') { circle(12, '#ffca62', ink, 3); circle(6, ink); }
+  else if (shape === 'city') { circle(12, ink); circle(8.5, paper); circle(5.5, ink); }
   else if (shape === 'town') { circle(9, ink); }
   else if (shape === 'village') { circle(7.5, paper, ink, 3); }
   else if (shape === 'keep') { c.fillStyle = paper; c.fillRect(11, 11, 18, 18); c.strokeStyle = ink; c.lineWidth = 3; c.strokeRect(11, 11, 18, 18); }
@@ -126,6 +127,7 @@ function imageData(img) {
 
 /** The map-key shape of a place (from its printed marker, else its class), or '' for none. */
 export function symbolFor(place) {
+  if(place.regionalMapEntry)return 'regional';
   if (place.sourceSymbol) return { hamlet: 'village', poi: 'site' }[place.sourceSymbol] ?? place.sourceSymbol;
   if (['Road', 'Trail', 'Area', 'Region', 'Macroregion', 'Sea', 'Lake', 'River', 'Forest', 'Mountains', 'Hills', 'Hill', 'Marsh', 'Swamp', 'Moor', 'Desert', 'Glacier', 'Island', 'Islands', 'Valley', 'Plain'].includes(place.class) || place.kind === 'natural' || place.kind === 'territory' || place.kind === 'domain') return '';
   if (place.class === 'City') return 'city';

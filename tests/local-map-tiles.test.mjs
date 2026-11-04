@@ -5,6 +5,7 @@ import {placedTextureSize,placedTileAsset,tileInView,PlacedTileLods} from '../sc
 import {mapAsset} from '../scripts/local-map-renderer.mjs';
 import {lodSrcAllowed,resolveLocalLods} from '../scripts/local-map-lods.mjs';
 import {parseHTML} from 'linkedom';
+import {upload} from '../scripts/homebrew/homebrew.mjs';
 
 function fakeTile(tile){const bytes=new Uint8Array(80),v=new DataView(bytes.buffer);bytes.set([0xab,0x4b,0x54,0x58,0x20,0x32,0x30,0xbb,0x0d,0x0a,0x1a,0x0a]);v.setUint32(20,tile.textureWidth,true);v.setUint32(24,tile.textureHeight,true);v.setUint32(40,1,true);v.setUint32(44,1,true);return bytes;}
 function fixture(){
@@ -105,4 +106,26 @@ test('placed tile detail respects zoom, hardware limits, GPU share and viewport 
   assert.equal(tileInView({mesh:{},bounds:{x:0,y:0,width:10,height:10}},{x:5,y:5,width:100,height:100}),true);
   assert.equal(tileInView({mesh:{},bounds:{x:500,y:500,width:10,height:10}},{x:5,y:5,width:100,height:100}),false);
   const manager=new PlacedTileLods(),tile={_original:{},document:{id:'roof'}};manager.attach(tile);manager.remove(tile);assert.equal(manager.status().tiles,0,'native drag previews do not replace the real tile controller');
+});
+
+test('production upload and readback follow the server-confirmed preview and catalogue paths',async()=>{
+  const f=placedFixture(),stored=new Map(),directories=[];
+  foundry.utils.getRoute=path=>`/vtt/${path}`;
+  foundry.applications={apps:{FilePicker:{implementation:{createDirectory:async(_source,path)=>directories.push(path),upload:async(_source,dir,file)=>{
+    const name=file.name==='preview.png'?'saved-preview.png':file.name,path=`${dir}/${name}`;
+    stored.set(path,new Uint8Array(await file.arrayBuffer()));return{path:encodeURI(path)};
+  }}}}};
+  globalThis.fetch=async path=>{const key=decodeURI(String(path).replace(/^\/vtt\//,'')),bytes=stored.get(key);return{ok:!!bytes,status:bytes?200:404,arrayBuffer:async()=>bytes.buffer};};
+  const io={...f.io};delete io.write;delete io.read;delete io.prepare;
+  await stagePlacedMapTiles(f.scene,io);
+  assert.ok(directories.length);const asset=placedTileAsset(f.scene.tiles[0]);assert.match(asset.preview,/saved-preview.png$/);assert.ok(stored.has(decodeURI(asset.preview)));
+  const catalog=JSON.parse(new TextDecoder().decode(stored.get(decodeURI(asset.lodManifest))));
+  assert.ok(catalog.lods.flatMap(l=>l.tiles).every(t=>lodSrcAllowed(t.src,asset.city,asset)));
+});
+
+test('an unconfirmed or failed upload stops before a nonexistent preview can be selected',async()=>{
+  const f=fixture();let response;
+  foundry.applications={apps:{FilePicker:{implementation:{upload:async()=>response}}}};
+  for(response of [undefined,false,{}, {error:'Write denied'}, {status:'error',message:'Disk full'}])await assert.rejects(()=>upload('map','preview.png',new Uint8Array([1]),'image/png'),/confirm|denied|full/);
+  assert.equal(f.updates.length,0);
 });

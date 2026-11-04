@@ -144,7 +144,7 @@ export function areasGeoJSON(places, regions = []) {
     const props = { id: p.id, name: p.name ?? "", layer, kind: areaKind(p), color: areaKind(p) === "realm" ? realmColor(p) : "", rank: p.rank ?? 5, hidden: !!p.hidden };
     const ring = o.closed ? [...o.pts, o.pts[0]] : o.pts;
     areas.push({ type: "Feature", properties: { ...props, closed: o.closed }, geometry: o.closed ? { type: "Polygon", coordinates: [ring] } : { type: "LineString", coordinates: ring } });
-    if (o.closed && Number.isFinite(p.lon) && Number.isFinite(p.lat)) labels.push({ type: "Feature", properties: props, geometry: { type: "Point", coordinates: [p.lon, p.lat] } });
+    if (o.closed && !p.regionalMapEntry && Number.isFinite(p.lon) && Number.isFinite(p.lat)) labels.push({ type: "Feature", properties: props, geometry: { type: "Point", coordinates: [p.lon, p.lat] } });
   }
   return { areas: { type: "FeatureCollection", features: areas }, labels: { type: "FeatureCollection", features: labels } };
 }

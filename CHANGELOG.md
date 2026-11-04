@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.94.1: tile upload readback and Regional map labels
+
+- Use the file path confirmed by Foundry after upload. Verify placed tile previews, compressed chunks and catalogues at their saved locations instead of assuming their requested names. Reject uploads without a confirmed path and retry briefly when a saved file is not yet available. Readback errors include the file path, and failed builds retain the previous map selection.
+- Give places linked to Regional maps a point and label at overview zoom, on both Places and Areas. Keep the entry label visible through ordinary POI collisions, retain the custom area border, and avoid a duplicate area label. Hidden places still respect player visibility.
+- Show road and trail crossing handles only while the GM is editing. Keep them out of normal search and travel destinations while retaining their routing connections and saved alignment edits. Apply layer choices to both source-image and vector-map place labels.
+
 ## 0.94.0: complete map packages and local tile rebuilding
 
 - Export a realm with its linked Regional maps, local maps and interiors, including full scene contents and referenced files. Re-exports retain packaged scenes and documents that have not been generated in the current world. Missing required files block download and appear in a repair report. Large archives use ZIP64.
