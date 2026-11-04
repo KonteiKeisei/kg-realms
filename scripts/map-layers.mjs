@@ -1,5 +1,5 @@
-// The realm map's layers (0.77): Places (single points: settlements, sites, peaks), Realms (who holds
-// the land: kingdoms, regions) and Geography (what the land and water are: forests, ranges, seas,
+// The realm map's layers (0.77): Places (single points: settlements, sites, peaks), Areas (who holds
+// the land: domains and territories) and Geography (what the land and water are: forests, ranges, seas,
 // lakes). Viewers can show several layers at once; the journey, roads and rivers show on all of them.
 // A place's type gives its layer and shape (a point, an area, or a line); either can be set on the
 // place itself. An area is drawn as a border (closed) or a line with two ends (a strait, a range's
@@ -8,12 +8,14 @@
 import { borderOf, followOf } from "./borders.mjs";
 
 export const MAP_LAYERS = ["places", "realms", "geo"];
-export const LAYER_NAMES = { places: "Places", realms: "Realms", geo: "Geography" };
+export const LAYER_NAMES = { places: "Places", realms: "Areas", geo: "Geography" };
 export const SHAPES = { point: "Point", area: "Area", line: "Line" };
 
 const words = (list) => new Set(list.map((s) => s.toLowerCase()));
 /** Who holds the land. */
-const REALM = words(["Region", "Macroregion", "Kingdom", "Empire", "Country", "Nation", "Realm", "Province", "Duchy", "Barony", "County", "March", "Principality", "Republic", "Dominion", "Domain", "Territory", "State", "Lands", "City-state", "Confederation", "Theocracy", "Satrapy", "Khanate", "Tribe Lands"]);
+// Older world packages retain their saved type names; normalise those at the UI boundary.
+const REALM = words(["Area", "Region", "Macroregion", "Kingdom", "Empire", "Country", "Nation", "Realm", "Province", "Duchy", "Barony", "County", "March", "Principality", "Republic", "Dominion", "Domain", "Territory", "State", "Lands", "City-state", "Confederation", "Theocracy", "Satrapy", "Khanate", "Tribe Lands"]);
+export const placeClass = p => ['Region','Macroregion'].includes(p?.class) ? 'Area' : p?.class;
 /** What the land and water are. */
 const LAND = words(["Feature", "Forest", "Wood", "Woods", "Jungle", "Mountains", "Range", "Hills", "Highlands", "Desert", "Wastes", "Badlands", "Marsh", "Swamp", "Bog", "Fen", "Glacier", "Ice", "Tundra", "Steppe", "Moor", "Plain", "Plains", "Grassland", "Valley", "Canyon", "Islands", "Archipelago", "Coast", "Peninsula", "Cape"]);
 const WATER = words(["Sea", "Ocean", "Coastal Sea", "Water/Coastal sea", "Water/Oceanic expanse", "Bay", "Gulf", "Strait", "Sound", "Channel", "Fjord", "Lagoon", "Lake", "Reef", "Shoal", "River"]);
@@ -24,7 +26,7 @@ const LINES = words(["River", "Strait", "Channel", "Canyon", "Range"]);
 
 const cls = (p) => String(p?.class ?? "").toLowerCase();
 
-/** The top level: a country or empire. Everything below one, at any depth, is a territory, whatever its type: a state, a county, a region. */
+/** The top level: a country or empire. Everything below one, at any depth, is a territory. Both are Areas. */
 const DOMAIN = words(["Domain", "Empire", "Kingdom", "Country", "Nation", "Realm", "Republic", "Dominion", "Theocracy", "Confederation", "Khanate", "Principality", "City-state"]);
 /**
  * What sort of thing a place is. Realms were once natural features: one of a realm's types still is
@@ -44,7 +46,7 @@ export function placeLayer(p) {
   const c = cls(p);
   if (NONE.has(c)) return null;
   if (p?.kind === "territory" || p?.kind === "domain") return "realms";
-  // Told it is a natural feature, whatever its type's word usually means (The Steppes, a Region).
+  // Told it is a natural feature, whatever its type's word usually means (The Steppes, an Area).
   if (p?.kindChosen && p?.kind === "natural" && REALM.has(c)) return "geo";
   if (REALM.has(c)) return "realms";
   if (LAND.has(c) || WATER.has(c)) return "geo";
@@ -168,7 +170,7 @@ export const withShoreBorders = (places, waterways = {}) => withFollowedBorders(
 const BIOME_CLASS = { forest: "Forest", jungle: "Jungle", taiga: "Forest", mountains: "Mountains", hills: "Hills", desert: "Desert", badlands: "Badlands", wetlands: "Marsh", swamp: "Swamp", glacier: "Glacier", arctic: "Ice", tundra: "Tundra", plains: "Plain", savanna: "Grassland", steppe: "Steppe", coast: "Coast", volcanic: "Mountains" };
 export function placeFromZone(id, zone) {
   const at = interiorPoint(zone.pts);
-  return { name: String(zone.name ?? "").trim() || "New place", kind: "natural", class: BIOME_CLASS[zone.type] ?? "Region", rank: 4, level: "surface", layer: "geo", follow: `biome:${id}`, lon: +at[0].toFixed(6), lat: +at[1].toFixed(6) };
+  return { name: String(zone.name ?? "").trim() || "New place", kind: "natural", class: BIOME_CLASS[zone.type] ?? "Feature", rank: 4, level: "surface", layer: "geo", follow: `biome:${id}`, lon: +at[0].toFixed(6), lat: +at[1].toFixed(6) };
 }
 /** A new place for a shoreline: a lake if its water is inside, islands if outside, a coast if its ends are apart. */
 export function placeFromShore(id, w) {

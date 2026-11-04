@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.93.6: Areas terminology
+
+- Use Areas as the umbrella for Domains and Territories in the place list and map filter rail. Keep Domain and Territory as the individual place kinds.
+- Rename Draw region border to Draw area border, and Region place to Area in regional-map setup. Keep Regional maps as the name for detailed maps beneath a realm.
+- Display older Region and Macroregion place types as Area without rewriting their source records, coordinates, borders or scene links. Existing saved layer preferences and regional-map settings remain compatible. Foundry Regions keep their core name.
+
 ## 0.93.5: GM-only encounter hover cards
 
 - Hover journey encounter dots to preview the correct encounter, with its description, Perception DC and GM notes. Double-click opens its full card. Card references retain the owning scene and party when viewed on a regional map.

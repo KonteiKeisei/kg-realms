@@ -19,10 +19,10 @@ function setup(answer,base=[]){
 }
 
 test('territory border drawing is available before selection and creates a named closed region without opening a place card',async()=>{
-  const s=setup({existing:'',name:'Icewind Dale'});assert.ok(s.editor.panel.querySelector('[data-act="draw-region"]'));
+  const s=setup({existing:'',name:'Icewind Dale'});assert.ok(s.editor.panel.querySelector('[data-act="draw-area"]'));
   assert.match(s.editor.panel.textContent,/does not resize the regional scene rectangle/);
   await s.editor.drawRegionalCoverage();assert.equal(s.editor.placing,true);
-  await s.click(20,20);assert.equal(s.editor.drawing.regional,true);assert.equal(s.cards,0);
+  await s.click(20,20);assert.equal(s.editor.drawing.areaBorder,true);assert.equal(s.cards,0);
   await s.click(0,0);await s.click(100,0);await s.click(100,100);
   assert.match(s.editor.panel.textContent,/Finish closed border/);
   await s.editor.onKey({key:'Enter',target:document.body,preventDefault(){},stopImmediatePropagation(){}});

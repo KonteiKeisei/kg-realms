@@ -979,7 +979,7 @@ Hooks.once("init", () => {
     scope: "world", config: true, type: Number, default: MAX_SIDE, range: { min: 8000, max: 80000, step: 1000 }
   });
   register("relief", { name: "Mountain shading", hint: "Shade the land by its height (the atlas's elevation model).", scope: "client", config: false, type: Boolean, default: true, onChange: redraw });
-  register('borders', { name: 'Country and region borders', hint: 'Show country and region boundaries as white dotted lines.', scope: 'client', config: false, type: Boolean, default: false, onChange: redraw });
+  register('borders', { name: 'Country and area borders', hint: 'Show country and area boundaries as white dotted lines.', scope: 'client', config: false, type: Boolean, default: false, onChange: redraw });
   register("markerScale", { name: "Map marker size", hint: "Scale of place markers on the map (1 is the default).", scope: "client", config: true, type: Number, default: 1, range: { min: 0.5, max: 2.5, step: 0.1 }, onChange: redraw });
   register("labelScale", { name: "Map label size", hint: "Scale of place names on the map (1 is the default).", scope: "client", config: true, type: Number, default: 1, range: { min: 0.5, max: 2.5, step: 0.1 }, onChange: redraw });
   register("hoverDelayMs", { name: "Place card hover delay (ms)", hint: "How long to hold the pointer over a visible place label or marker before its card appears.", scope: "client", config: true, type: Number, default: 750, range: { min: 0, max: 1500, step: 50 } });

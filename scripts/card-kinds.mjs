@@ -1,5 +1,5 @@
 import {partyScene} from './party-groups.mjs';
-import { hierarchyOf, hierarchyLine } from "./map-layers.mjs";
+import { hierarchyOf, hierarchyLine, placeClass } from "./map-layers.mjs";
 import { defaultWorldId } from "./worlds.mjs";
 import {entranceType} from './settlement-entry.mjs';
 // What the place card shows and saves for each kind of place: realm places (the world's place
@@ -86,7 +86,7 @@ export function registerKinds(cards, deps) {
       try { trade = await deps.trade?.get(ref.world, p); } catch (error) { console.warn("kg-realms | trade:", error); }
       return {
         trade,
-        name: p.name, type: p.class ?? "Place", icon: iconFor(p), subtitle: [line, known_as].filter(Boolean).join(" · "),
+        name: p.name, type: placeClass(p) ?? "Place", icon: iconFor(p), subtitle: [line, known_as].filter(Boolean).join(" · "),
         img: p.img || legacyImage(p.page), known, gmNotes: p.gmNotes ?? "", rumours: p.rumours ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"),
         actor: p.actor ?? null, url: p.url ?? null, locate: true,
         enter: enterFor(sceneId, p.name, !!p.regionalMapScene),
@@ -96,7 +96,7 @@ export function registerKinds(cards, deps) {
         // world (restored from the map editor's Places tab).
         canDelete: true, deleteLabel: p.added ? "Delete" : "Remove from the map",
         deleteNote: p.added ? null : "Gone from this world: off the map, out of search and journeys. Restore it from the map editor's Places tab (Removed from this world), with its edits.",
-        form: { name: p.name, class: p.class ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"), img: p.img ?? "", known, rumours: p.rumours ?? "", gmNotes: p.gmNotes ?? "", scene: p.scene ?? "", actor: p.actor ?? "", gold: !!p.gold, port: !!(p.port ?? deps.autoPort?.(p)) },
+        form: { name: p.name, class: placeClass(p) ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"), img: p.img ?? "", known, rumours: p.rumours ?? "", gmNotes: p.gmNotes ?? "", scene: p.scene ?? "", actor: p.actor ?? "", gold: !!p.gold, port: !!(p.port ?? deps.autoPort?.(p)) },
         fields: [ART, TEXT("name", "Name", { wide: true }), TEXT("class", "Type", { placeholder: "Town, Ruins, Temple..." }), { name: "gold", label: "Gold on the map", type: "check", group: "identity" },
           { name: "port", label: "Port: the party can take a boat here", type: "check", group: "identity" },
           WHO, RUMOURS, KNOWN, GM_NOTES, sceneField(), ACTOR]

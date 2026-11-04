@@ -1,5 +1,5 @@
 // The realm map's layers rail (0.77): a tab on the travel panel's left edge that unfolds into the
-// map's layers (map-layers.mjs): Places, Realms, Geography. Each viewer chooses for themselves (kept
+// map's layers (map-layers.mjs): Places, Areas, Geography. Each viewer chooses for themselves (kept
 // in this browser); the GM's choice is never pushed to players. It follows the travel panel as the
 // panel moves, resizes or redraws, and stands at the screen's right edge when there is no panel.
 
@@ -14,7 +14,7 @@ const ICONS = {
 };
 const TIPS = {
   places: "Places: settlements, keeps, ruins, temples, peaks. Single points you can travel to.",
-  realms: "Realms: kingdoms, empires and regions, with their borders. Who holds the land.",
+  realms: "Areas: domains and territories, including kingdoms and empires, with their borders. Who holds the land.",
   geo: "Geography: forests, mountain ranges, deserts, seas, lakes and rivers. What the land and water are."
 };
 const read = (k, fallback) => { try { return localStorage.getItem(k) ?? fallback; } catch { return fallback; } };

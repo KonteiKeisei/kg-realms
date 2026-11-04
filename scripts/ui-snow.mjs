@@ -66,7 +66,7 @@ export class SnowTab {
   #render() {
     if (!this.active || !this.panel) return;
     const regional=this.isRegional?.(),enabled=this.getEnabled?.()??true;
-    const toggle=regional?`<label class="kgr-snow-on"><input type="checkbox" name="regional-enabled" ${enabled?'checked':''}> Enable snow line on this regional map</label><p class="hint">Off by default. This region uses its own snow settings, independent of the realm.</p>`:'';
+    const toggle=regional?`<label class="kgr-snow-on"><input type="checkbox" name="regional-enabled" ${enabled?'checked':''}> Enable snow line on this regional map</label><p class="hint">Off by default. This regional map uses its own snow settings, independent of the realm.</p>`:'';
     if(regional&&!enabled){this.panel.innerHTML=toggle;this.onStatus?.();return;}
     const cfg = this.getSnow(), months = this.getMonths();
     const southRule = ruleTooltip("<p><strong>Reversed</strong> The south's winter falls half a year after the north's, as on Earth: its snow is deepest when the north's is least.</p><p><strong>Not reversed</strong> Both poles have winter at the same time.</p>");

@@ -37,7 +37,7 @@ test('filter clicks toggle independently on both rendered maps and persist acros
   rail.setLayer('realms');rail.setLayer('places');assert.deepEqual(chosenLayers(),['places','realms']);
   rail.mount();assert.equal(rail.el.querySelectorAll('[aria-pressed="true"]').length,2);
   rail.el.querySelector('[data-fold]').click();
-  assert.match(rail.el.querySelector('[data-fold]').getAttribute('data-tooltip'),/Places, Realms/);
+  assert.match(rail.el.querySelector('[data-fold]').getAttribute('data-tooltip'),/Places, Areas/);
   rail.unmount();
 });
 

@@ -1,3 +1,4 @@
+import {placeClass} from './map-layers.mjs';
 // Search a region's world (Ctrl+F): places and regions by name, nearest-in-scene first among
 // equals. Picking one pans there and blinks it; a region pans to fit it. On a settlement map,
 // its named streets too: picking one fits the whole street on screen and lights it up.
@@ -86,7 +87,7 @@ export class RealmSearch {
       const it = r.item;
       const icon = r.type === "street" ? "fa-road" : r.type === "region" ? "fa-flag" : r.type === "local" ? (CATEGORIES[it.category] ?? CATEGORIES.other).icon : iconFor(it);
       const kind = { avenue: "Avenue", street: "Street", lane: "Lane", alley: "Alley" }[it.kind] ?? "Street";
-      const where = r.type === "street" ? kind : r.type === "region" ? it.class : r.type === "local" ? `${(CATEGORIES[it.category] ?? CATEGORIES.other).label}, in ${it.map}` : [it.class, it.location?.split("→").pop()?.trim()].filter(Boolean).join(", ");
+      const where = r.type === "street" ? kind : r.type === "region" ? placeClass(it) : r.type === "local" ? `${(CATEGORIES[it.category] ?? CATEGORIES.other).label}, in ${it.map}` : [placeClass(it), it.location?.split("→").pop()?.trim()].filter(Boolean).join(", ");
       return `<div class="row ${i === 0 ? "active" : ""} ${r.here ? "" : "away"}" data-i="${i}">
         <span class="ic ${it.gold ? "gold" : ""}"><i class="fa-solid ${icon}"></i></span>
         <span class="name">${esc(it.name)}</span>

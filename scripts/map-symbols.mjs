@@ -127,7 +127,7 @@ function imageData(img) {
 /** The map-key shape of a place (from its printed marker, else its class), or '' for none. */
 export function symbolFor(place) {
   if (place.sourceSymbol) return { hamlet: 'village', poi: 'site' }[place.sourceSymbol] ?? place.sourceSymbol;
-  if (['Road', 'Trail', 'Region', 'Macroregion', 'Sea', 'Lake', 'River', 'Forest', 'Mountains', 'Hills', 'Hill', 'Marsh', 'Swamp', 'Moor', 'Desert', 'Glacier', 'Island', 'Islands', 'Valley', 'Plain'].includes(place.class) || place.kind === 'natural' || place.kind === 'territory' || place.kind === 'domain') return '';
+  if (['Road', 'Trail', 'Area', 'Region', 'Macroregion', 'Sea', 'Lake', 'River', 'Forest', 'Mountains', 'Hills', 'Hill', 'Marsh', 'Swamp', 'Moor', 'Desert', 'Glacier', 'Island', 'Islands', 'Valley', 'Plain'].includes(place.class) || place.kind === 'natural' || place.kind === 'territory' || place.kind === 'domain') return '';
   if (place.class === 'City') return 'city';
   if (place.class === 'Town') return 'town';
   if (place.kind === 'settlement') return 'village';

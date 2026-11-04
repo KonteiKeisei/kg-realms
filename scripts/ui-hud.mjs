@@ -434,7 +434,7 @@ export class TravelHud {
       this.#projectProgress();
       // The route sheet: places passed, roads joined and left, and stops kept (places or stays).
       const sts = this.stops();
-      const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && p.kind !== "territory" && p.kind !== "domain" && !(p.unnamed && !p.edited) && !["Road", "Trail", "Region", "Macroregion", "Sea"].includes(p.class))
+      const places = this.getPlaces().filter((p) => !p.hidden && p.kind !== "natural" && p.kind !== "territory" && p.kind !== "domain" && !(p.unnamed && !p.edited) && !["Road", "Trail", "Area", "Region", "Macroregion", "Sea"].includes(p.class))
         .map((p) => ({ name: p.name, at: this.toSource(p.lon, p.lat), settlement: p.kind === "settlement" }));
       const nums = this.#numbers();
       this.sheet = routeSheet(r, { stops: sts.map((w, i) => ({ name: w.name ?? "Stop", keep: i === 0 || nums[i - 1] != null })), places, milesPerPixel: this.sourceMap.milesPerPixel });
@@ -1210,7 +1210,7 @@ export class TravelHud {
     const biome=this.currentBiome(), favored=this.favoredTerrains().includes(biome?.type);
     // The setup, in one line: how the party travels, and the day.
     const aboard = p?.sailing ? this.result?.legs.find((l) => l.sea && l.start <= p.hour + 1e-6 && l.start + l.hours > p.hour) : null, aboardIdx = aboard ? this.result.legs.indexOf(aboard) : -1;
-    const summary = `${gm&&this.getDestinations?'<button type="button" data-act="find-destination" class="wide">Find destination in realm or region</button>':''}<div class="tr-setup"><div class="grow"><b>${esc(METHODS[method].short)}, ${esc(pace.label.toLowerCase())} pace</b><small>${aboard ? `This leg: ${esc(this.vessel(s.legVessels?.[aboardIdx]).label.toLowerCase())}` : `${both(daily(s.pace))} a day · ${s.hours} h road · ${s.rest} h camp · ${how}`}</small></div>${gm ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
+    const summary = `${gm&&this.getDestinations?'<button type="button" data-act="find-destination" class="wide">Find destination in realm or regional map</button>':''}<div class="tr-setup"><div class="grow"><b>${esc(METHODS[method].short)}, ${esc(pace.label.toLowerCase())} pace</b><small>${aboard ? `This leg: ${esc(this.vessel(s.legVessels?.[aboardIdx]).label.toLowerCase())}` : `${both(daily(s.pace))} a day · ${s.hours} h road · ${s.rest} h camp · ${how}`}</small></div>${gm ? `<button data-act="setup" class="${open ? "on" : ""}">${open ? "Done" : "Setup"}</button>` : ""}</div>`;
     const fr = { ...DEFAULT.fares, ...(s.fares ?? {}) };
     const settings = open ? `${summary}
       <div class="row"><label>Name<input type="text" name="name" value="${esc(s.name)}" placeholder="${esc(title)}"></label></div>

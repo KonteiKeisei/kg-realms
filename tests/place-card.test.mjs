@@ -1,6 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyEdits } from "../scripts/places.mjs";
+import {placeLayer} from '../scripts/map-layers.mjs';
+
+test('legacy area labels preserve kinds, coordinates, borders and links without rewriting saved records',()=>{
+  const base=[{id:'territory',name:'North',class:'Region',kind:'territory',lon:1,lat:2,area:[[0,0],[1,0],[1,1]],scene:'detail'},{id:'natural',name:'The Steppes',class:'Macroregion',kind:'natural',kindChosen:true,lon:3,lat:4},{id:'domain',name:'Kingdom',class:'Kingdom',kind:'domain',lon:5,lat:6}];
+  const edits={edits:{territory:{lon:10}},added:{}},before=structuredClone({base,edits});
+  const out=applyEdits(base,edits);
+  assert.equal(out[0].class,'Area');assert.equal(out[0].kind,'territory');assert.equal(out[0].lon,10);assert.equal(out[0].scene,'detail');assert.deepEqual(out[0].area,base[0].area);
+  assert.equal(out[1].class,'Area');assert.equal(out[1].kind,'natural');assert.equal(placeLayer(out[1]),'geo');
+  assert.equal(out[2].class,'Kingdom');assert.equal(out[2].kind,'domain');assert.equal(placeLayer({class:'Area'}),'realms');
+  assert.deepEqual({base,edits},before);
+});
 
 test("a place's visibility: Hidden, Rumoured or Discovered, with older hidden edits still hidden", () => {
   const base = [{ id: "a", name: "Neverwinter", hidden: true }, { id: "b", name: "Port Llast" }, { id: "c", name: "Saltmarsh" }, { id: "d", name: "Luskan" }];

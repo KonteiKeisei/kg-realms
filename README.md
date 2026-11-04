@@ -1,6 +1,6 @@
 # KG Realms
 
-Realm maps for Foundry VTT (v13 and v14, D&D 5e). Turn a world map into a living travel map: places with cards and journals, roads, rivers and sea lanes, regions, biomes, journeys planned and played out day by day, camps and watches, encounters, weather, night and seasons, and settlement maps the party can walk or ride through.
+Realm maps for Foundry VTT (v13 and v14, D&D 5e). Turn a world map into a living travel map: places with cards and journals, roads, rivers and sea lanes, areas, biomes, journeys planned and played out day by day, camps and watches, encounters, weather, night and seasons, and settlement maps the party can walk or ride through.
 
 KG Realms is the engine. A world is either one you make from your own map picture, or one that comes in a world module.
 
@@ -20,7 +20,7 @@ Or download `kg-realms.zip` from the [latest release](https://github.com/KonteiK
 2. In the Scenes sidebar, right-click it and choose **Make realm world**.
 3. Give the world a name and the map's width in miles (from its left edge to its right). Travel times use it.
 4. Wait while KG Realms backs up the scene, cuts the picture into compressed map tiles and saves the world. A map 12,000 px wide takes a few minutes. Foundry stays usable meanwhile.
-5. Open the scene. It is now a realm map with nothing on it yet. Add places, roads, rivers, regions and biomes with the editors, and set a party token travelling.
+5. Open the scene. It is now a realm map with nothing on it yet. Add places, roads, rivers, areas and biomes with the editors, and set a party token travelling.
 
 The map's files are saved in Foundry's Data folder (`KG Realms Data/World/<world id>/`), outside every game world, so include that folder in your backups. Places, roads and other edits are saved in the game world itself. Right-click the scene again for:
 
@@ -69,3 +69,5 @@ GM encounter previews: hover a red encounter dot on the realm or regional map to
 Link a detailed regional map beneath a realm by placing an aspect-matched rectangle. Regional scale and terrain control travel inside its coverage, including journeys that enter and leave it. Both map views share one journey. See [Regional map setup and travel](docs/regional-maps.md).
 
 Party token outlines: Configure Settings > KG Realms > Party token appearance > Configure token outlines. The GM's colour applies to the glowing outer outline and portrait borders; the surrounding band is transparent.
+
+Areas group Domains and Territories, each with its own border. Regional maps are the detailed maps beneath a realm. Foundry Regions remain Foundry's own scene feature.

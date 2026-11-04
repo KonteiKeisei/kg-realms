@@ -1,6 +1,7 @@
 // The hover card on a region's places, for everyone: a quick preview. A double-click on a place
 // opens its place card (place-card.mjs), for the GM and players alike.
 
+import {placeClass} from './map-layers.mjs';
 import { metres, sceneToLatLon } from "./geo.mjs";
 import { sourceMiles } from './source-map.mjs';
 import { excerptHtml } from "./place-card.mjs";
@@ -15,7 +16,7 @@ const ICONS = {
   Battlefield: "fa-khanda", Mine: "fa-hammer", Temple: "fa-place-of-worship", Tomb: "fa-skull", Inn: "fa-beer-mug-empty",
   Cave: "fa-mountain", Cavern: "fa-mountain", Volcano: "fa-volcano", Portal: "fa-circle-notch", Shipwreck: "fa-anchor",
   Rapids:"fa-water",Waterfall:"fa-water",Oasis: "fa-tree", "Water Source": "fa-droplet", Pass: "fa-route", Bay: "fa-water", Island: "fa-umbrella-beach"
-  ,Forest:"fa-tree",Mountains:"fa-mountain",Hills:"fa-mountain",River:"fa-water",Lake:"fa-water",Sea:"fa-water",Ocean:"fa-water",Marsh:"fa-water",Swamp:"fa-water",Desert:"fa-sun",Glacier:"fa-snowflake",Region:"fa-map",Road:"fa-route",Trail:"fa-route",Lair:"fa-dungeon",Hamlet:"fa-house",Keep:"fa-chess-rook",Fort:"fa-chess-rook",Ruin:"fa-dungeon",Islands:"fa-umbrella-beach"
+  ,Forest:"fa-tree",Mountains:"fa-mountain",Hills:"fa-mountain",River:"fa-water",Lake:"fa-water",Sea:"fa-water",Ocean:"fa-water",Marsh:"fa-water",Swamp:"fa-water",Desert:"fa-sun",Glacier:"fa-snowflake",Area:"fa-map",Region:"fa-map",Road:"fa-route",Trail:"fa-route",Lair:"fa-dungeon",Hamlet:"fa-house",Keep:"fa-chess-rook",Fort:"fa-chess-rook",Ruin:"fa-dungeon",Islands:"fa-umbrella-beach"
 };
 export const iconFor = (p) => ICONS[p.class] ?? (p.kind === "settlement" ? "fa-house" : "fa-location-dot");
 const MILES = 1609.344;
@@ -231,7 +232,7 @@ export class PlaceCard {
         distance ? `<span><i class="fa-solid fa-person-walking"></i>${esc(distance)} away</span>` : "",
         p.factions ? `<span class="wide"><i class="fa-solid fa-flag"></i>${esc(p.factions.split(",").slice(0, 4).join(", "))}</span>` : ""
       ].join("");
-      const badge = `<span class="badge ${p.gold ? "gold" : ""}"><i class="fa-solid ${iconFor(p)}"></i>${esc(p.class ?? "Place")}</span>`;
+      const badge = `<span class="badge ${p.gold ? "gold" : ""}"><i class="fa-solid ${iconFor(p)}"></i>${esc(placeClass(p) ?? "Place")}</span>`;
       this.el.className = `kgr-ui kgr-panel kgr-card ${img ? "" : "small"}${p.gmOnly?' kgr-gm-only':''}`;
       this.el.innerHTML = `
         ${img ? `<div class="art" style="background-image:url('${esc(foundry.utils.getRoute(img))}')">${badge}</div>` : ""}
