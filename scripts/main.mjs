@@ -1,3 +1,4 @@
+import {registerPartyAppearance} from './party-appearance.mjs';
 import { RegionalMaps } from "./regional-service.mjs";
 import { receiveCampMessage } from "./camp-messages.mjs";
 import { PartyTokenFit } from "./party-token-fit.mjs";
@@ -97,7 +98,7 @@ const regionOf = (scene) => (scene?.getFlag(MODULE_ID, "world") ? scene.flags[MO
 let current = null; // { scene, region, world (the index), places (edits applied) }
 
 const regional = new RegionalMaps({
-  loadWorld, getLayer:()=>layer, getEdits:id=>editsOf(id),
+  loadWorld, getLayer:()=>layer, onPlacementStart:()=>{if(editor.active)editor.onClose();hud.suspend(true);}, onPlacementEnd:()=>hud.suspend(false), getEdits:id=>editsOf(id),
   rawPlaces:(id,places)=>applyEdits(places,editsOf(id),"surface"),
   getTerrain:async(id,data)=>{await loadShippedWaterways(id);await loadShippedBiomes(id);return terrainFor(id,data);},
   getBiomes:id=>biomesOf(id),
@@ -184,7 +185,7 @@ const partyManager=new PartyManager({before:scene=>syncJourney(scene,{force:true
 cityTravel.partyManager=partyManager;
 const partyPortraits=new PartyPortraits(),partyInterface=new PartyInterface(partyManager);
 const partyTokenFit=new PartyTokenFit({isParty:t=>sceneParties(canvas.scene).some(p=>p.id===t.document?.id||p===t.document||p===t)});
-Hooks.once('init',()=>{partyPortraits.install();partyInterface.install();partyTokenFit.install();});
+Hooks.once('init',()=>{registerPartyAppearance(()=>partyPortraits.fitStrokes());partyPortraits.install();partyInterface.install();partyTokenFit.install();});
 Hooks.once("init", () => {localMaps.install();cityTravel.install();});
 // Biome climates (biome-climate.mjs): added to each calendar, and the settlement takes its place's.
 Hooks.once("init", () => game.settings.register(MODULE_ID, "biomeClimatesAdded", { scope: "world", config: false, type: Object, default: {} }));
@@ -1286,6 +1287,7 @@ async function drawRegion() {
   journeyLight.setRoutes(current.drawn);
   hud.mount();
   layersRail.mount();
+  if(regional.links[region.world])layersRail.setLayer("places");
   nightLights.draw(current.places, layer.frame);
   attachSnow();
   // The edit-only markings (hidden places ringed, edited names coloured) show only in the map editor.

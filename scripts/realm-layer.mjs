@@ -95,12 +95,12 @@ export class RealmLayer {
   }
 
   /** A planned journey's path ([lon, lat] list), or null to clear it. wet: whether each point is by water. */
-  setJourney(coords, camps = [], wet = null) {
-    this.journey = [coords, camps, wet];
+  setJourney(coords, camps = [], wet = null, parts = null) {
+    this.journey = [coords, camps, wet, parts];
     this.onJourneyChanged?.(coords);
     this.#apply("journey", (map) => {
-      const [line, marks, water] = this.journey;
-      map.getSource("journey")?.setData({ type: "FeatureCollection", features: journeyFeatures(line, water) });
+      const [line, marks, water, segments] = this.journey;
+      map.getSource("journey")?.setData({ type: "FeatureCollection", features: segments?segments.flatMap(s=>journeyFeatures(s.coords,s.wet)):journeyFeatures(line, water) });
       map.getSource("journey-camps")?.setData({ type: "FeatureCollection", features: (marks ?? []).map((c) => ({ type: "Feature", properties: { label: c.label ?? "", name: c.name ?? "", kind: c.kind ?? "camp", selected: !!c.selected }, geometry: { type: "Point", coordinates: c.at } })) });
     });
   }

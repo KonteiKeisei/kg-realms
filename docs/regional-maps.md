@@ -1,57 +1,46 @@
 # Regional maps
 
-A regional map is a detailed travel map linked beneath a realm and above settlement maps. Its own scale and terrain determine travel inside its coverage, even when the party is viewing the realm overview. A journey can enter, leave and re-enter regions without ending at their borders.
+A regional map is a detailed travel map beneath a realm and above settlements. It owns travel distance and terrain within its coverage. Its size on the realm artwork is independent of its scale in miles.
 
-## Create and link a map
+## Create or reposition a regional map
 
-1. View the parent realm map (for example Map of Faerun). Press **E** to open the KG Realms **Map editor**, then choose its **Places** tab.
-2. Click **Draw regional coverage** at the top of Places. In the dialog, select **Icewind Dale** if that place already exists. Otherwise leave **Create a new region** selected and enter a name. Click **Draw coverage on the map**. For a new region, first click inside it to place its label.
-3. Click around the outer edge of the regional coverage to add at least three corners. Click the first corner again, click **Finish closed coverage**, or press **Enter** to close and save the outline. Escape cancels drawing. These are KG Realms map controls, not Foundry's native Drawing tools.
-4. Click **Done editing** in the orange bar at the top of the map. The outline is now available in the regional-map setup dialog.
-5. Create a Foundry scene with the detailed picture as its Background Image. Right-click that scene in the directory and choose **Make regional map**.
-6. Enter the picture's full width in miles. This is the regional scale, independent of the size of its footprint on the realm artwork. The picture is processed with the existing map tile builder and its original scene is backed up.
-7. Choose the parent realm scene and its closed area. **Fit picture to outline** initially aligns the picture's corners with the outline's bounding box.
-8. For better alignment, match three landmarks that form a triangle. Each row contains the same landmark's image pixel coordinates on the parent and regional maps. The **Pick** buttons fill them from map clicks. View the relevant scene before picking. Escape cancels a pick. Three-point alignment supports rotation and different horizontal and vertical stretching; it does not reshape the regional picture.
-9. Save, then review inherited POI positions and trace the detailed roads. Move inherited POIs to their exact regional positions with the existing map editor. Draw regional roads up to the coverage edge so that they meet the parent roads. Parent roads inside the coverage are superseded.
+1. Put the detailed picture in a Foundry scene as its Background Image. Right-click that scene and choose **Make regional map**. Enter the picture's full width in miles, then click **Build regional map**.
+2. Choose the parent realm and click **Place rectangle on realm**. For an already built map, right-click its scene and choose **Regional map settings**. Its tiles do not need rebuilding.
+3. On the parent realm, **drag inside the rectangle** to move it. Hold **Alt and scroll the mouse wheel** to resize it. The rectangle keeps the picture's aspect ratio; resizing never changes regional miles.
+4. Click **Use this rectangle** to save. **Cancel** or **Escape** leaves the existing link unchanged. Four-corner alignment is automatic.
+5. Open the detailed scene, then **Map editor > Roads**. Every parent road or trail crossing the rectangle has a named crossing marker on both maps, such as **Trail crossing 1** and **Trail crossing 2**. Draw regional roads from these markers to POIs and other crossings. The road editor snaps to them.
+6. Review inherited POIs and move their regional markers onto the correct locations. Moving them does not move their realm markers. Journals, settlement links and discovery metadata remain shared.
 
-### Finding the outline controls in 0.92.0
+No territory outline is required first. Older polygon links remain supported; Regional map settings can replace them with a rectangular placement. Regional scenes open on the Places layer so the crossing markers are visible. Reopen or refresh a map after editing parent roads to refresh its crossing markers.
 
-The direct Draw regional coverage action was added in 0.92.2. In 0.92.0, the border tools only appear after selecting a place:
+## Refine placement
 
-1. In Map editor > Places, type Icewind Dale in **Find a place**, then click its result.
-2. In the selected place's controls, choose **Shape > Area**. Then click **Draw border** or **Redraw border**.
-3. Click at least three corners, then click the **first corner** to close the outline. In this older drawing mode, Enter and double-click finish an open line, which regional setup cannot use.
-4. If there is no existing place, click **Add place**, choose **Territory**, then click inside the region. Name it in its place card, close the card, select the new place, and follow steps 2 and 3.
+Choose **Advanced three-landmark alignment** in Regional map settings if the corner registration needs refinement. Match three non-collinear landmarks using each map's image pixel coordinates. **Pick** fills a coordinate pair from a click on the relevant map. Existing rectangular coverage is available for refinement without drawing a separate territory.
 
-An already converted map can be linked using **Regional map settings** in its scene context menu. The **Regional maps** control on a realm lists maps that can be linked or adjusted. Use **Realm world settings** to correct a homebrew map's width in miles. Reopen regional settings after changing the coverage outline to adopt its new boundary.
+Exact outline-to-picture containment is not required. For older polygon coverage extending beyond the picture, regional scale still applies, with realm roads and terrain filling unmatched areas.
 
-Keep the authoritative party token on the parent realm. The regional map shows a linked mirror while that party is inside its coverage. Engine-created mirrors are removed on exit. Existing placed content is preserved.
+## Travel across boundaries
 
-## Places
+One itinerary can enter, leave and re-enter regions. The planner compares true distances, including roads around regional coverage. Roads and trails connect through the generated crossing points.
 
-Parent POIs inside the outline appear on the regional map without copying their journals, settlement links or discovery state. Metadata edits on inherited markers go back to the canonical parent place. Regional coordinate adjustments stay on the regional map.
+Across-country travel can cross anywhere on the coverage edge. Its crossing is calculated from the route, without requiring a road entrance. Flying can also cross anywhere, uses regional miles, and ignores ground penalties. Existing realm water routes receive corrected regional mileage; regional-only waterway routing and automatic cross-map boat suggestions remain deferred.
 
-Places created in the region belong to that region. In regional settings, select the places that should also have an approximate marker on the realm. These markers retain the regional place's visibility and metadata. Publishing a marker never reveals a hidden place. Coordinate edits to an approximate realm marker stay local to the realm.
+An 80-mile approach, a 150-mile regional crossing and a 60-mile onward journey total 290 miles, even if the overview artwork suggests only 30 miles for the crossing. At 3 mph on open ground, that crossing takes 50 moving hours in either view. Camps, encounters, rests and camp escapes use the journey's travel rules.
 
-The Travel panel's **Find destination in realm or region** searches linked places, including regional places without a permanent realm marker. Destination routing uses the regional position. The realm's ordinary map search can also find linked regional places.
+The regional map displays only the journey portions and markers within its coverage and picture. A realm trip that never visits it contributes no route or encounter overlay. Separate visits remain separate lines. The authoritative journey stays on the parent realm. Regional group-token mirrors exist only while the party is inside the detailed coverage. Existing placed scene content is preserved.
 
-## Travel and views
+The HUD opens either map view without activating a scene for everyone. Either linked scene can be activated normally without inserting an away pause. Settlements and encounter scenes retain the existing away-pause behaviour.
 
-The route planner combines roads from the realm and its regions and compares their true travel costs. It can choose roads around a region when those are shorter. Direct travel also uses regional scale while inside coverage. Regional terrain affects ground travel; flying uses regional distances while ignoring ground penalties.
+## POIs and destinations
 
-For example, an 80-mile approach, a 150-mile regional crossing and a 60-mile onward journey total 290 miles, even if the realm artwork makes the crossing look only 30 miles long. At 3 mph on open ground, the crossing takes 50 moving hours in either view. Rests, pace, encounters and terrain apply through the existing journey rules. Abandoning camp also measures its escape and return distance using the owning maps, including a flight across a regional border.
+Parent POIs within coverage are inherited without rebuilding journals or settlement maps. Coordinates are separate on each map; metadata remains linked to the canonical place. Regional roads and precise POI positions determine regional travel distances while realm markers retain their approximate positions.
 
-The travel log includes entry and exit rows. The HUD shows which scale applies at the current position and provides **Open regional map** and **View realm map** actions. These open the GM's view; they do not activate a scene for all players. The GM can activate either linked scene normally. Both views read and control the same parent-owned journey, including its camps and party selection. Switching between them does not count as time away from travel. Settlement and encounter scenes retain the existing away-pause behaviour.
+**Find destination in realm or region** in the Travel panel finds linked regional POIs, including those without permanent realm markers. The realm's ordinary search also finds them. Advanced regional settings can publish approximate realm markers for regional-only places, preserving their discovery state.
 
-Regional encounters are projected onto the shared journey using native regional reach distances. Existing realm waterways can cross regional coverage and receive corrected mileage. Regional-only waterway routing and automatic boat suggestions across map boundaries are not part of this first version. Use the realm's water routes for such journeys.
+## Saved journeys and validation
 
-## Saved journeys and limits
+New journeys in linked realms save their itinerary at departure. Later map edits do not retime that saved route. Explicit route, method or pace edits replan it. Journeys already underway before regions were linked retain their old calculation; finish or clear them before starting a new journey that should use regional coverage.
 
-- New journeys in a realm with regional maps save their calculated itinerary at departure. Editing map scale, terrain or roads cannot rewrite the timing of that saved itinerary. Explicit route, pace or method edits deliberately rebuild it. Existing walking-speed changes still apply through the existing timing history.
-- Journeys already underway before linking a region retain their previous calculation. Finish or clear them before starting a journey that should use the new coverage.
-- If required regional data is unavailable, a new plan fails with an explicit error instead of estimating regional travel at realm scale. Previously saved itineraries retain their timing.
-- This version supports one regional level beneath a realm. Coverage areas must be separate and must not overlap or touch. The aligned regional picture must cover the whole selected footprint.
-- Positioning is a three-point affine alignment. It accommodates a regional map whose scale differs from the realm artwork, but cannot automatically resolve every inconsistency between two cartographers. Review POIs and border road connections after aligning.
-- Links are stored in the Foundry world's KG Realms settings. After exporting and importing maps into another game world, configure the links again so they reference that world's scenes.
+This version supports one regional level with separate non-touching coverage areas. Links are stored in Foundry world settings; reconfigure them after exporting maps to a different game world.
 
-Automated tests cover scale transitions, through-travel, repeated crossings, route alternatives, terrain, flight, POIs, projected encounters, shared views, token mirrors and saved itineraries. Native Foundry rendering and multiplayer scene transitions still need live validation.
+Automated tests cover placement gestures, aspect preservation, crossing markers, route clipping, repeated entry, POI identity, mileage, terrain, flight, encounters, camp escapes and saved plans. Native Foundry rendering and multiplayer transitions still need live validation.

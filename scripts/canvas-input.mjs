@@ -10,7 +10,7 @@ const ON_CANVAS = new Set(["pointerdown", "dblclick", "contextmenu"]);
 /** Listen with handlers { type: fn }; returns a function that stops listening. */
 export function onCanvas(handlers) {
   const list = Object.entries(handlers).map(([type, fn]) => [type, (e) => { if (!ON_CANVAS.has(type) || e.target === canvas.app?.view) fn(e); }]);
-  for (const [type, fn] of list) window.addEventListener(type, fn, { capture: true });
+  for (const [type, fn] of list) window.addEventListener(type, fn, type==="wheel"?{capture:true,passive:false}:{ capture: true });
   return () => { for (const [type, fn] of list) window.removeEventListener(type, fn, { capture: true }); };
 }
 

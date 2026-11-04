@@ -328,7 +328,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
   function finish(r) {
     if (!r) return null;
     if (segments) {
-      const legs=r.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,nativePts:[s.nativeFrom,s.nativeTo],terrain:terrainAt((s.from[0]+s.to[0])/2,(s.from[1]+s.to[1])/2).name}))));
+      const legs=r.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo],terrain:terrainAt((s.from[0]+s.to[0])/2,(s.from[1]+s.to[1])/2).name}))));
       return {legs,miles:legs.reduce((n,l)=>n+l.miles,0),normalHours:r.cost};
     }
     const legs = r.legs.map((l) => {
@@ -340,7 +340,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
 }
 
 export function metricPlan(plan, segments) {
-  const legs=plan.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,nativePts:[s.nativeFrom,s.nativeTo]}))));
+  const legs=plan.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo]}))));
   return {...plan,legs,miles:legs.reduce((n,l)=>n+l.miles,0)};
 }
 
@@ -370,13 +370,13 @@ export function schedule(plan, { pace = "normal", hoursPerDay = 8, terrainAt = (
         const p = [a[0] + (b[0] - a[0]) * (j + 0.5) / n, a[1] + (b[1] - a[1]) * (j + 0.5) / n];
         const T=terrainAt(...p), v = speed(leg, T);
         const at = leg.nativePts ? [a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n] : p;
-        samples.push({ at, hour, kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,terrain:T}: {}) });
+        samples.push({ at, hour, kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,regionalFallback:leg.regionalFallback,terrain:T}: {}) });
         hour += distance / n / v; miles += distance / n;
       }
     }
   }
   if(plan.legs.some(l=>l.nativePts)){
-    const last=plan.legs.at(-1);samples.push({at:last.pts.at(-1),hour,miles,worldId:last.worldId,regionTitle:last.regionTitle,terrain:terrainAt(...last.pts.at(-1)),kind:last.kind,v:0});
+    const last=plan.legs.at(-1);samples.push({at:last.pts.at(-1),hour,miles,worldId:last.worldId,regionTitle:last.regionTitle,regionalFallback:last.regionalFallback,terrain:terrainAt(...last.pts.at(-1)),kind:last.kind,v:0});
   }
   const total = hour;
   const dayCount = Math.max(1, Math.ceil(total / hoursPerDay - 1e-9));
@@ -505,7 +505,7 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
     legs.push({ from, to, plan, sched, days: sched.days.length, miles: plan.miles, hours: sched.hours, start: startHour, mode: m, method: h.method?.key ?? "foot", sea: bySea, autoSea, crewed: perDay >= 24 });
   }
   path.push({ at: waypoints.at(-1), day: days.length });
-  track.push({ at: waypoints.at(-1), hour: clock, leg: legs.length - 1, ...(segments?{worldId:track.at(-1)?.worldId,regionTitle:track.at(-1)?.regionTitle,terrain:track.at(-1)?.terrain,miles:legs.reduce((n,l)=>n+l.miles,0)}:{}) });
+  track.push({ at: waypoints.at(-1), hour: clock, leg: legs.length - 1, ...(segments?{worldId:track.at(-1)?.worldId,regionTitle:track.at(-1)?.regionTitle,regionalFallback:track.at(-1)?.regionalFallback,terrain:track.at(-1)?.terrain,miles:legs.reduce((n,l)=>n+l.miles,0)}:{}) });
   return { legs, days, path, track, legEnds, sail, hours: clock, miles: legs.reduce((s, l) => s + l.miles, 0), ground };
 }
 

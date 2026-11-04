@@ -1149,7 +1149,7 @@ export class TravelHud {
     const sample=this.result?.track.findLast(q=>q.hour<=(progress?.hour??0));
     if((!game.user.isGM&&this.state.show==="none")||!this.result?.track.some(q=>q.regionTitle))return "";
     const regional=sample?.regionTitle,gm=game.user.isGM;
-    const title=regional?`In ${regional}: regional scale applies`:'Realm scale applies outside regional coverage';
+    const title=regional?`In ${regional}: regional scale applies${sample.regionalFallback?" (realm terrain beyond the detailed picture)":""}`:'Realm scale applies outside regional coverage';
     return `<div class="tr-regional"><small>${esc(title)}</small>${gm?`<button type="button" data-act="regional-view" data-world="${esc(regional?sample.worldId:'')}">${regional?'Open regional map':'View realm map'}</button>${regional?'<button type="button" data-act="regional-view" data-world="">View realm map</button>':''}`:''}</div>`;
   }
 

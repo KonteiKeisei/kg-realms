@@ -13,7 +13,7 @@ test('scene actions open regional-specific creation and settings dialogs without
   const entry=id=>{const el=new HTMLElement();el.dataset={entryId:id};return el;};
   registerHomebrew();const actions=[];handlers.get('getSceneContextOptions')(null,actions);
   await actions.find(a=>a.name==='Make regional map').callback(entry('picture'));
-  assert.equal(dialogs[0].window.title,'Make regional map');assert.match(dialogs[0].content,/Regional map name/);assert.match(dialogs[0].content,/choose its parent realm and coverage outline/);assert.equal(dialogs[0].buttons[0].label,'Build regional map');
+  assert.equal(dialogs[0].window.title,'Make regional map');assert.match(dialogs[0].content,/Regional map name/);assert.match(dialogs[0].content,/choose its parent realm and place an aspect-matched rectangle/);assert.equal(dialogs[0].buttons[0].label,'Build regional map');
   await actions.find(a=>a.name==='Realm world settings').callback(entry('made'));
   assert.match(dialogs[1].content,/Regional map name/);
   settings.regionalMaps={};

@@ -41,9 +41,11 @@ export function compileRegions(parent, children) {
     const projection=sourceProjection(data.sourceMap),transform=affine(link.anchors),polygon=link.footprint.map(p=>root.toSource(...p));
     const area=polygon.reduce((sum,p,i)=>{const q=polygon[(i+1)%polygon.length];return sum+p[0]*q[1]-p[1]*q[0];},0);
     if(Math.abs(area)<1e-6)throw Error(`${link.title}: the regional outline has no area.`);
-    for(const p of polygon){const q=transform.toRegion(p);if(q[0]<-1||q[1]<-1||q[0]>data.sourceMap.width+1||q[1]>data.sourceMap.height+1)throw Error(`${link.title}: the outline extends outside the aligned regional picture.`);}
+    const hasArtwork=p=>{const q=transform.toRegion(p);return q[0]>=-1e-6&&q[1]>=-1e-6&&q[0]<=data.sourceMap.width+1e-6&&q[1]<=data.sourceMap.height+1e-6;};
+    const artworkPolygon=[[0,0],[data.sourceMap.width,0],[data.sourceMap.width,data.sourceMap.height],[0,data.sourceMap.height]].map(transform.toParent);
+    const uncovered=polygon.some(p=>!hasArtwork(p));
     const origin=transform.toRegion([0,0]),x=transform.toRegion([1,0]),y=transform.toRegion([0,1]),resolution=1/Math.max(1,Math.hypot(x[0]-origin[0],x[1]-origin[1]),Math.hypot(y[0]-origin[0],y[1]-origin[1]));
-    return {...link,projection,...transform,polygon,terrainAt,data,resolution};
+    return {...link,projection,...transform,polygon,terrainAt,data,resolution,hasArtwork,artworkPolygon,uncovered};
   });
   // Ambiguous ownership must never depend on setting insertion order.
   for(let i=0;i<regions.length;i++)for(let j=0;j<i;j++){
@@ -52,21 +54,21 @@ export function compileRegions(parent, children) {
   }
   const owner=p=>regions.find(r=>pointInBiome(p,r.polygon));
   const segments=(a,b)=>{
-    const cuts=[...new Set([0,1,...regions.flatMap(r=>segmentCuts(a,b,r.polygon))])].sort((x,y)=>x-y),out=[];
+    const cuts=[...new Set([0,1,...regions.flatMap(r=>[...segmentCuts(a,b,r.polygon),...segmentCuts(a,b,r.artworkPolygon)])])].sort((x,y)=>x-y),out=[];
     for(let i=1;i<cuts.length;i++){
       const from=mixPoint(a,b,cuts[i-1]),to=mixPoint(a,b,cuts[i]),r=owner(mixPoint(from,to,.5)),nativeA=r?r.toRegion(from):from,nativeB=r?r.toRegion(to):to;
-      out.push({from,to,miles:Math.hypot(nativeB[0]-nativeA[0],nativeB[1]-nativeA[1])*(r?.data.sourceMap.milesPerPixel??root.sourceMap.milesPerPixel),worldId:r?.world??parent.id,regionTitle:r?.title,nativeFrom:nativeA,nativeTo:nativeB});
+      out.push({from,to,miles:Math.hypot(nativeB[0]-nativeA[0],nativeB[1]-nativeA[1])*(r?.data.sourceMap.milesPerPixel??root.sourceMap.milesPerPixel),worldId:r?.world??parent.id,regionTitle:r?.title,regionalFallback:!!r&&!r.hasArtwork(mixPoint(from,to,.5)),nativeFrom:nativeA,nativeTo:nativeB});
     }return out;
   };
-  const terrainAt=(fallback)=>(x,y)=>{const r=owner([x,y]);return r?r.terrainAt(...r.toRegion([x,y])):fallback(x,y);};
-  // Parent roads inside a region are superseded. Only regional roads inside its footprint survive.
+  const terrainAt=(fallback)=>(x,y)=>{const r=owner([x,y]);return r&&r.hasArtwork([x,y])?r.terrainAt(...r.toRegion([x,y])):fallback(x,y);};
+  // Detailed roads supersede the parent where the picture exists. Unmatched fringes keep parent roads at regional scale.
   const roads=(parentRoutes, childRoutes)=>{
     const features=[];
     const add=(collection,r)=>{for(const f of collection?.features??[]){
       if(f.geometry?.type!=='LineString')continue;
       const pts=f.geometry.coordinates.map(p=>r?r.toParent(r.projection.toSource(...p)):root.toSource(...p));let run=[];
       const flush=()=>{if(run.length>1)features.push({type:'Feature',properties:{...f.properties,regionalResolution:r?.resolution??1,id:`${r?.world??parent.id}:${f.properties?.id??'road'}:${features.length}`},geometry:{type:'LineString',coordinates:run.map(q=>root.toLonLat(...q))}});run=[];};
-      for(let i=1;i<pts.length;i++)for(const s of segments(pts[i-1],pts[i])){const own=owner(mixPoint(s.from,s.to,.5));if((r&&own!==r)||(!r&&own)){flush();continue;}if(!run.length)run.push(s.from);run.push(s.to);}flush();
+      for(let i=1;i<pts.length;i++)for(const s of segments(pts[i-1],pts[i])){const midpoint=mixPoint(s.from,s.to,.5),own=owner(midpoint);if((r&&(own!==r||!r.hasArtwork(midpoint)))||(!r&&own&&own.hasArtwork(midpoint))){flush();continue;}if(!run.length)run.push(s.from);run.push(s.to);}flush();
     }};
     add(parentRoutes,null);for(const r of regions)add(childRoutes[r.world],r);return {type:'FeatureCollection',features};
   };

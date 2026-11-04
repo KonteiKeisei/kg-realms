@@ -64,4 +64,6 @@ Hooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld({
 
 ## Regional maps
 
-Link a detailed regional map beneath a realm. Regional scale and terrain control travel inside its coverage, including journeys that enter and leave it. Both map views share one journey. See [Regional map setup and travel](docs/regional-maps.md).
+Link a detailed regional map beneath a realm by placing an aspect-matched rectangle. Regional scale and terrain control travel inside its coverage, including journeys that enter and leave it. Both map views share one journey. See [Regional map setup and travel](docs/regional-maps.md).
+
+Party token outlines: Configure Settings > KG Realms > Party token appearance > Configure token outlines. The GM's colour applies to the glowing outer outline and portrait borders; the surrounding band is transparent.

@@ -1,3 +1,4 @@
+import {partyOutlineValue,drawPartyOutline} from './party-appearance.mjs';
 import {groupMembers,groupActor,tokenDoc,familyActors,rosterStamp,partyMeta} from './party-groups.mjs';
 import {isPrimaryGM} from './authority.mjs';
 const ID='kg-realms',esc=s=>foundry.utils.escapeHTML(String(s??''));
@@ -60,10 +61,10 @@ export class PartyPortraits {
   if(token.destroyed||token.kgrPartyEpoch!==epoch){for(const p of images)if(p)this.cache.release(p.src);return;}
   for(const p of token.kgrPartyImages??[])if(p)this.cache.release(p.src);token.kgrPartyImages=images;
   token.kgrPartyPortraits?.destroy({children:true});const root=token.kgrPartyPortraits=new PIXI.Container();root.eventMode='none';token.addChild(root);
-  const layout=portraitLayout(w,h,members.length),d=Math.min(w,h),ringR=layout.length>1?Math.hypot(layout[0].x-w/2,layout[0].y-h/2):0,band=(layout[0]?.r??0)*1.22;
-  // A ring of its own that holds the portraits (0.69.1): a dark band under them, edged in gold, inside
-  // the token's square, so they never spill past a party token art whose own ring is smaller.
-  const track=new PIXI.Graphics();root.addChild(track);
+  const layout=portraitLayout(w,h,members.length),d=Math.min(w,h),outlineRadius=d*.468;
+  // Transparent surround: additive glow behind a single outer outline.
+  const glow=new PIXI.Graphics();glow.blendMode=PIXI.BLEND_MODES.ADD;
+  const track=new PIXI.Graphics();root.addChild(glow,track);
   const strokes=[];
   layout.forEach((p,i)=>{
    if(!images[i]){const label=new PIXI.Text((members[i].name??'?').slice(0,1),{fontSize:p.r,fontFamily:'Arial',fill:0xe8d6b5});label.anchor.set(.5);label.position.set(p.x,p.y);root.addChild(label);}
@@ -74,10 +75,7 @@ export class PartyPortraits {
   // Lines a steady width on screen at any zoom or display scale (redrawn on zoom: fitStrokes).
   token.kgrPartyStrokes=()=>{
    if(root.destroyed)return;const zoom=(canvas.stage?.scale?.x||1)*(token.kgrFitFactor||1),line=Math.min(d*.03,Math.max(d*.004,1.4/zoom));
-   track.clear();
-   if(ringR){track.lineStyle({width:band*2,color:0x15110d,alpha:.82,alignment:.5}).drawCircle(w/2,h/2,ringR);
-    track.lineStyle({width:line,color:0xd9a441,alpha:.9,alignment:.5}).drawCircle(w/2,h/2,ringR+band).drawCircle(w/2,h/2,ringR-band);}
-   for(const {g,p}of strokes){g.clear().lineStyle({width:line,color:0xe8d6b5,alpha:.9,alignment:.5}).drawCircle(p.x,p.y,p.r);}
+   drawPartyOutline(track,glow,strokes,{width:w,height:h,radius:outlineRadius,line,colour:partyOutlineValue()});
   };
   token.kgrPartyStrokes();
   token.kgrFitNow?.();

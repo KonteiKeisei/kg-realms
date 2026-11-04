@@ -54,11 +54,24 @@ test('routing compares the true regional cost with roads that go around its foot
   const r=itinerary(buildGraph(roads.features,root.toSource,[],{precision:1e6}),[[20,115],[190,115]],{mode:'roads',milesPerPixel:1,segments:network.segments,terrainAt:network.terrainAt(()=>TERRAIN[1])});
   assert.ok(r.miles<250);assert.ok(!r.track.some(p=>p.regionTitle));
 });
-test('collinear anchors, overlapping footprints and uncovered map areas fail explicitly',()=>{
+test('invalid anchors and overlapping footprints fail, while an imperfect picture fit is accepted',()=>{
   const {parent,data,link}=fixture();assert.throws(()=>affine([{parent:[0,0],region:[0,0]},{parent:[1,1],region:[1,1]},{parent:[2,2],region:[2,2]}]),/triangle/);
   assert.throws(()=>compileRegions(parent,[{link,data},{link:{...link,world:'other'},data}]),/overlap/);
-  assert.throws(()=>compileRegions(parent,[{link:{...link,anchors:link.anchors.map(a=>({...a,region:a.region.map(n=>n/2+200)}))},data}]),/outside/);
+  const loose=compileRegions(parent,[{link:{...link,anchors:link.anchors.map(a=>({...a,region:a.region.map(n=>n/2+200)}))},data}]);assert.equal(loose.regions[0].uncovered,true);
   assert.deepEqual(segmentCuts([0,0],[10,0],[[3,-2],[7,-2],[7,2],[3,2]]),[0,.3,.7,1]);
+});
+test('imperfect picture coverage keeps regional scale and retains realm terrain and roads in the unmatched fringe',()=>{
+  const {parent,data,root,link}=fixture();
+  // The regional picture covers the right half of the outlined region, but not the left half.
+  const shifted={...link,anchors:link.anchors.map(a=>({...a,region:[a.region[0]-150,a.region[1]]}))};
+  let regionalQueries=0;
+  const n=compileRegions(parent,[{link:shifted,data,terrainAt:()=>{regionalQueries++;return TERRAIN[4];}}]),terrain=n.terrainAt(()=>TERRAIN[1]);
+  assert.equal(n.regions[0].uncovered,true);assert.equal(terrain(105,115),TERRAIN[1]);assert.equal(regionalQueries,0);assert.equal(terrain(120,115),TERRAIN[4]);
+  const road={type:'FeatureCollection',features:[{type:'Feature',properties:{id:'parent',kind:'road'},geometry:{type:'LineString',coordinates:[[100,115],[130,115]].map(p=>root.toLonLat(...p))}}]};
+  const roads=n.roads(road,{});assert.equal(roads.features.length,1);
+  near(root.toSource(...roads.features[0].geometry.coordinates.at(-1))[0],115);
+  const r=itinerary(buildGraph([],root.toSource),[[100,115],[130,115]],{mode:'direct',milesPerPixel:1,segments:n.segments,terrainAt:terrain});
+  near(r.miles,150);near(r.hours,75);assert.ok(r.track.some(p=>p.regionalFallback));assert.ok(r.track.some(p=>p.regionTitle&&!p.regionalFallback));
 });
 test('inherited and published POIs retain canonical identity, metadata and visibility',()=>{
   const {parent,data,link,root,child}=fixture(),bryn={id:'bryn',name:'Bryn Shander',lon:root.toLonLat(115,115)[0],lat:root.toLonLat(115,115)[1],scene:'town',hidden:true,area:[[1,1],[2,2],[3,3]]},discovery={id:'cave',name:'Cave',lon:child.toLonLat(100,100)[0],lat:child.toLonLat(100,100)[1],hidden:true};
@@ -88,7 +101,7 @@ test('regional view projects the same journey both ways and continues to use the
   const service=new RegionalMaps({});service.indexes={realm:parent,dale:data};
   const frame=makeFrame(data.sourceMap.bounds,{x:0,y:0,width:600,height:600});let drawn;
   const layer={frame,setJourney:(...args)=>drawn=args,toScreen:(lon,lat)=>[lon,lat],fromScreen:(lon,lat)=>[lon,lat],placeAt:()=> 'bryn'};
-  const view=service.viewLayer(layer,'dale'),ll=root.toLonLat(115,115),native=child.toLonLat(150,150);view.setJourney([ll],[{at:ll,name:'Party'}]);near(drawn[0][0][0],native[0]);near(drawn[1][0].at[1],native[1]);
+  const view=service.viewLayer(layer,'dale'),ll=root.toLonLat(115,115),native=child.toLonLat(150,150);view.setJourney([ll],[{at:ll,name:'Party'}]);assert.equal(drawn[0],null);near(drawn[1][0].at[1],native[1]);
   const pixel=latLonToScene(view.frame,ll[1],ll[0]);near(pixel.x,300);near(pixel.y,300);const back=sceneToLatLon(view.frame,pixel);near(back.lon,ll[0]);near(back.lat,ll[1]);assert.equal(view.placeAt(), 'bryn');assert.equal(service.rootScene(scene),owner);
 });
 

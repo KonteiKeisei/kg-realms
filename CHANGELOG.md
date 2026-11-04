@@ -1,5 +1,26 @@
 # KG Realms changelog
 
+## 0.93.1: transparent party surround and GM outline colour
+
+- Remove the dark donut band and inner band edge around party portraits. Keep a single outer outline with a layered additive glow matching the travel trails.
+- Add Party token appearance in module settings. The GM chooses one world-wide colour for the outer outline, its glow and all member portrait borders. Changes redraw on clients without reloading portrait images.
+- Preserve portrait positions and the central party artwork. Glow uses simple strokes rather than blur filters or an animation timer.
+
+## 0.93.0: rectangular region placement and road crossings
+
+- Choose the detailed map first, then place its aspect-matched rectangle on the parent realm. Drag to move, Alt + mouse wheel to resize, and Use this rectangle to save. Regional scale remains independent. Four-corner registration is automatic; three-landmark refinement remains available.
+- Generate named road/trail crossing markers on both maps from parent routes crossing regional coverage. Regional road drawing snaps to these markers. Crossings refresh from the parent road data when maps load or plans are rebuilt.
+- Clip realm journey lines and encounter/camp/party overlays to the regional footprint and picture. Trips outside the region no longer appear on its map. Repeated visits render as separate path segments.
+- Regional POI coordinates remain independent of realm marker coordinates. Existing maps can be repositioned without rebuilding their tiles.
+- Across-country and flying paths can cross any rectangle edge; road/trail endpoints are provided as explicit construction handles. Regional-only waterway routing remains deferred.
+
+## 0.92.3: allow imperfect regional alignment
+
+- Remove the rejection when a realm coverage outline extends outside the aligned regional picture. Cartographers' outlines do not have to match.
+- Keep regional distance throughout the selected coverage. Beyond the detailed picture, retain realm roads and terrain as a fallback, split routing at the picture edge, and identify the fallback in the HUD.
+- Keep regional token mirrors within the detailed picture. The authoritative realm token and journey continue through unmatched coverage.
+- Include the regional setup controls, dialog labels and expanded instructions from 0.92.2. Existing detailed maps can be linked through Regional map settings without rebuilding their tiles.
+
 ## 0.92.2: regional setup controls and instructions
 
 - Add Draw regional coverage directly to Map editor > Places, visible before selecting a place. Choose an existing region or name a new one, place its label, and draw its coverage on the map.
