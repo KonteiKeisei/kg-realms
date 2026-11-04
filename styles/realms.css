@@ -2045,6 +2045,18 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-travel .tr-regional { padding: 8px 12px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; border-bottom:1px solid var(--kgr-line); }
 .kgr-travel .tr-regional small { flex:1; color:var(--kgr-text-2); }
 
+/* Installed integration setup. */
+.kgr-integrations { padding: 16px; }
+.kgr-integrations h3 { margin: 18px 0 8px; font-size: 15px; }
+.kgr-integration-row { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--kgr-line); }
+.kgr-integration-row > div { flex: 1; min-width: 0; }
+.kgr-integration-row p { margin: 4px 0 0; color: var(--kgr-text-2); font-size: 12px; }
+.kgr-integration-row label { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.kgr-integration-enabled { color: var(--kgr-gold-text); font-size: 12px; }
+.kgr-integrations .kgr-integration-error { color: var(--kgr-danger); }
+.kgr-integrations footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.kgr-integrations footer button { flex: 1 1 auto; }
+.kgr-integrations [hidden] { display: none !important; }
 /* Private encounter cards are marked in both hover previews and full windows. */
 .kgr-ui.kgr-card.kgr-gm-only, .kgr-ui.kgr-hover-cue.kgr-gm-only, .kgr-ui.kgr-place-card.kgr-gm-only { border: 2px solid #ffbd45; box-shadow: 0 0 0 1px #e88124, 0 0 14px rgba(255, 165, 35, .28), 0 6px 24px rgba(0, 0, 0, .55); }
 .kgr-card .badge.gm-only, .kgr-place-card .kgc-vis.gm-only { display: inline-block; margin: 4px 0; padding: 3px 7px; border: 1px solid #e88124; border-radius: 4px; color: #ffd06b; background: rgba(130, 66, 10, .35); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }

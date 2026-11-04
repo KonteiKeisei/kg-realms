@@ -1,4 +1,10 @@
 import {registerPartyAppearance} from './party-appearance.mjs';
+import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
+Hooks.once('init',registerIntegrationSetup);
+Hooks.once('ready',async()=>{
+  try {await promptIntegrations();}
+  catch(error){console.error('kg-realms | integration setup',error);ui.notifications.error(`KG Realms: ${error.message}`);}
+});
 import { RegionalMaps } from "./regional-service.mjs";
 import { receiveCampMessage } from "./camp-messages.mjs";
 import { PartyTokenFit } from "./party-token-fit.mjs";

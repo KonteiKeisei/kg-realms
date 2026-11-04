@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.93.9: first-load integration setup
+
+- On the first active GM load, list installed integrations and mark active ones Already Enabled. Show Calendaria as Recommended and the remaining integrations as Compatible/integrated optionals. Inactive integrations start unchecked.
+- Save and Reload enables selected modules and their required installed dependencies, preserves other module choices, saves setup completion and reloads connected clients. Missing dependencies and incompatible versions block activation.
+- Maybe Later leaves settings unchanged and offers setup on the next load. Don't Show Again suppresses automatic prompts for the world. Configure Settings > KG Realms > Module integrations > Review integrations reopens setup manually.
+- Keep only Calendaria in the package's recommended-module relationship. Other supported integrations remain optional choices in setup.
+
 ## 0.93.8: realm exports include linked Regional maps
 
 - Show Export as module on companion realm scenes as well as maps created from an image. Export the current world's edits without converting the companion realm into a homebrew map.
