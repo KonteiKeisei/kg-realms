@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.93.10: skip unnecessary integration prompts
+
+- Skip automatic integration setup when all installed integrations are already enabled. Only offer setup when an installed, disabled integration can be enabled with its available dependencies and compatible versions.
+- Leave module settings and setup status unchanged when skipping. Manual Review integrations remains available in module settings.
+
 ## 0.93.9: first-load integration setup
 
 - On the first active GM load, list installed integrations and mark active ones Already Enabled. Show Calendaria as Recommended and the remaining integrations as Compatible/integrated optionals. Inactive integrations start unchecked.

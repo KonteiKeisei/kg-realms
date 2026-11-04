@@ -55,7 +55,7 @@ export function installedIntegrations(game = globalThis.game) {
 export function shouldPromptIntegrations(game = globalThis.game) {
   return permitted(game) && game.user === game.users?.activeGM
     && (game.settings.get(ID,SETTING) ?? 'pending') === 'pending'
-    && installedIntegrations(game).length > 0;
+    && installedIntegrations(game).some(module => !module.active && !module.issue);
 }
 
 export async function saveIntegrations(selected, game = globalThis.game) {

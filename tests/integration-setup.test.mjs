@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {installedIntegrations,integrationPlan,shouldPromptIntegrations,saveIntegrations,dismissIntegrations,integrationSetupContent,registerIntegrationSetup,promptIntegrations} from '../scripts/integration-setup.mjs';
+import {INTEGRATIONS,installedIntegrations,integrationPlan,shouldPromptIntegrations,saveIntegrations,dismissIntegrations,integrationSetupContent,registerIntegrationSetup,promptIntegrations} from '../scripts/integration-setup.mjs';
 
 const mod=(id,active=false,extra={})=>({id,title:id,active,version:'1.0.0',relationships:{requires:[],systems:[]},...extra});
 function fixture(){
@@ -34,6 +34,35 @@ test('automatic prompt belongs to the active GM, retries after Later and stays h
   settings.set('kg-realms.integrationSetup','never');assert.equal(shouldPromptIntegrations(game),false);
   settings.set('kg-realms.integrationSetup','pending');assert.equal(shouldPromptIntegrations(game),true);
   game.modules.clear();assert.equal(shouldPromptIntegrations(game),false);
+});
+
+test('startup stays silent when all six integrations are enabled; manual review remains available',async()=>{
+  const {game,settings,events,writes,menus}=fixture();
+  game.modules=new Map(INTEGRATIONS.map(({id})=>[id,mod(id,true)]));
+  settings.set('core.moduleConfiguration',Object.fromEntries(INTEGRATIONS.map(({id})=>[id,true])));
+  registerIntegrationSetup();
+  assert.equal(shouldPromptIntegrations(game),false);
+  await promptIntegrations();
+  assert.deepEqual(events,[]);assert.deepEqual(writes,[]);
+  assert.equal(settings.get('kg-realms.integrationSetup'),'pending','skipping does not dismiss later actionable setup');
+  const app=new menus[0][2].type(),html=await app._renderHTML();
+  assert.equal((html.match(/Already Enabled/g)??[]).length,6);
+  assert.doesNotMatch(html,/type="checkbox"/);
+  settings.set('core.moduleConfiguration',{});
+  assert.equal(shouldPromptIntegrations(game),false,'runtime active flags also suppress an unnecessary prompt');
+});
+
+test('startup prompts only for an installed integration that can actually be enabled',()=>{
+  const {game,settings}=fixture();
+  game.modules=new Map([['calendaria',mod('calendaria',true)]]);
+  assert.equal(shouldPromptIntegrations(game),false,'uninstalled integrations do not trigger setup');
+  game.modules.set('tenacity',mod('tenacity',false,{compatibility:{minimum:'14'}}));
+  game.modules.set('fxmaster-plus',mod('fxmaster-plus',false,{relationships:{requires:[{id:'fxmaster'}]}}));
+  assert.equal(shouldPromptIntegrations(game),false,'incompatible or missing-dependency rows cannot offer activation');
+  game.modules.set('fxmaster',mod('fxmaster'));
+  assert.equal(shouldPromptIntegrations(game),true,'an eligible disabled integration triggers setup');
+  settings.set('core.moduleConfiguration',{calendaria:true,fxmaster:true,'fxmaster-plus':true});
+  assert.equal(shouldPromptIntegrations(game),false,'pending enabled configuration does not prompt for activation again');
 });
 
 test('save enables only selected integrations and required dependencies, preserves configuration and reloads after saving',async()=>{
