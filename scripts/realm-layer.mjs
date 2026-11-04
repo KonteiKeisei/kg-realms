@@ -97,7 +97,7 @@ export class RealmLayer {
   /** A planned journey's path ([lon, lat] list), or null to clear it. wet: whether each point is by water. */
   setJourney(coords, camps = [], wet = null, parts = null) {
     this.journey = [coords, camps, wet, parts];
-    this.onJourneyChanged?.(coords);
+    this.onJourneyChanged?.(parts?null:coords);
     this.#apply("journey", (map) => {
       const [line, marks, water, segments] = this.journey;
       map.getSource("journey")?.setData({ type: "FeatureCollection", features: segments?segments.flatMap(s=>journeyFeatures(s.coords,s.wet)):journeyFeatures(line, water) });

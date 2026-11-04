@@ -2,7 +2,7 @@
   "id": "kg-realms",
   "title": "KG Realms",
   "description": "Realm maps for Foundry VTT: turn your own world map into a travel map with places, roads, rivers, regions, journeys, encounters, camps, weather and settlement maps. Right-click a scene with a map picture and choose Make realm world, or install a world module.",
-  "version": "0.93.2",
+  "version": "0.93.3",
   "compatibility": {
     "minimum": "13.351",
     "verified": "13",
@@ -51,7 +51,7 @@
   },
   "url": "https://github.com/KonteiKeisei/kg-realms",
   "manifest": "https://github.com/KonteiKeisei/kg-realms/releases/latest/download/module.json",
-  "download": "https://github.com/KonteiKeisei/kg-realms/releases/download/v0.93.2/kg-realms.zip",
+  "download": "https://github.com/KonteiKeisei/kg-realms/releases/download/v0.93.3/kg-realms.zip",
   "bugs": "https://github.com/KonteiKeisei/kg-realms/issues",
   "readme": "https://github.com/KonteiKeisei/kg-realms#readme",
   "changelog": "https://github.com/KonteiKeisei/kg-realms/blob/main/CHANGELOG.md"

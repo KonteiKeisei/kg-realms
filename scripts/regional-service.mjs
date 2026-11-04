@@ -1,4 +1,4 @@
-import {placeRegionalRectangle,regionalEntrances,regionalJourneyParts} from './regional-placement.mjs';
+import {placeRegionalRectangle,regionalEntrances,regionalJourneyParts,adjustedEntrances,followCrossingRoads} from './regional-placement.mjs';
 import { compileRegions, affine, regionalPlaces } from './regional-maps.mjs';
 import { sourceProjection } from './source-map.mjs';
 import { buildGraph, terrainLookup } from './travel.mjs';
@@ -31,9 +31,11 @@ export class RegionalMaps {
       for(const link of links)if(this.indexes[link.world])this.entryPoints[link.world]=regionalEntrances(routes,link,this.indexes[root].sourceMap,this.indexes[link.world].sourceMap);
     }
   }
+  entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
+  followRoutes(world,routes){return this.links[world]?followCrossingRoads(routes,this.entrances(world)):routes;}
   places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes);const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
     const relevant=this.links[id]?[this.links[id]]:Object.values(this.links).filter(l=>l.parent===id);
-    for(const link of relevant)for(const entry of this.entryPoints[link.world]??link.entrances??[]){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:'Linked realm/regional road crossing. Draw regional roads to this marker. Its position follows map placement.'});}return result;}
+    for(const link of relevant)for(const entry of this.entrances(link.world)){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:'Linked realm/regional road crossing. Draw regional roads to this marker. Drag this marker on the regional map to align its trail. The realm-side crossing remains fixed.'});}return result;}
   destinations(id){
     const out=this.places(id),byId=new Map(out.map((p,i)=>[p.id,i]));
     for(const link of Object.values(this.links).filter(l=>l.parent===id)){
@@ -73,7 +75,7 @@ export class RegionalMaps {
     if(this.networks.get(id)?.key===key)return this.networks.get(id).network;
     const contexts=await Promise.all(links.map(async link=>{
       const data=this.indexes[link.world],grid=await this.getTerrain(link.world,data),projection=sourceProjection(data.sourceMap);
-      return {link,data,terrainAt:biomeLookup(this.getBiomes(link.world),terrainLookup(grid),projection.toSource).terrain};
+      return {link:{...link,entrances:this.entrances(link.world)},data,terrainAt:biomeLookup(this.getBiomes(link.world),terrainLookup(grid),projection.toSource).terrain};
     }));
     const parent={...this.indexes[id],id},network=compileRegions(parent,contexts);
     const childRoutes=Object.fromEntries(await Promise.all(links.map(async l=>[l.world,await this.getRoutes(l.world,this.indexes[l.world])])));
@@ -93,8 +95,8 @@ export class RegionalMaps {
     const toView=(lon,lat)=>region.toLonLat(...t.toRegion(parent.toSource(lon,lat))),fromView=(lon,lat)=>parent.toLonLat(...t.toParent(region.toSource(lon,lat)));
     return new Proxy(layer,{get(target,key){
       if(key==='frame')return {project:(lat,lon)=>{const p=toView(lon,lat);return latLonToScene(target.frame,p[1],p[0]);},unproject:p=>{const v=sceneToLatLon(target.frame,p),q=fromView(v.lon,v.lat);return {lon:q[0],lat:q[1]};}};
-      if(key==='setJourney')return(path,marks,wet)=>{
-        const parts=regionalJourneyParts(path,wet,link,parent.sourceMap,region.sourceMap);
+      if(key==='setJourney')return(path,marks,wet,sourceParts)=>{
+        const parts=sourceParts?sourceParts.flatMap(s=>regionalJourneyParts(s.coords,s.wet,link,parent.sourceMap,region.sourceMap)):regionalJourneyParts(path,wet,link,parent.sourceMap,region.sourceMap);
         const visible=marks?.filter(m=>{const q=t.toRegion(parent.toSource(...m.at));return pointInBiome(m.at,link.footprint)&&q[0]>=0&&q[1]>=0&&q[0]<=region.sourceMap.width&&q[1]<=region.sourceMap.height;}).map(m=>({...m,at:toView(...m.at)}));
         return target.setJourney(null,visible??[],null,parts);
       };
@@ -107,7 +109,7 @@ export class RegionalMaps {
   // Coordinate edits stay local. Metadata edits to an inherited place go to its canonical map.
   reconcileEdits(world,before,after,all){
     const places=this.places(world),coordinate=new Set(['lon','lat','area','shape','areaClosed','follow','shore','biomeZone','removed']);
-    for(const p of places){if(p.regionalEntry){delete after.edits?.[p.id];delete after.added?.[p.id];continue;}if(!p.canonicalWorld||p.canonicalWorld===world)continue;
+    for(const p of places){if(p.regionalEntry){if(this.links[world]){for(const key of Object.keys(after.edits?.[p.id]??{}))if(!['lon','lat'].includes(key))delete after.edits[p.id][key];}else delete after.edits?.[p.id];delete after.added?.[p.id];continue;}if(!p.canonicalWorld||p.canonicalWorld===world)continue;
       const old=before.edits?.[p.id]??{},next=after.edits?.[p.id]??{},target=all[p.canonicalWorld]??={edits:{},added:{}},dest=target.added?.[p.canonicalId]??((target.edits??={})[p.canonicalId]??={});
       for(const k of new Set([...Object.keys(old),...Object.keys(next)]))if(!coordinate.has(k)&&JSON.stringify(old[k])!==JSON.stringify(next[k])){if(next[k]===undefined)delete dest[k];else dest[k]=next[k];if(after.edits?.[p.id])delete after.edits[p.id][k];}
     }

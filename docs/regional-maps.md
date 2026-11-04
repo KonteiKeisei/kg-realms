@@ -11,7 +11,7 @@ A regional map is a detailed travel map beneath a realm and above settlements. I
 5. Open the detailed scene, then **Map editor > Roads**. Every parent road or trail crossing the rectangle has a named crossing marker on both maps, such as **Trail crossing 1** and **Trail crossing 2**. Draw regional roads from these markers to POIs and other crossings. The road editor snaps to them.
 6. Review inherited POIs and move their regional markers onto the correct locations. Moving them does not move their realm markers. Journals, settlement links and discovery metadata remain shared.
 
-No territory outline is required first. Older polygon links remain supported; Regional map settings can replace them with a rectangular placement. Regional scenes open on the Places layer so the crossing markers are visible. Reopen or refresh a map after editing parent roads to refresh its crossing markers.
+No territory outline is required first. Older polygon links remain supported; Regional map settings can replace them with a rectangular placement. Regional scenes open on the Places layer so the crossing markers are visible. Reopen or refresh a map after editing parent roads to refresh its crossing markers. Crossing markers can be dragged on the regional map to align them with the artwork. Their local positions are saved; realm-side crossings stay fixed. Regional road endpoints attached to crossing IDs follow those adjustments, and the mapping transfer adds no travel distance.
 
 ## Refine placement
 
@@ -46,3 +46,7 @@ New journeys in linked realms save their itinerary at departure. Later map edits
 This version supports one regional level with separate non-touching coverage areas. Links are stored in Foundry world settings; reconfigure them after exporting maps to a different game world.
 
 Automated tests cover placement gestures, aspect preservation, crossing markers, route clipping, repeated entry, POI identity, mileage, terrain, flight, encounters, camp escapes and saved plans. Native Foundry rendering and multiplayer transitions still need live validation.
+
+## Regional snow
+
+Regional snow lines are off by default and do not inherit the realm snow toggle. Open Map editor > Snow on the regional scene and check Enable snow line on this regional map to use that region's own snow-line settings. Changing realm snow does not enable or disable regional snow.

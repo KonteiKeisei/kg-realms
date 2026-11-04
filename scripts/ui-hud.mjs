@@ -1140,7 +1140,16 @@ export class TravelHud {
     if (here) marks.push({ at: ll(here), name: "Party", kind: "here" });
     else if (gm && this.stops()[0]) { const f = this.stops()[0]; marks.push({ at: [f.lon, f.lat], name: "Start", kind: "here" }); }
     if (progressOnly && here) { path.push(ll(here)); wet.push(wet.at(-1) ?? false); }
-    layer.setJourney(path.length > 1 ? path : null, marks, wet);
+    let parts=null;
+    if(r?.track.some(q=>q.portalTransfer)){
+      parts=[];let run={coords:[],wet:[]};
+      const flush=()=>{if(run.coords.length>1)parts.push(run);run={coords:[],wet:[]};};
+      for(const q of (progressOnly?r.track.filter(q=>q.hour<=hour):r.track)){
+        if(q.portalTransfer){run.coords.push(ll(q.at));run.wet.push(false);flush();continue;}
+        run.coords.push(ll(q.at));run.wet.push(!!r.legs[q.leg]?.sea);
+      }flush();
+    }
+    layer.setJourney(path.length > 1 ? path : null, marks, wet,parts);
   }
 
   /* ------------------------------------------------------------------ panel */

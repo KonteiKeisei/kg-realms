@@ -374,3 +374,5 @@ export class SnowCover {
     this.map = this.layer = null;
   }
 }
+/** Detailed regional maps opt in independently of the realm snow switch. */
+export function mapSnowEnabled(world,regionalLinks,regionalSettings,realmEnabled){return regionalLinks?.[world]?regionalSettings?.[world]?.enabled===true:!!realmEnabled;}

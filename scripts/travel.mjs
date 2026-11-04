@@ -107,10 +107,11 @@ const key = (p) => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`;
 export function buildGraph(features, toSheet, labels = [], {precision = 2} = {}) {
   const key=p=>`${Math.round(p[0]*precision)},${Math.round(p[1]*precision)}`;
   const lines = features.filter((f) => f.geometry?.coordinates?.length > 1)
-    .map((f) => ({ id: f.properties.id, kind: f.properties.kind === "trail" ? "trail" : "road", name: f.properties.name ?? null, resolution: Number.isFinite(f.properties.regionalResolution)&&f.properties.regionalResolution>0?Math.max(1e-8,f.properties.regionalResolution):1, pts: f.geometry.coordinates.map((c) => toSheet(...c)) }));
+    .map((f) => ({ id: f.properties.id, kind: f.properties.kind === "trail" ? "trail" : "road", name: f.properties.name ?? null, portalTransfer:!!f.properties.portalTransfer, resolution: Number.isFinite(f.properties.regionalResolution)&&f.properties.regionalResolution>0?Math.max(1e-8,f.properties.regionalResolution):1, pts: f.geometry.coordinates.map((c) => toSheet(...c)) }));
   // Split segments where another route's end touches them.
   const ends = lines.flatMap((l) => [l.pts[0], l.pts.at(-1)]);
   for (const l of lines) {
+    if(l.portalTransfer)continue;
     for (const e of ends) {
       for (let i = 1; i < l.pts.length; i++) {
         const a = l.pts[i - 1], b = l.pts[i], dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy || 1e-9;
@@ -124,7 +125,7 @@ export function buildGraph(features, toSheet, labels = [], {precision = 2} = {})
   for (const l of lines) {
     const out = [l.pts[0]];
     for (let i = 1; i < l.pts.length; i++) {
-      const a = l.pts[i - 1], b = l.pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (6 * l.resolution)));
+      const a = l.pts[i - 1], b = l.pts[i], n = l.portalTransfer?1:Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (6 * l.resolution)));
       for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
     }
     l.pts = out;
@@ -136,8 +137,8 @@ export function buildGraph(features, toSheet, labels = [], {precision = 2} = {})
       const a = node(l.pts[i - 1]), b = node(l.pts[i]);
       if (a === b) continue;
       const px = Math.hypot(b.at[0] - a.at[0], b.at[1] - a.at[1]);
-      a.edges.push({ to: b.k, px, kind: l.kind, route: l.id, name: l.name });
-      b.edges.push({ to: a.k, px, kind: l.kind, route: l.id, name: l.name });
+      a.edges.push({ to: b.k, px, kind: l.kind, route: l.id, name: l.name, portalTransfer:l.portalTransfer });
+      b.edges.push({ to: a.k, px, kind: l.kind, route: l.id, name: l.name, portalTransfer:l.portalTransfer });
     }
   }
   // A route that stops short of the network (a gap in the traced roads) is linked to the
@@ -302,7 +303,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
     const n = graph.nodes.get(k);
     for (const e of n.edges) {
       const mid = graph.nodes.get(e.to).at, T = terrainAt((n.at[0] + mid[0]) / 2, (n.at[1] + mid[1]) / 2);
-      const metric = metricCost(n.at,mid,e.kind);
+      const metric = e.portalTransfer?{cost:0,water:false}:metricCost(n.at,mid,e.kind);
       if (metric?.water && e.kind === "offroad") continue;
       const nd = d + (metric?.cost ?? (e.px * mpp) / speedFactor(e.kind, T, opts)) * (e.kind === "offroad" ? bias : 1);
       if (nd < (dist.get(e.to) ?? Infinity)) { dist.set(e.to, nd); prev.set(e.to, { k, e }); push(e.to, nd); }
@@ -319,16 +320,16 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
   const legs = [{ kind: "offroad", pts: [from, first] }];
   for (const s of steps) {
     const last = legs.at(-1), at = graph.nodes.get(s.to).at;
-    if (last.route === s.e.route && last.name === s.e.name) last.pts.push(at);
-    else legs.push({ kind: s.e.kind, route: s.e.route, name: s.e.name, pts: [graph.nodes.get(s.from).at, at] });
+    if (last.route === s.e.route && last.name === s.e.name && last.portalTransfer===s.e.portalTransfer) last.pts.push(at);
+    else legs.push({ kind: s.e.kind, route: s.e.route, name: s.e.name, portalTransfer:s.e.portalTransfer, pts: [graph.nodes.get(s.from).at, at] });
   }
   legs.push({ kind: "offroad", pts: [graph.nodes.get(viaNet.k).at, to] });
-  return finish({ cost: viaNet.cost, legs: legs.filter((l) => polyPx(l.pts) > 0.5) });
+  return finish({ cost: viaNet.cost, legs: legs.filter((l) => l.portalTransfer || polyPx(l.pts) > 0.5) });
 
   function finish(r) {
     if (!r) return null;
     if (segments) {
-      const legs=r.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo],terrain:terrainAt((s.from[0]+s.to[0])/2,(s.from[1]+s.to[1])/2).name}))));
+      const legs=r.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:l.portalTransfer?0:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo],terrain:terrainAt((s.from[0]+s.to[0])/2,(s.from[1]+s.to[1])/2).name}))));
       return {legs,miles:legs.reduce((n,l)=>n+l.miles,0),normalHours:r.cost};
     }
     const legs = r.legs.map((l) => {
@@ -340,7 +341,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
 }
 
 export function metricPlan(plan, segments) {
-  const legs=plan.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo]}))));
+  const legs=plan.legs.flatMap(l=>l.pts.slice(1).flatMap((b,i)=>segments(l.pts[i],b).map(s=>({...l,pts:[s.from,s.to],miles:l.portalTransfer?0:s.miles,worldId:s.worldId,regionTitle:s.regionTitle,regionalFallback:s.regionalFallback,nativePts:[s.nativeFrom,s.nativeTo]}))));
   return {...plan,legs,miles:legs.reduce((n,l)=>n+l.miles,0)};
 }
 
@@ -365,12 +366,12 @@ export function schedule(plan, { pace = "normal", hoursPerDay = 8, terrainAt = (
   let hour = 0, miles = 0;
   for (const leg of plan.legs) {
     for (let i = 1; i < leg.pts.length; i++) {
-      const a = leg.pts[i - 1], b = leg.pts[i], px = Math.hypot(b[0] - a[0], b[1] - a[1]), distance = leg.nativePts ? leg.miles * px / (polyPx(leg.pts) || 1) : px * milesPerPixel, n = Math.max(1, Math.ceil(leg.nativePts ? Math.max(distance,Math.hypot(leg.nativePts.at(-1)[0]-leg.nativePts[0][0],leg.nativePts.at(-1)[1]-leg.nativePts[0][1])/6) : px / 6));
+      const a = leg.pts[i - 1], b = leg.pts[i], px = Math.hypot(b[0] - a[0], b[1] - a[1]), distance = leg.nativePts ? leg.miles * px / (polyPx(leg.pts) || 1) : px * milesPerPixel, n = Math.max(1, Math.ceil(leg.portalTransfer ? 1 : leg.nativePts ? Math.max(distance,Math.hypot(leg.nativePts.at(-1)[0]-leg.nativePts[0][0],leg.nativePts.at(-1)[1]-leg.nativePts[0][1])/6) : px / 6));
       for (let j = 0; j < n; j++) {
         const p = [a[0] + (b[0] - a[0]) * (j + 0.5) / n, a[1] + (b[1] - a[1]) * (j + 0.5) / n];
         const T=terrainAt(...p), v = speed(leg, T);
         const at = leg.nativePts ? [a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n] : p;
-        samples.push({ at, hour, kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,regionalFallback:leg.regionalFallback,terrain:T}: {}) });
+        samples.push({ at, hour, ...(leg.portalTransfer?{portalTransfer:true}:{}), kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,regionalFallback:leg.regionalFallback,terrain:T}: {}) });
         hour += distance / n / v; miles += distance / n;
       }
     }
@@ -402,9 +403,11 @@ export function schedule(plan, { pace = "normal", hoursPerDay = 8, terrainAt = (
 /** The path position (sheet pixels) reached after `hour` travel hours. */
 export function pointAtHour(samples, hour) {
   if (!samples.length) return null;
-  if (hour <= samples[0].hour) return samples[0].at;
+  if (hour < samples[0].hour) return samples[0].at;
+  if(hour===samples[0].hour)return samples.findLast(s=>s.hour===hour).at;
   for (let i = 1; i < samples.length; i++) {
     if (samples[i].hour >= hour) {
+      if(samples[i].hour===hour){while(i+1<samples.length&&samples[i+1].hour===hour)i++;return samples[i].at;}
       const a = samples[i - 1], b = samples[i], t = (hour - a.hour) / Math.max(1e-9, b.hour - a.hour);
       return [a.at[0] + (b.at[0] - a.at[0]) * t, a.at[1] + (b.at[1] - a.at[1]) * t];
     }
@@ -659,7 +662,7 @@ export function routeSheet(itin, { stops = [], places = [], milesPerPixel }) {
   let run = 0;
   const legEnds = [];
   itin.legs.forEach((leg, li) => {
-    for (const p of leg.plan.legs) { const rawPx = polyPx(p.pts), px = p.nativePts ? p.miles / mpp : rawPx; pieces.push({ ...p, leg: li, pxScale: px / (rawPx || 1), d0: run, d1: run + px }); run += px; }
+    for (const p of leg.plan.legs) { if(p.portalTransfer)continue; const rawPx = polyPx(p.pts), px = p.nativePts ? p.miles / mpp : rawPx; pieces.push({ ...p, leg: li, pxScale: px / (rawPx || 1), d0: run, d1: run + px }); run += px; }
     legEnds.push(run);
   });
   const total = run;

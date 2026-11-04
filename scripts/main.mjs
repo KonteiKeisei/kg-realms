@@ -44,7 +44,7 @@ import { applySceneAmbience } from "./scene-ambience.mjs";
 import { JourneyLight } from "./journey-light.mjs";
 import { LocalMaps } from "./local-maps.mjs";
 import { LocalMapRenderer } from "./local-map-renderer.mjs";
-import { SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
+import { mapSnowEnabled, SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
 import { areasGeoJSON, outlinedIds, placeLayer, withFollowedBorders, placeFromShore, placeFromZone, inlandWaters, canBeBiome } from "./map-layers.mjs";
 import { borderChoices, followOf, waterwaysWithBorders, zonesWithBorders } from "./borders.mjs";
 import { LayersRail, chosenLayer } from "./ui-layers.mjs";
@@ -102,7 +102,7 @@ const regional = new RegionalMaps({
   rawPlaces:(id,places)=>applyEdits(places,editsOf(id),"surface"),
   getTerrain:async(id,data)=>{await loadShippedWaterways(id);await loadShippedBiomes(id);return terrainFor(id,data);},
   getBiomes:id=>biomesOf(id),
-  getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const response=await fetch(worldUrl(id,data.routes));if(!response.ok)throw Error(`${id} roads: HTTP ${response.status}`);const routes=applyRouteEdits(await response.json(),routeEditsOf(id)),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
+  getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const response=await fetch(worldUrl(id,data.routes));if(!response.ok)throw Error(`${id} roads: HTTP ${response.status}`);const routes=regional.followRoutes(id,applyRouteEdits(await response.json(),routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
   revision:()=>[setting("placeEdits"),setting("routeEdits"),setting("biomes"),setting("waterways")],
   onChange:()=>{backgroundJourneys.clear();if(canvas.ready){localMaps.refreshNavigation();drawRegion();}}
 });
@@ -293,7 +293,7 @@ async function saveRouteEdits(world, fn) {
 const curved = (fc) => (fc && current?.world?.sourceMap ? smoothRoutes(fc, lonLatToSource, sourceToLonLat) : fc);
 function refreshRoutes() {
   if (!current?.routesBase) return;
-  current.routes = applyRouteEdits(current.routesBase, routeEditsOf(current.region.world));
+  current.routes = regional.followRoutes(current.region.world,applyRouteEdits(current.routesBase, routeEditsOf(current.region.world)));
   current.drawn = curved(current.routes);
   layer.setRoutes(current.drawn);
   journeyLight.setRoutes(current.drawn);
@@ -835,6 +835,8 @@ const biomes = new BiomeEditor({
   getLayer:()=>layer,getBiomes:()=>current?biomesOf(current.region.world):{},getTerrain:loadTerrain,saveBiomes:fn=>current&&saveBiomes(current.region.world,fn)});
 // The Snow tab: this world's snow (snowOf), shown on the map as it changes.
 const snowTab = new SnowTab({
+  isRegional:()=>!!regional.links[current?.region.world],getEnabled:()=>snowEnabled(current?.region.world),
+  setEnabled:async enabled=>{const id=current?.region.world;if(!id||!regional.links[id])return;const all=structuredClone(setting('regionalSnow')??{});all[id]={...all[id],enabled};await game.settings.set(MODULE_ID,'regionalSnow',all);},
   snow, getWorld: () => current?.region.world, getSnow: () => snowOf(current?.region.world),
   saveSnow: (fn) => current && saveSnow(current.region.world, fn),
   getSheet: () => ({ width: SOURCE_MAP.width, height: SOURCE_MAP.height, milesPerPixel: SOURCE_MAP.milesPerPixel }),
@@ -984,7 +986,7 @@ Hooks.once("init", () => {
   // region's water filter ripples the sea but not its name. Off: one map, as before (a little lighter).
   register("namesAbove", { name: "Names above effects", hint: "Draws the realm map's names, markers and the journey above the scene's effects (FXMaster region filters, weather), so they stay readable while the land and water under them ripple. Off: everything is drawn as one picture, under the effects, which is a little lighter on the computer.", scope: "client", config: true, type: Boolean, default: true, onChange: redraw });
   register("highDpi", { name: "Sharp map on high-DPI screens", hint: "Draws the map at your screen's full resolution when its scaling is 150% or more.", scope: "client", config: true, type: Boolean, default: true, onChange: redraw });
-  register("placeEdits", { scope: "world", config: false, type: Object, default: {}, onChange: () => { regional.networks.clear(); backgroundJourneys.clear(); card.hide(); refreshPlaces(); cards.refresh(); water.refresh(); biomes.refresh(); syncShoreZones().catch((err) => console.warn("kg-realms | shared biome zones:", err)); } });
+  register("placeEdits", { scope: "world", config: false, type: Object, default: {}, onChange: () => { regional.networks.clear(); backgroundJourneys.clear(); card.hide(); refreshPlaces(); if(regional.links[current?.region.world])refreshRoutes(); cards.refresh(); water.refresh(); biomes.refresh(); syncShoreZones().catch((err) => console.warn("kg-realms | shared biome zones:", err)); } });
   register("journalsImported", { scope: "world", config: false, type: Boolean, default: false });
   register("cardRepeatsRemoved", { scope: "world", config: false, type: Boolean, default: false });
   // Travel panel placement, per user (client): -1 until first placed.
@@ -1019,6 +1021,7 @@ Hooks.once("init", () => {
   register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{refreshPlaces();water.refresh();biomes.refresh();hud.refresh();syncViewedJourneys();syncShoreZones().catch(err=>console.warn("kg-realms | shared biome zones:",err));}});
   register("waterways", { scope: "world", config: false, type: Object, default: {}, onChange: async () => { refreshPlaces(); if(current)layer.setRiverNames(waterwaysOf(current.region.world)); await hud.refresh(); if (current) await terrainFor(current.region.world, current.world).catch(() => null); water.refresh(); refreshSnowGrid(); syncShoreZones().catch((err) => console.warn("kg-realms | shoreline biome zones:", err)); } });
   // Each world's snow (the Snow tab, snow.mjs): { [world]: { north, south, reversed, midwinter, mountains, hills } }.
+  register("regionalSnow",{scope:"world",config:false,type:Object,default:{},onChange:()=>{attachSnow();snowTab.refresh();}});
   register("snow", { scope: "world", config: false, type: Object, default: {}, onChange: () => { if (current) snow.setConfig(snowOf(current.region.world)); snowTab.refresh(); localMaps.applySeasons(); } });
   register("waterwaysOnTop", { scope: "world", config: false, type: Boolean, default: false });
   // Making camp (ui-camp.mjs).
@@ -1260,7 +1263,7 @@ async function drawRegion() {
   if (world.routes) {
     current.routesBase = await fetch(worldUrl(region.world, world.routes)).then((r) => r.json()).catch(() => null);
     if (current?.scene !== scene) return;
-    current.routes = current.routesBase ? applyRouteEdits(current.routesBase, routeEditsOf(region.world)) : null;
+    current.routes = current.routesBase ? regional.followRoutes(region.world,applyRouteEdits(current.routesBase, routeEditsOf(region.world))) : null;
     current.drawn = curved(current.routes);
     layer.routes = current.drawn;
   }
@@ -1314,8 +1317,9 @@ async function saveSnow(worldId, fn) {
 }
 const monthCount = () => { const c = game.time.calendar; return c?.monthsArray?.length || (Array.isArray(c?.months?.values) ? c.months.values.length : Object.keys(c?.months?.values ?? {}).length) || 12; };
 /** Today's snow lines on a world's map (the drawn world's sheet), or null when snow is off. */
+const snowEnabled=id=>mapSnowEnabled(id,regional.links,setting("regionalSnow"),setting("seasonalSnow"));
 function snowToday(worldId) {
-  if (!setting("seasonalSnow") || !SOURCE_MAP?.height) return null;
+  if (!snowEnabled(worldId) || !SOURCE_MAP?.height) return null;
   return snowLines(yearFraction(game.time.components, game.time.calendar), snowOf(worldId), { height: SOURCE_MAP.height, milesPerPixel: SOURCE_MAP.milesPerPixel, months: monthCount() });
 }
 
@@ -1323,9 +1327,9 @@ function snowToday(worldId) {
 async function attachSnow() {
   snow.detach();
   const region = current, world = region?.world;
-  if (!world?.sourceMap || !layer.map || !setting("seasonalSnow")) return;
+  if (!world?.sourceMap || !layer.map || !snowEnabled(region.region.world)) return;
   const grid = await terrainFor(region.region.world, world).catch((err) => { console.warn("kg-realms | seasonal snow is off:", err); return null; });
-  if (!grid || current !== region || !layer.map) return;
+  if (!grid || current !== region || !layer.map || !snowEnabled(region.region.world)) return;
   snow.attach(layer, {
     grid, config: snowOf(region.region.world), sheet: { height: world.sourceMap.height, milesPerPixel: world.sourceMap.milesPerPixel },
     toSheet: (lon, lat) => lonLatToSource(lon, lat),

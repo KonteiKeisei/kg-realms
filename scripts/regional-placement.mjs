@@ -31,6 +31,18 @@ export function regionalEntrances(routes,link,parentSheet,regionalSheet){
   }return out;
 }
 
+/** Regional crossing positions are local overrides; their realm-side anchors remain fixed. */
+export function adjustedEntrances(entries,edits,sheet){
+  const projection=sourceProjection(sheet);
+  return entries.map(entry=>{const e=edits?.[entry.id];if(!Number.isFinite(e?.lon)||!Number.isFinite(e?.lat))return entry;
+    return {...entry,regionLL:[e.lon,e.lat],region:projection.toSource(e.lon,e.lat),adjusted:true};});
+}
+
+export function followCrossingRoads(routes,entries){
+  const byId=new Map(entries.map(e=>[e.id,e.regionLL]));
+  return {...routes,features:(routes?.features??[]).map(f=>{const from=byId.get(f.properties?.from),to=byId.get(f.properties?.to);if((!from&&!to)||f.geometry?.type!=='LineString')return f;const coordinates=f.geometry.coordinates.map(p=>[...p]);if(from)coordinates[0]=[...from];if(to)coordinates[coordinates.length-1]=[...to];return {...f,geometry:{...f.geometry,coordinates}};})};
+}
+
 /** Clip rather than project unrelated journeys onto the regional picture. */
 export function regionalJourneyParts(path,wet,link,parentSheet,regionalSheet){
   if(!path?.length)return [];

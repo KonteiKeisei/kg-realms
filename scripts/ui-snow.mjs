@@ -65,11 +65,14 @@ export class SnowTab {
 
   #render() {
     if (!this.active || !this.panel) return;
+    const regional=this.isRegional?.(),enabled=this.getEnabled?.()??true;
+    const toggle=regional?`<label class="kgr-snow-on"><input type="checkbox" name="regional-enabled" ${enabled?'checked':''}> Enable snow line on this regional map</label><p class="hint">Off by default. This region uses its own snow settings, independent of the realm.</p>`:'';
+    if(regional&&!enabled){this.panel.innerHTML=toggle;this.onStatus?.();return;}
     const cfg = this.getSnow(), months = this.getMonths();
     const southRule = ruleTooltip("<p><strong>Reversed</strong> The south's winter falls half a year after the north's, as on Earth: its snow is deepest when the north's is least.</p><p><strong>Not reversed</strong> Both poles have winter at the same time.</p>");
     const highRule = ruleTooltip("<p><strong>High ground</strong> Mountains and hills (from the map's terrain and the biomes you paint) keep snow further from the pole than open ground, and keep it longer into summer.</p>");
     const monthOptions = months.map((m, i) => `<option value="${i}">${esc(m)}</option>`).join("");
-    this.panel.innerHTML = `
+    this.panel.innerHTML = `${toggle}
       <p class="hint">Where this world's snow lies through the year. Changes show on the map as you make them and are saved for this world only.</p>
       ${this.#pole("north", cfg)}
       ${this.#pole("south", cfg)}
@@ -103,6 +106,7 @@ export class SnowTab {
 
   /** The map shows the snow in the month picked, or at today's date. */
   #preview() {
+    if(this.isRegional?.()&&this.getEnabled?.()===false){this.snow?.preview(null);return;}
     const n = this.getMonths().length || 12;
     this.snow?.preview(this.previewMonth === "" ? null : (Number(this.previewMonth) + 0.5) / n);
   }
@@ -120,6 +124,7 @@ export class SnowTab {
 
   async #change(t) {
     if (!t.name) return;
+    if(t.name==="regional-enabled"){await this.setEnabled?.(t.checked);this.#render();return this.#preview();}
     if (t.name === "preview") { this.previewMonth = t.value; return this.#preview(); }
     const num = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
     const pole = /^(north|south)-(on|winter|summer|band)$/.exec(t.name);

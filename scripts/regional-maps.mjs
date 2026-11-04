@@ -70,7 +70,11 @@ export function compileRegions(parent, children) {
       const flush=()=>{if(run.length>1)features.push({type:'Feature',properties:{...f.properties,regionalResolution:r?.resolution??1,id:`${r?.world??parent.id}:${f.properties?.id??'road'}:${features.length}`},geometry:{type:'LineString',coordinates:run.map(q=>root.toLonLat(...q))}});run=[];};
       for(let i=1;i<pts.length;i++)for(const s of segments(pts[i-1],pts[i])){const midpoint=mixPoint(s.from,s.to,.5),own=owner(midpoint);if((r&&(own!==r||!r.hasArtwork(midpoint)))||(!r&&own&&own.hasArtwork(midpoint))){flush();continue;}if(!run.length)run.push(s.from);run.push(s.to);}flush();
     }};
-    add(parentRoutes,null);for(const r of regions)add(childRoutes[r.world],r);return {type:'FeatureCollection',features};
+    add(parentRoutes,null);for(const r of regions){add(childRoutes[r.world],r);
+      for(const entry of r.entrances??[])if(entry.adjusted){const at=r.toParent(entry.region);if(Math.hypot(at[0]-entry.parent[0],at[1]-entry.parent[1])<1e-6)continue;
+        features.push({type:'Feature',properties:{id:entry.id,kind:entry.kind==='Trail'?'trail':'road',name:entry.name,portalTransfer:true},geometry:{type:'LineString',coordinates:[entry.parentLL,root.toLonLat(...at)]}});
+      }
+    }return {type:'FeatureCollection',features};
   };
   return {root,regions,owner,segments,terrainAt,roads};
 }

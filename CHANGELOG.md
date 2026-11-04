@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.93.3: adjustable crossings and independent regional snow
+
+- Save regional crossing-marker coordinate adjustments instead of discarding them during place edits. Realm-side crossing positions remain fixed, and regional roads attached by crossing ID follow the adjusted endpoint.
+- Link the original realm crossing to its adjusted regional representation without adding phantom distance or travel time. Planned route display separates the map-alignment transfer from physical roads.
+- Regional snow lines are opt-in, off by default, independently of the realm snow switch. Map editor > Snow has an Enable snow line on this regional map checkbox. Each region keeps its own snow configuration.
+
 ## 0.93.2: regional map navigation
 
 - Show the existing top map-navigation bar on regional maps, with the parent realm and current region in the trail.
