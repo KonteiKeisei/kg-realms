@@ -29,6 +29,8 @@ An 80-mile approach, a 150-mile regional crossing and a 60-mile onward journey t
 
 The regional map displays only the journey portions and markers within its coverage and picture. A realm trip that never visits it contributes no route or encounter overlay. Separate visits remain separate lines. The authoritative journey stays on the parent realm. Regional group-token mirrors exist only while the party is inside the detailed coverage. Existing placed scene content is preserved.
 
+Regional maps also show the top navigation trail, for example Faerun > Icewind Dale. The back arrow views the parent without moving players; clicking an ancestor breadcrumb activates it for everyone. These controls follow the existing GM-only map navigation policy.
+
 The HUD opens either map view without activating a scene for everyone. Either linked scene can be activated normally without inserting an away pause. Settlements and encounter scenes retain the existing away-pause behaviour.
 
 ## POIs and destinations

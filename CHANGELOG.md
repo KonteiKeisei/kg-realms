@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.93.2: regional map navigation
+
+- Show the existing top map-navigation bar on regional maps, with the parent realm and current region in the trail.
+- Preserve the back arrow's view-only behaviour, scene activation controls and GM-only navigation policy. Regional settlements can continue the same scene hierarchy.
+- Refresh the navigation trail when regional links change.
+
 ## 0.93.1: transparent party surround and GM outline colour
 
 - Remove the dark donut band and inner band edge around party portraits. Keep a single outer outline with a layered additive glow matching the travel trails.

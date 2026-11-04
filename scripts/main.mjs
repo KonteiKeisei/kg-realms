@@ -104,7 +104,7 @@ const regional = new RegionalMaps({
   getBiomes:id=>biomesOf(id),
   getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const response=await fetch(worldUrl(id,data.routes));if(!response.ok)throw Error(`${id} roads: HTTP ${response.status}`);const routes=applyRouteEdits(await response.json(),routeEditsOf(id)),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
   revision:()=>[setting("placeEdits"),setting("routeEdits"),setting("biomes"),setting("waterways")],
-  onChange:()=>{backgroundJourneys.clear();if(canvas.ready)drawRegion();}
+  onChange:()=>{backgroundJourneys.clear();if(canvas.ready){localMaps.refreshNavigation();drawRegion();}}
 });
 Hooks.once("init",()=>regional.init());
 const travelWorld=()=>regional.links[current?.region.world]?.parent??current?.region.world;
@@ -151,6 +151,7 @@ const worldWithSheet = async (id) => { const data = await loadWorld(id); if (!cu
 const realmPlaces = async (world) => {await regional.prepare(world);return current?.region.world===world?current.places:regional.places(world);};
 // Local maps: a settlement's (or site's) own scene with its places on it (local-maps.mjs).
 const localMaps = new LocalMaps({
+  regionalParent:scene=>{const link=regional.links[scene?.getFlag?.(MODULE_ID,'world')],to=link?game.scenes.get(link.parentScene):null;return to?{to,place:link.title,focus:null}:null;},
   roadEditor:()=>cityTravel.editor,
   travel:()=>cityTravel.open(),
   needsDock: scene => localMapNeedsDock(scene),

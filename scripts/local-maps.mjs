@@ -539,6 +539,8 @@ export class LocalMaps {
    * map of a realm place goes to the realm map.
    */
   parentOf(scene) {
+    const regional = this.regionalParent?.(scene);
+    if (regional?.to && regional.to.id !== scene.id) return regional;
     const back = returnOf(scene), map = localMapOf(scene);
     const up = map?.parent ?? (back ? { scene: back.scene, note: back.note, name: back.name } : null);
     if (up) {
@@ -564,6 +566,8 @@ export class LocalMaps {
     const label = (s) => localMapOf(s)?.name ?? s.name;
     return [...steps.map((x) => ({ ...x, label: label(x.scene) })), { scene, label: label(scene), focus: null }];
   }
+
+  refreshNavigation() { this.#drawBar(); }
 
   #drawBar() {
     this.#removeBar();
