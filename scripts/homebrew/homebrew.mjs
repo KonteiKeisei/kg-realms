@@ -238,11 +238,13 @@ const buildWindowClass = () => class extends foundry.applications.api.Applicatio
   set(key, state, note = "") { const s = this.steps.find((x) => x.key === key); if (s) Object.assign(s, { state, note }); this.render(); }
   async _renderHTML() {
     const icon = { done: "fa-solid fa-check", now: "fa-solid fa-circle-half-stroke", todo: "fa-regular fa-circle", failed: "fa-solid fa-xmark" };
-    const pct = this.total ? Math.round((100 * this.done) / this.total) : 0;
-    const left = this.done && this.total > this.done ? Math.round(((Date.now() - this.tilesStarted) / this.done) * (this.total - this.done) / 1000) : null;
+    const pct = this.total ? Math.min(this.done < this.total ? 99 : 100, Math.round((100 * this.done) / this.total)) : 0;
+    const left = this.done && this.total > this.done && Number.isFinite(this.tilesStarted) ? Math.round(((Date.now() - this.tilesStarted) / this.done) * (this.total - this.done) / 1000) : null;
+    const detail = this.progressDetails;
     return `<div class="kgr-build">
       <ol class="kgr-build-steps">${this.steps.map((s) => `<li class="${s.state}"><i class="${icon[s.state]}"></i><span>${esc(s.label)}</span><em>${esc(s.note)}</em></li>`).join("")}</ol>
-      <div class="kgr-build-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
+      ${detail ? `<div class="kgr-build-source"><strong>${esc(detail.label)}</strong><span class="kgr-build-file" title="${esc(detail.path)}">${esc(detail.file)}</span><span>${esc(detail.note)}</span><span>${detail.total ? `Chunks saved and verified: ${detail.done} / ${detail.total}` : "Waiting for chunk plan"}</span><div class="kgr-build-bar" role="progressbar" aria-label="Current source chunks" aria-valuenow="${detail.done}" aria-valuemin="0" aria-valuemax="${detail.total || 1}"><span style="width:${detail.total ? 100 * detail.done / detail.total : 0}%"></span></div></div><p class="kgr-build-overall">${esc(detail.overall)}</p>` : ""}
+      <div class="kgr-build-bar" role="progressbar" aria-label="Overall build progress" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
       <p class="kgr-build-note">${esc(this.message || (left != null ? `About ${left < 90 ? `${left} seconds` : `${Math.round(left / 60)} minutes`} left` : "Foundry stays usable while this runs. Closing this window does not stop it."))}</p>
       ${this.finished ? "" : `<div class="kgr-build-actions"><button type="button" data-stop>Stop</button></div>`}
     </div>`;

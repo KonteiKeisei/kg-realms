@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {planLocalTiles,buildLocalMapTiles,localMapPicture,stagePlacedMapTiles} from '../scripts/local-map-tiles.mjs';
+import {planLocalTiles,buildLocalMapTiles,buildLocalSceneTiles,updateLocalBuildWindow,localMapPicture,stagePlacedMapTiles} from '../scripts/local-map-tiles.mjs';
 import {placedTextureSize,placedTileAsset,tileInView,PlacedTileLods} from '../scripts/placed-tile-lods.mjs';
 import {mapAsset} from '../scripts/local-map-renderer.mjs';
 import {lodSrcAllowed,resolveLocalLods} from '../scripts/local-map-lods.mjs';
 import {parseHTML} from 'linkedom';
-import {upload} from '../scripts/homebrew/homebrew.mjs';
+import {upload,BuildWindow} from '../scripts/homebrew/homebrew.mjs';
 
 function fakeTile(tile){const bytes=new Uint8Array(80),v=new DataView(bytes.buffer);bytes.set([0xab,0x4b,0x54,0x58,0x20,0x32,0x30,0xbb,0x0d,0x0a,0x1a,0x0a]);v.setUint32(20,tile.textureWidth,true);v.setUint32(24,tile.textureHeight,true);v.setUint32(40,1,true);v.setUint32(44,1,true);return bytes;}
 function fixture(){
@@ -98,6 +98,105 @@ test('background publish failure restores placed tile source selections',async()
   const f=placedFixture(),before=structuredClone(f.scene.tiles);f.scene.update=async()=>{throw Error('Save failed');};
   await assert.rejects(()=>buildLocalMapTiles(f.scene,'new-background.webp',{...f.io,beforePublish:()=>stagePlacedMapTiles(f.scene,f.io)}),/Save failed/);
   assert.deepEqual(f.scene.tiles.map(t=>t.texture.src),before.map(t=>t.texture.src));assert.ok(f.scene.tiles.every(t=>!placedTileAsset(t)));
+});
+
+test('scene build progress identifies each placed source and accumulates verified chunks without resetting overall counts',async()=>{
+  const f=placedFixture(),events=[];
+  const switchTiles=f.scene.updateEmbeddedDocuments;
+  f.scene.updateEmbeddedDocuments=async(...args)=>{assert.equal(events.at(-1).phase,'switch');assert.equal(events.at(-1).finished,false);return switchTiles(...args);};
+  f.io.picture=async src=>({width:src==='new-background.webp'?1021:8000,height:src==='new-background.webp'?513:6400,close(){}});
+  await buildLocalSceneTiles(f.scene,'new-background.webp',{...f.io,onProgress:state=>events.push(structuredClone(state))});
+  assert.equal(events[0].sourceTotal,3,'videos are not counted as image sources');
+  const starts=events.filter(s=>s.phase==='read'&&s.done===0);
+  assert.deepEqual(starts.map(s=>[s.source.kind,s.source.index,s.source.src]),[['background',1,'new-background.webp'],['placed',1,'floor.webp'],['placed',2,'roof.webp']]);
+  const floor=events.filter(s=>s.source.id==='floor'&&s.phase==='tiles'),roof=events.filter(s=>s.source.id==='roof'&&s.phase==='tiles');
+  assert.deepEqual([floor.at(-1).chunks,roof.at(-1).chunks],[{done:61,total:61},{done:61,total:61}]);
+  assert.equal(roof[0].chunks.done,0);assert.equal(roof[0].completedSources,2);
+  assert.equal(roof[0].verifiedChunks,floor.at(-1).verifiedChunks);
+  for(let i=1;i<events.length;i++){
+    assert.ok(events[i].completedSources>=events[i-1].completedSources);
+    assert.ok(events[i].verifiedChunks>=events[i-1].verifiedChunks);
+  }
+  assert.ok(events.some(s=>s.phase==='preview'&&s.source.id==='roof'));
+  assert.ok(events.some(s=>s.phase==='catalogue'&&s.source.id==='roof'));
+  const last=events.at(-1);assert.equal(last.completedSources,3);assert.equal(last.verifiedChunks,126);assert.equal(last.finished,true);
+  assert.equal(events.filter(s=>s.finished).length,1,'only the real scene switch completes the build');
+});
+
+test('progress uses each source chunk plan and the original image behind an existing preview',async()=>{
+  const f=placedFixture(),events=[];
+  f.scene.tiles[0].flags={'kg-realms':{tileAsset:{preview:'floor-preview.webp',source:'original-floor.avif'}}};f.scene.tiles[0].texture.src='floor-preview.webp';
+  f.io.picture=async src=>({width:src==='roof.webp'?2050:100,height:100,close(){}});
+  await buildLocalSceneTiles(f.scene,'background.webp',{...f.io,onProgress:state=>events.push(state)});
+  const starts=events.filter(s=>s.phase==='read'&&s.done===0);
+  assert.equal(starts[1].source.src,'original-floor.avif');
+  const plans=events.filter(s=>s.phase==='tiles'&&s.done===0);
+  assert.deepEqual(plans.map(s=>s.total),[3,3,5]);
+  assert.equal(events.at(-1).verifiedChunks,11);
+});
+
+test('a build with no placed images counts only the background and completes after saving the scene',async()=>{
+  const f=placedFixture(),events=[];f.scene.tiles=f.scene.tiles.filter(t=>t.id==='video');
+  await buildLocalSceneTiles(f.scene,'background.webp',{...f.io,onProgress:state=>{
+    events.push(state);if(state.finished)assert.equal(f.updates.length,1);
+  }});
+  assert.ok(events.every(s=>s.sourceTotal===1&&s.source.kind==='background'));
+  assert.equal(events.at(-1).completedSources,1);assert.equal(events.at(-1).finished,true);
+});
+
+test('failed verification and cancellation cannot report an unverified chunk or completed source',async()=>{
+  for(const mode of ['corrupt','cancel']){
+    const f=placedFixture(),events=[];let cancelled=false;
+    f.io.cancelled=()=>cancelled;
+    const read=f.io.read;f.io.read=async path=>{
+      const bytes=await read(path);
+      if(path.includes('-roof/')&&path.endsWith('.fbx')){
+        if(mode==='cancel')cancelled=true;
+        else{const corrupt=bytes.slice();corrupt[0]^=1;return corrupt;}
+      }
+      return bytes;
+    };
+    await assert.rejects(()=>buildLocalSceneTiles(f.scene,'background.webp',{...f.io,onProgress:state=>events.push(state)}));
+    assert.ok(events.every(s=>!s.finished));assert.ok(events.every(s=>s.completedSources<=2));
+    assert.equal(f.updates.length,0);
+    if(mode==='corrupt')assert.ok(events.filter(s=>s.source.id==='roof').every(s=>s.chunks.done===0));
+  }
+});
+
+test('a final save failure leaves overall progress incomplete and restores the previous tile selections',async()=>{
+  const f=placedFixture(),events=[],before=structuredClone(f.scene.tiles);
+  f.scene.update=async()=>{throw Error('Save failed');};
+  await assert.rejects(()=>buildLocalSceneTiles(f.scene,'background.webp',{...f.io,onProgress:state=>events.push(state)}),/Save failed/);
+  assert.equal(events.at(-1).completedSources,3);assert.equal(events.at(-1).phase,'save');assert.equal(events.at(-1).done,0);
+  assert.ok(events.every(s=>!s.finished));assert.deepEqual(f.scene.tiles.map(t=>t.texture.src),before.map(t=>t.texture.src));
+});
+
+test('a source edited while the background builds is rejected rather than overwritten from the progress snapshot',async()=>{
+  const f=placedFixture(),write=f.io.write;
+  f.io.write=async(...args)=>{const result=await write(...args);if(args[0].endsWith('lods.json'))f.scene.tiles[0].texture.src='replacement-floor.webp';return result;};
+  await assert.rejects(()=>buildLocalSceneTiles(f.scene,'background.webp',f.io),/placed tile changed/);
+  assert.equal(f.scene.tiles[0].texture.src,'replacement-floor.webp');assert.equal(f.updates.length,0);
+});
+
+test('the build window shows source and chunk progress, escapes filenames and reserves 100 percent for the final switch',async()=>{
+  fixture();
+  foundry.utils.escapeHTML=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+  foundry.applications={api:{ApplicationV2:class{render(){}}}};
+  const win=new BuildWindow('Town',()=>{},{steps:[['background','Build background'],['placed','Build placed tiles'],['save','Switch the scene']]});
+  const state={source:{kind:'placed',index:12,total:50,src:'maps/<roof>".avif'},sourceTotal:51,completedSources:12,verifiedChunks:732,chunks:{done:38,total:61},phase:'tiles',finished:false};
+  updateLocalBuildWindow(win,state);
+  const {document}=parseHTML(await win._renderHTML());
+  const text=document.querySelector('.kgr-build').textContent;
+  assert.match(text,/Placed tile 12 of 50/);assert.match(text,/Chunks saved and verified: 38 \/ 61/);
+  assert.match(text,/Sources verified: 12 \/ 51/);assert.equal(document.querySelector('.kgr-build-file').textContent,'<roof>".avif');
+  assert.equal(document.querySelector('.kgr-build-file').title,'maps/<roof>".avif');assert.equal(document.querySelector('roof'),null);
+  assert.equal(document.querySelector('[aria-label="Current source chunks"]').getAttribute('aria-valuenow'),'38');
+  assert.equal(win.steps[1].note,'11 / 50');assert.equal(win.steps[2].state,'todo');assert.doesNotMatch(await win._renderHTML(),/NaN/);
+  updateLocalBuildWindow(win,{...state,source:{kind:'background',src:'background.webp'},sourceTotal:1000,completedSources:1000,phase:'save',finished:false});
+  assert.match(await win._renderHTML(),/aria-label="Overall build progress" aria-valuenow="99"/);
+  updateLocalBuildWindow(win,{...state,source:{kind:'background',src:'background.webp'},completedSources:51,phase:'save',finished:true});
+  assert.match(await win._renderHTML(),/aria-label="Overall build progress" aria-valuenow="100"/);assert.ok(win.steps.every(s=>s.state==='done'));
+  const legacy=new BuildWindow('Realm',()=>{});assert.doesNotMatch(await legacy._renderHTML(),/kgr-build-source|NaN/);
 });
 test('placed tile detail respects zoom, hardware limits, GPU share and viewport without flattening elevations',()=>{
   const asset={width:16000,height:8000},doc={width:8000,height:4000,texture:{scaleX:-1,scaleY:1}};

@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.94.3: local-map build progress
+
+- Show the current background or placed image, its filename, and its saved and verified chunk count. Number placed tiles across the whole build instead of presenting each source as another identical build.
+- Show completed sources and accumulated verified chunks with separate current-source and overall progress bars. Report picture loading, preview verification and catalogue verification. Count still images only, and resolve existing previews to their original source pictures.
+- Keep the final scene switch separate and reserve overall completion for a successful save. Retain the previous tile selection on failure or cancellation. Detect placed source changes made while the background is building.
+
 ## 0.94.2: accept re-encoded tile previews
 
 - Validate rewritten tile previews as decoded images rather than requiring identical file bytes. Accept ordinary PNG/WebP re-encoding while checking aspect, image content and transparency. Reject corrupt images, lost transparency and mismatched previews. Keep byte-exact checks for compressed KTX2 artwork and detail catalogues, with the previous map selection retained on failure.

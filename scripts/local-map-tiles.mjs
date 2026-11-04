@@ -54,6 +54,7 @@ export async function buildLocalMapTiles(scene,src,io={}) {
       for(let attempt=0;attempt<3;attempt++){r=await fetch(url,{cache:'no-store'});if(r.ok)break;if(![404,503].includes(r.status)||attempt===2)throw Error(`Saved file could not be read (HTTP ${r.status}): ${path}`);await new Promise(resolve=>setTimeout(resolve,150*(attempt+1)));}
       return new Uint8Array(await r.arrayBuffer());});
     await io.bitmapReady?.(bitmap,plan,{write,read});
+    progress('tiles',0,tiles.length);
     const workers=Math.max(1,Math.min(2,(globalThis.navigator?.hardwareConcurrency??2)-1));
     if(!io.encode){encoder=new TileEncoder(workers,`${location.origin}${foundry.utils.getRoute(`modules/${ID}`)}`);await encoder.ready;}
     let next=0,done=0;
@@ -68,9 +69,11 @@ export async function buildLocalMapTiles(scene,src,io={}) {
     }));halt();
     const lods=plan.lods.map(l=>({...l,tiles:l.tiles.map(({crop,...tile})=>tile)}));
     const manifest={schema:1,id:plan.id,width:plan.width,height:plan.height,lods};
+    progress('catalogue',0,1);
     let lodManifest=`${plan.dataRoot}/lods.json`;const bytes=new TextEncoder().encode(JSON.stringify(manifest));
     lodManifest=savedPath(await write(lodManifest,bytes,'application/json'),lodManifest);
     if(await hash(await read(lodManifest))!==await hash(bytes))throw Error('The server changed the local-map catalogue.');
+    progress('catalogue',1,1);
     halt();const latest=scene.getFlag(ID,'localMap');
     if(!latest||latest.world!==previous.world||latest.placeId!==previous.placeId||JSON.stringify(latest.tileAsset??null)!==revision||scene.width!==size[0]||scene.height!==size[1])throw Error('The local map changed during this build. Start again from its current settings.');
     const asset={id:plan.id,city:plan.city,width:plan.width,height:plan.height,world:latest.world,placeId:latest.placeId,source:src,lodManifest,dataRoot:plan.dataRoot,tiles:[]};
@@ -87,20 +90,30 @@ export async function buildLocalMapTiles(scene,src,io={}) {
   finally{encoder?.stop();bitmap?.close();}
 }
 
+function placedMapSources(scene){
+  return Array.from(scene.tiles?.values?.()??scene.tiles??[]).flatMap(tile=>{
+    const previous=tile.getFlag?.(ID,'tileAsset')??tile.flags?.[ID]?.tileAsset,current=tile.texture?.src;
+    const src=previous&&current===previous.preview?previous.source:current;
+    return src&&!/\.(?:webm|mp4|m4v|ogv)(?:[?#]|$)/i.test(src)?[{tile,id:tile.id??tile._id,src,current,previous:structuredClone(previous)}]:[];
+  });
+}
+
 /** Retile placed image artwork while leaving every native Tile document's geometry intact. */
 export async function stagePlacedMapTiles(scene,io={}){
-  const docs=Array.from(scene.tiles?.values?.()??scene.tiles??[]),patches=[],old=[];
-  for(const tile of docs){
-    const id=tile.id??tile._id,previous=tile.getFlag?.(ID,'tileAsset')??tile.flags?.[ID]?.tileAsset,current=tile.texture?.src;
-    const src=previous&&current===previous.preview?previous.source:current;
-    if(!src||/\.(?:webm|mp4|m4v|ogv)(?:[?#]|$)/i.test(src))continue;
+  const sources=io.sources??placedMapSources(scene),patches=[],old=[];
+  for(const [index,{tile,id,src,current:expectedSource,previous:expectedAsset}] of sources.entries()){
+    const previous=tile.getFlag?.(ID,'tileAsset')??tile.flags?.[ID]?.tileAsset,current=tile.texture?.src;
+    if(current!==expectedSource||JSON.stringify(previous)!==JSON.stringify(expectedAsset))throw Error('A placed tile changed during the build. Start again.');
+    const progress=(step,done,total)=>io.progress?.(step,done,total,{kind:'placed',index:index+1,total:sources.length,id,src});
     let preview;
     const fake={id:`${scene.id}-${id}`,name:tile.name??'Placed tile',width:tile.width,height:tile.height,flags:{localMap:{world:scene.getFlag(ID,'localMap')?.world,placeId:id}},getFlag:(_m,k)=>fake.flags[k],update:async patch=>{fake.flags.localMap.tileAsset=patch[`flags.${ID}.localMap.tileAsset`];}};
-    const asset=await buildLocalMapTiles(fake,src,{...io,placed:true,beforePublish:undefined,bitmapReady:async(bitmap,plan,{write,read})=>{
+    const asset=await buildLocalMapTiles(fake,src,{...io,progress,placed:true,beforePublish:undefined,bitmapReady:async(bitmap,plan,{write,read})=>{
+      progress('preview',0,1);
       let bytes;
       if(io.preview)bytes=await io.preview(bitmap);
       else{const factor=Math.min(1,512/Math.max(bitmap.width,bitmap.height)),canvas=new OffscreenCanvas(Math.max(1,Math.round(bitmap.width*factor)),Math.max(1,Math.round(bitmap.height*factor)));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bytes=new Uint8Array(await(await canvas.convertToBlob({type:'image/png'})).arrayBuffer());}
       preview=`${plan.dataRoot}/preview.png`;preview=savedPath(await write(preview,bytes,'image/png'),preview);await verifyTilePreview(bytes,await read(preview),io.previewValidation);
+      progress('preview',1,1);
     }});
     patches.push({_id:id,'texture.src':preview,[`flags.${ID}.tileAsset`]:{...asset,tileId:id,preview}});
     old.push({id,src:current,asset:structuredClone(previous)});
@@ -109,8 +122,41 @@ export async function stagePlacedMapTiles(scene,io={}){
   if(io.cancelled?.())throw Error('Build cancelled.');
   if(!(io.authority??(()=>isPrimaryGM()))())throw Error('The primary GM must build local-map tiles.');
   const restore=async()=>{if(!old.length)return;await scene.updateEmbeddedDocuments('Tile',old.map(t=>({_id:t.id,'texture.src':t.src,...(t.asset?{[`flags.${ID}.tileAsset`]:t.asset}:{[`flags.${ID}.-=tileAsset`]:null})})));};
+  io.progress?.('switch',0,1);
   try{if(patches.length)await scene.updateEmbeddedDocuments('Tile',patches);}catch(error){await restore().catch(()=>{});throw error;}
   return restore;
+}
+
+/** Report source completion separately from chunks within the current source. */
+export async function buildLocalSceneTiles(scene,src,io={}){
+  const sources=placedMapSources(scene),sourceTotal=sources.length+1;
+  const background={kind:'background',index:1,total:1,src};
+  const chunks=new Map();let completedSources=0,verifiedChunks=0;
+  const report=(phase,done,total,source=background)=>{
+    const key=source.kind==='background'?'background':`placed:${source.id}`;
+    if(phase==='tiles'){
+      verifiedChunks+=done-(chunks.get(key)?.done??0);
+      chunks.set(key,{done,total});
+    }
+    if(phase==='save'&&done===total&&source.kind==='placed')completedSources++;
+    io.onProgress?.({source,sourceTotal,completedSources,verifiedChunks,chunks:chunks.get(key)??{done:0,total:0},phase,done,total,finished:source.kind==='background'&&phase==='save'&&done===total});
+    io.progress?.(phase,done,total,source);
+  };
+  return buildLocalMapTiles(scene,src,{...io,progress:report,beforePublish:async()=>{
+    completedSources++;report('ready',1,1);
+    return stagePlacedMapTiles(scene,{...io,sources,progress:report});
+  }});
+}
+
+export function updateLocalBuildWindow(win,state){
+  const {source,sourceTotal,completedSources,verifiedChunks,chunks,phase,finished}=state,placedTotal=sourceTotal-1;
+  win.total=sourceTotal+1;win.done=completedSources+(finished?1:0);
+  Object.assign(win.steps[0],{state:completedSources?'done':'now'});
+  Object.assign(win.steps[1],{state:completedSources===sourceTotal?'done':source.kind==='placed'?'now':'todo',note:placedTotal?`${Math.max(0,completedSources-1)} / ${placedTotal}`:'None'});
+  Object.assign(win.steps[2],{state:['switch','save'].includes(phase)&&source.kind==='background'?(finished?'done':'now'):'todo'});
+  const phases={read:'Reading picture',preview:'Saving and verifying preview',tiles:'Saving and verifying chunks',catalogue:'Saving and verifying catalogue',ready:'Source verified',switch:'Switching the scene',save:source.kind==='placed'?'Finalizing source':'Switching the scene'};
+  win.progressDetails={label:source.kind==='background'?'Background':`Placed tile ${source.index} of ${source.total}`,file:source.src.split(/[\\/]/).pop(),path:source.src,note:phases[phase],...chunks,overall:`Sources verified: ${completedSources} / ${sourceTotal}. Chunks verified: ${verifiedChunks}.`};
+  win.render();
 }
 
 export async function regenerateLocalMapTiles(scene,src) {
@@ -119,12 +165,15 @@ export async function regenerateLocalMapTiles(scene,src) {
   const yes=await foundry.applications.api.DialogV2.confirm({window:{title:`Regenerate tiles: ${scene.name}`},content:`<p>Build new background tiles and optimize placed image tiles for ${esc(scene.name)}. Pins, roads, grid scale and scene contents stay in place. Each placed tile retains its position, elevation and occlusion settings. Videos stay native.</p><p>The current tiles stay in use until every new file has been saved and verified.</p>`,rejectClose:false});
   if(!yes)return;
   let cancelled=false;
-  const win=new BuildWindow(scene.name,()=>{cancelled=true;win.message='Stopping...';win.render();},{id:`kgr-local-build-${scene.id}`,title:`Local map tiles: ${scene.name}`,steps:[['read','Read the picture'],['tiles','Build and verify tiles'],['save','Switch the map to them']]});win.render({force:true});
+  const win=new BuildWindow(scene.name,()=>{cancelled=true;win.message='Stopping...';win.render();},{id:`kgr-local-build-${scene.id}`,title:`Local map tiles: ${scene.name}`,steps:[['background','Build background'],['placed','Build placed tiles'],['save','Switch the scene']]});win.render({force:true});
   try{
-    const io={cancelled:()=>cancelled,progress:(step,done,total)=>win.set(step,done===total?'done':'now',`${done} / ${total}`)};
-    const asset=await runMapBuild(`local:${scene.id}`,()=>buildLocalMapTiles(scene,src,{...io,beforePublish:()=>stagePlacedMapTiles(scene,io)}));
+    const io={cancelled:()=>cancelled,onProgress:state=>{
+      if(!cancelled)win.message='The scene switches after all sources have been saved and verified.';
+      updateLocalBuildWindow(win,state);
+    }};
+    const asset=await runMapBuild(`local:${scene.id}`,()=>buildLocalSceneTiles(scene,src,io));
     win.finished=true;win.message='Done. The local map is using the new tiles.';win.render();return asset;
-  }catch(error){win.finished=true;win.message=`${error.message} The previous tile selection was kept.`;win.render();console.error('kg-realms | local map tiles',error);}
+  }catch(error){win.finished=true;const active=win.steps.find(s=>s.state==='now')??win.steps.find(s=>s.state==='todo');if(active)active.state='failed';win.message=`${error.message} The previous tile selection was kept.`;win.render();console.error('kg-realms | local map tiles',error);}
 }
 
 export function localMapPicture(root,scene) {
