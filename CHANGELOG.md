@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.93.5: GM-only encounter hover cards
+
+- Hover journey encounter dots to preview the correct encounter, with its description, Perception DC and GM notes. Double-click opens its full card. Card references retain the owning scene and party when viewed on a regional map.
+- Mark private encounter previews, hover cues and full cards with an orange-yellow outline and a GM only badge. Ordinary encounter cards do not offer player-facing secret-reveal controls.
+- Filter private encounter dots and labels out of player map sources, with additional style, hit-test and card-access checks. Queued renders recheck permission, and a local GM role change clears private cards and redraws marker sources. Existing discovered river-hazard visibility and encounter roll/result presentation are preserved.
+
 ## 0.93.4: combined map filters, regional scene entry and independent territory borders
 
 - Toggle Places, Realms and Geography independently. Remember the combination per browser, retain older single-filter preferences, and enable a selected place's layer without hiding others.

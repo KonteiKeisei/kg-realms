@@ -10,7 +10,7 @@ import { CATEGORIES, VISIBILITY } from "./local-places.mjs";
 import { localMapOf, localOf } from "./local-maps.mjs";
 import { asHtml, asSecret } from "./place-card.mjs";
 import { iconFor } from "./ui-card.mjs";
-import { isHazard, hazardSubtype, normalizeEncounter, RIVER_HAZARDS } from "./river-hazards.mjs";
+import { isHazard, hazardSubtype, normalizeEncounter, RIVER_HAZARDS, hazardVisible } from "./river-hazards.mjs";
 import { openTradeEditor } from "./ui-trade.mjs";
 import {ICON_PACKS,resolvedIconPack,iconPackOverride,iconPackOptions} from './local-icon-packs.mjs';
 
@@ -200,15 +200,18 @@ export function registerKinds(cards, deps) {
   const PICTURES = { name: "images", label: "Pictures", type: "images", group: "links" };
   const actorsOf = (e) => e.actors ?? (e.actor ? [e.actor] : []);
   /** An encounter kind: read(ref) the encounter, write(ref, fn(e) -> e | null) saves or deletes it. */
-  const encounterKind = ({ read, write }) => ({
+  const encounterKind = ({ read, write, privateAlways = false }) => ({
     get(ref) {
       const e = read(ref);
       if (!e) return null;
+      const gmOnly=privateAlways||!isHazard(e);
+      if(gmOnly&&!game.user.isGM)return {gmOnly:true,visibility:'hidden'};
       const known = e.known ?? `${asHtml(e.notes)}${legacyText(e.journal)}`;
       const hazard=isHazard(e),subtype=hazardSubtype(e),hazardName=RIVER_HAZARDS[subtype]??subtype??"Hazard";
       // An encounter met in camp (a journey's own, set on a rest): when in the rest it comes.
       const camp = e.rest ? [["During the rest", `${e.rest.at ?? 0} h after camp is made`]] : [["Range", `${e.radius ?? 3} mi from the route`]];
       return {
+        gmOnly,
         name: e.name ?? "Encounter", type: hazard?"Hazard":"Encounter", icon: hazard?"fa-water":"fa-triangle-exclamation", subtitle: hazard?`${hazardName}: permanent hazard`:e.rest ? "In camp, on this journey" : ref.kind === "journey" ? "On this journey" : "Placed in the map editor",
         img: e.img ?? "", known, gmNotes: e.gmNotes ?? "", rumours: "",
         // Ordinary encounters stay with the GM; discovered river hazards have public cards.
@@ -225,6 +228,7 @@ export function registerKinds(cards, deps) {
       };
     },
     save(ref, v) {
+      if(!game.user.isGM)return;
       return write(ref, (e) => {
         const out = { ...normalizeEncounter(e) };
         if("group" in v)out.group=String(v.group??"").trim().slice(0,120);
@@ -242,13 +246,13 @@ export function registerKinds(cards, deps) {
         return out;
       });
     },
-    remove: (ref) => write(ref, () => null),
+    remove: (ref) => game.user.isGM && write(ref, () => null),
     enter(ref, all) {
       const scene = game.scenes.get(read(ref)?.scene ?? "");
       if (!game.user.isGM || !scene) return;
       return all ? scene.activate() : scene.view();
     },
-    locate(ref) { const e = read(ref); if (e) deps.locate(e.lon, e.lat); }
+    locate(ref) { const e = read(ref); if (e && (game.user.isGM || (!privateAlways && hazardVisible(e,false)))) deps.locate(e.lon, e.lat); }
   });
   cards.register("encounter", encounterKind({
     read: (ref) => deps.encounters(ref.world)[ref.id] ?? null,
@@ -261,6 +265,7 @@ export function registerKinds(cards, deps) {
   }));
   const journey = (ref) => partyScene(game.scenes.get(ref.scene),ref.partyId)?.getFlag(MODULE_ID, "journey") ?? null;
   cards.register("journey", encounterKind({
+    privateAlways:true,
     read: (ref) => journey(ref)?.encounters?.find((e) => e.id === ref.id) ?? null,
     write: async (ref, fn) => {
       const s = journey(ref);

@@ -5,6 +5,7 @@ import { metres, sceneToLatLon } from "./geo.mjs";
 import { sourceMiles } from './source-map.mjs';
 import { excerptHtml } from "./place-card.mjs";
 import { tradeSection, fitTradeRows } from "./ui-trade.mjs";
+import {privateEncounterId} from './encounter-map.mjs';
 
 const CLICK_PX = 6;
 const CLICK_MS = 500;
@@ -135,7 +136,8 @@ export class PlaceCard {
       if (!this.pointerOnMap) return;
       const id = this.layer?.placeAt(this.pointerAt, 7) ?? null;
       const p = id ? this.getPlace(id) : null;
-      if (!p || (p.hidden && !game.user.isGM)) return this.#scheduleHide();
+      if (!p) return this.#scheduleHide();
+      if (!game.user.isGM && (p.hidden || p.gmOnly || privateEncounterId(id))) return this.hide();
       clearTimeout(this.hideTimer); this.hideTimer = null;
       if (this.hovered === id) return this.#show(p, this.pointerGlobal);
       if (this.candidate === id) return this.#positionCue(this.pointerGlobal);
@@ -155,13 +157,14 @@ export class PlaceCard {
   }
 
   #showCue(p, global, delay) {
+    if(!game.user.isGM&&(p.gmOnly||privateEncounterId(p.id)))return this.hide();
     if (this.cursorBefore === null) {
       this.cursorBefore = canvas.app.view.style.cursor || "";
       canvas.app.view.style.cursor = "pointer";
     }
     this.cue = document.createElement("div");
-    this.cue.className = "kgr-ui kgr-hover-cue";
-    this.cue.innerHTML = `<strong>${esc(p.name)}</strong><span>Place card opening</span>`;
+    this.cue.className = "kgr-ui kgr-hover-cue"+(p.gmOnly?' kgr-gm-only':'');
+    this.cue.innerHTML = `<strong>${esc(p.name)}</strong><span>${p.gmOnly?'GM only, encounter card opening':'Place card opening'}</span>`;
     this.cue.style.setProperty("--kgr-hover-delay", `${delay}ms`);
     document.body.append(this.cue);
     this.#positionCue(global);
@@ -193,6 +196,7 @@ export class PlaceCard {
   }
 
   #show(p, global) {
+    if(!game.user.isGM&&(p.gmOnly||privateEncounterId(p.id)))return this.hide();
     this.#clearCue();
     if (!this.el) {
       this.el = document.createElement("div");
@@ -228,14 +232,15 @@ export class PlaceCard {
         p.factions ? `<span class="wide"><i class="fa-solid fa-flag"></i>${esc(p.factions.split(",").slice(0, 4).join(", "))}</span>` : ""
       ].join("");
       const badge = `<span class="badge ${p.gold ? "gold" : ""}"><i class="fa-solid ${iconFor(p)}"></i>${esc(p.class ?? "Place")}</span>`;
-      this.el.className = `kgr-ui kgr-panel kgr-card ${img ? "" : "small"}`;
+      this.el.className = `kgr-ui kgr-panel kgr-card ${img ? "" : "small"}${p.gmOnly?' kgr-gm-only':''}`;
       this.el.innerHTML = `
         ${img ? `<div class="art" style="background-image:url('${esc(foundry.utils.getRoute(img))}')">${badge}</div>` : ""}
         <div class="body ${img ? "" : "top"}">
-          ${img ? "" : `<div>${badge}</div>`}
+          ${img ? "" : `<div>${badge}</div>`}${p.gmOnly?'<span class="badge gm-only">GM only</span>':''}
           <h3 class="${p.gold ? "gold" : ""}">${esc(p.name)}</h3>
           ${p.alt ? `<p class="sub">${esc(p.alt)}</p>` : ""}
           ${excerpt ? `<p>${excerpt}</p>` : ""}
+          ${p.gmOnly?`<div class="meta"><span>Perception DC: ${esc(p.dc??'none')}</span><span>${p.perception==='passive'?'Passive Perception only':'Wisdom (Perception) checks'}</span></div>${p.gmNotes?`<p><b>GM notes:</b> ${excerptHtml(p.gmNotes,true)}</p>`:''}`:''}
           ${meta ? `<div class="meta">${meta}</div>` : ""}
           <div class="kgr-hover-trade"></div>
         </div>
@@ -306,7 +311,7 @@ export class PlaceCard {
   /** The place's card. */
   open(id) {
     const p = this.getPlace(id);
-    if (!p || (p.hidden && !game.user.isGM)) return;
+    if (!p || (!game.user.isGM && (p.hidden || p.gmOnly || privateEncounterId(id)))) return;
     this.hide();
     return this.openCard?.(id);
   }

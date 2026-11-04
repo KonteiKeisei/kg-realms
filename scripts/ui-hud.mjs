@@ -11,6 +11,7 @@ import { travelRules, ruleTooltip, ruleContent, ruleParagraphs } from "./travel-
 import { RIDE_DEALS, ridePrice, roadGapMiles, roadReachMiles, buildGraph, itinerary, perceptionAgainst, terrainLookup, encounterHours, replayTrip, pointAtHour, routeSheet, elapsedAt, campHours, projectCamps, PACES, METHODS, speedFactor } from "./travel.mjs";
 import { randomCampEscape } from "./camp-resolution.mjs";
 import { regionalPointAtDistance } from "./regional-maps.mjs";
+import {journeyEncounterKey} from './encounter-map.mjs';
 import { buildSea, planSea, VESSELS, automaticPort, terrainHarbours, portForStop, portVoyage, riverAt, riverLabel, boatOptions, voyageParts, pathCrossing, WAY_LABELS } from "./waterways.mjs";
 import { assetStrip, assetDrag, openPinned, openDoc } from "./place-card.mjs";
 import { CampPanel, showDC } from "./ui-camp.mjs";
@@ -1135,7 +1136,7 @@ export class TravelHud {
     });
     // Encounters last, so a route point never hides one; the one being dragged follows the pointer.
     const drag = this.encDrag?.moved ? this.encDrag : null;
-    if (gm) for (const e of s.encounters ?? []) marks.push({ at: drag?.id === e.id ? [drag.lon, drag.lat] : this.#placeOf(e), name: e.name, kind: "encounter" });
+    if (gm) for (const e of s.encounters ?? []) marks.push({ at: drag?.id === e.id ? [drag.lon, drag.lat] : this.#placeOf(e), name: e.name, kind: "encounter", cardKey:journeyEncounterKey(this.scene,e.id) });
     const here = p ? this.#at(hour) : null;
     if (here) marks.push({ at: ll(here), name: "Party", kind: "here" });
     else if (gm && this.stops()[0]) { const f = this.stops()[0]; marks.push({ at: [f.lon, f.lat], name: "Start", kind: "here" }); }

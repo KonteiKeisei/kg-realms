@@ -116,6 +116,7 @@ export class PlaceCards {
     if (!def) return;
     const data = await def.get(ref);
     if (!data) { if (warnMissing) ui.notifications.warn('KG Realms: this place no longer exists.'); return; }
+    if (!game.user.isGM && data.gmOnly) return;
     if (!game.user.isGM && visibilityOf(data) === "hidden") return ui.notifications.info("Nothing is known about this place.");
     const App = cardClass();
     if (this.app?.rendered) {
@@ -132,6 +133,12 @@ export class PlaceCards {
 
   /** A record changed elsewhere: redraw the card if it shows it. */
   refresh() { if (this.app?.rendered && !this.app.editing) this.app.render(); }
+  enforceAccess() {
+    if(game.user.isGM||!this.app||!(this.app.data?.gmOnly||['journey','encounter'].includes(this.app.ref?.kind)))return;
+    const app=this.app;app.accessRevoked=true;app.dirty=false;app.data=null;
+    if(app.element){app.element.hidden=true;app.element.replaceChildren();}
+    app.close({force:true});this.app=null;
+  }
 }
 
 /** The edit form's boxes, in order, and what each visibility gives players. */
@@ -342,7 +349,7 @@ function cardClass() {
 
     // Opened straight into editing (an edit button, a new place): Save or Cancel closes the card,
     // since the card itself was never asked for. Edit pressed on an open card goes back to it.
-    target(ref, edit = false) { this.ref = ref; this.editing = !!edit; this.editOnly = !!edit; this.dirty = false; this.draft = null; this.viewTab = "about"; this.formTab = "text"; }
+    target(ref, edit = false) { this.ref = ref; this.accessRevoked=false;this.editing = !!edit; this.editOnly = !!edit; this.dirty = false; this.draft = null; this.viewTab = "about"; this.formTab = "text"; }
     get title() { return this.data?.name ?? "Place"; }
     get def() { return this.cards.kinds[this.ref.kind]; }
 
@@ -364,6 +371,7 @@ function cardClass() {
       this.data = d;
       if (!d) return `<div class="kgc"><p>This place is gone.</p></div>`;
       const gm = game.user.isGM, vis = visibilityOf(d);
+      if(!gm&&d.gmOnly)return '';
       if (!gm && vis === "hidden") return `<div class="kgc"><p>Nothing is known about this place.</p></div>`;
       return this.editing && gm ? this.#formHtml(d) : this.#viewHtml(d, vis, gm);
     }
@@ -377,7 +385,7 @@ function cardClass() {
       const sect = (title, body, cls = "") => (body ? `<section class="kgc-sect ${cls}"><h4>${title}</h4><div class="kgc-text">${body}</div></section>` : "");
       const art = !rumoured && d.img ? `<div class="kgc-art" data-act="art" style="background-image:url('${esc(foundry.utils.getRoute(d.img))}')" title="${gm ? "Show it" : "Open it"}"></div>` : "";
       const badge = `<span class="kgc-badge"><i class="fa-solid ${d.icon ?? "fa-location-dot"}"></i> ${esc(d.type ?? "Place")}</span>`;
-      const audience = gm && vis !== "discovered" ? `<span class="kgc-vis ${vis}"><i class="fa-solid fa-eye-slash"></i> ${esc(VISIBILITY[vis])} to players</span>` : "";
+      const audience = d.gmOnly ? '<span class="kgc-vis gm-only">GM only</span>' : gm && vis !== "discovered" ? `<span class="kgc-vis ${vis}"><i class="fa-solid fa-eye-slash"></i> ${esc(VISIBILITY[vis])} to players</span>` : "";
       const rows = (d.rows ?? []).filter(([, v]) => v != null && v !== "").map(([k, v]) => `<div class="kgc-row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
       const actor = d.actor ? fromUuidSync(d.actor, { strict: false }) : null;
       const canActor = actor && (gm || actor.testUserPermission?.(game.user, "LIMITED"));
@@ -407,6 +415,7 @@ function cardClass() {
       const panes = [["about", "About", "fa-scroll", about], ["trade", "Trade", "fa-scale-balanced", trade], ["gm", "GM notes", "fa-user-secret", gmTab.trim()]].filter(([k, , , body]) => k === "about" || body);
       if (!panes.some(([k]) => k === this.viewTab)) this.viewTab = "about";
       const tabs = panes.length > 1 ? shellTabs(panes.map(([k, l, i]) => [k, l, i]), this.viewTab, { attr: "data-card-tab", label: "Card" }) : "";
+      if(d.gmOnly&&!game.user.isGM)return '';
       return `<div class="kgc">
         ${art}
         <header class="kgc-head">${badge}${audience}<h2>${esc(d.name)}</h2>${d.subtitle ? `<p class="kgc-sub">${esc(d.subtitle)}</p>` : ""}</header>
@@ -459,7 +468,7 @@ function cardClass() {
       if (!shown.some(([k]) => k === this.formTab)) this.formTab = "text";
       const tabs = shown.length > 1 ? shellTabs(shown.map(([k, l, i]) => [k, l, i]), this.formTab, { attr: "data-card-tab", label: "Edit" }) : "";
       const boxes = `${tabs}${shown.map(([k, , , body]) => `<div class="kgc-pane" data-pane="${k}" ${k === this.formTab ? "" : "hidden"}>${body}</div>`).join("")}`;
-      return `<form class="kgc kgc-form" autocomplete="off">${boxes}</form><footer class="kgc-foot">
+      return `<form class="kgc kgc-form" autocomplete="off">${d.gmOnly?'<span class="kgc-vis gm-only">GM only</span>':''}${boxes}</form><footer class="kgc-foot">
         ${d.canDelete ? `<button data-act="delete" class="danger"><i class="fa-solid fa-trash"></i> ${esc(d.deleteLabel ?? "Delete")}</button>` : ""}
         <span class="sp"></span>${this.dirty ? `<span class="kgc-dirty"><i class="fa-solid fa-circle"></i> unsaved</span>` : ""}
         <button data-act="discard"><i class="fa-solid fa-rotate-left"></i> ${this.dirty ? "Discard" : "Cancel"}</button>
@@ -468,6 +477,9 @@ function cardClass() {
     }
 
     _replaceHTML(html, content) {
+      if(!game.user.isGM&&(this.data?.gmOnly||this.accessRevoked)){if(this.element)this.element.hidden=true;content.replaceChildren();return;}
+      if(this.element)this.element.hidden=false;
+      this.element?.classList.toggle('kgr-gm-only',!!this.data?.gmOnly);
       content.innerHTML = html;
       const title = this.element?.querySelector(".window-title");
       if (title) title.textContent = this.data?.name ?? "Place";
@@ -490,7 +502,7 @@ function cardClass() {
         if(preview&&select){const draw=()=>this.#paintIconPreview(root);select.addEventListener('change',draw);category?.addEventListener('change',draw);draw();}
       }
       // GM: reveal or hide each secret block of What is known, in place.
-      if (game.user.isGM && !this.editing) {
+      if (game.user.isGM && !this.editing && !this.data?.gmOnly) {
         // One button per block: Foundry's own Reveal button (it is not wired up outside Foundry's
         // sheets) becomes ours, or one is added; a label says who sees the block now.
         root.querySelectorAll(".kgc-sect:not(.kgc-gm) section.secret").forEach((sec, i) => {

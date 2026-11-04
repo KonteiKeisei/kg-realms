@@ -47,6 +47,7 @@ import { LocalMapRenderer } from "./local-map-renderer.mjs";
 import { mapSnowEnabled, SnowCover, snowLines, snowConfig, yearFraction, TORIL_SNOW } from "./snow.mjs";
 import { areasGeoJSON, outlinedIds, placeLayer, withFollowedBorders, placeFromShore, placeFromZone, inlandWaters, canBeBiome } from "./map-layers.mjs";
 import { borderChoices, followOf, waterwaysWithBorders, zonesWithBorders } from "./borders.mjs";
+import {encounterPreview,journeyEncounterPreview,privateEncounterId} from './encounter-map.mjs';
 import { LayersRail, chosenLayers } from "./ui-layers.mjs";
 import { shoreWater } from "./waterways.mjs";
 const snow = new SnowCover();
@@ -278,8 +279,8 @@ function refreshPlaces() {
 }
 const hazardPlaces = world => Object.entries(encountersOf(world)).filter(([,e])=>isHazard(e)&&hazardVisible(e,game.user.isGM)).map(([id,e])=>({...e,id:`river-hazard:${id}`,class:hazardSubtype(e)==="rapids"?"Rapids":hazardSubtype(e)==="waterfall"?"Waterfall":"Hazard",kind:"natural",hidden:false}));
 // An encounter marker the GM hovers (realm-layer.mjs placeAt): its card, as a place's.
-const encounterPlace = id => { if (!game.user.isGM || !current) return null; const e = encountersOf(current.region.world)[id.slice(10)]; return e ? { ...e, id, class: "Encounter", kind: "natural", hidden: false } : null; };
-const getPlace = id => id?.startsWith("river-hazard:") ? hazardPlaces(current?.region.world).find(p=>p.id===id)??null : id?.startsWith("encounter:") ? encounterPlace(id) : current?.places.find(p=>p.id===id)??null;
+const encounterPlace = id => { if (!game.user.isGM || !current) return null; const e = encountersOf(current.region.world)[id.slice(10)]; return e ? encounterPreview(e,id,{kind:"encounter",world:current.region.world,id:id.slice(10)}) : null; };
+const getPlace = id => id?.startsWith("journey-encounter:") ? journeyEncounterPreview(id) : id?.startsWith("river-hazard:") ? hazardPlaces(current?.region.world).find(p=>p.id===id)??null : id?.startsWith("encounter:") ? encounterPlace(id) : current?.places.find(p=>p.id===id)??null;
 
 // Road edits, like place edits: a world setting keyed by world id,
 // { [world]: { edited: { [id]: {...} }, added: { [id]: {...} }, deleted: [id] } }.
@@ -711,7 +712,7 @@ Hooks.once("ready", authorityChanged);
 for (const event of ["userConnected", "createUser", "deleteUser"]) Hooks.on(event, () => authorityChanged());
 // Any module's user flag write fires updateUser: only changes to who is GM, who is here, where
 // they are looking, or a GM's name (the Primary GM list) matter.
-Hooks.on("updateUser", (user, changes) => { if (userChangeMatters(changes)) authorityChanged(); });
+Hooks.on("updateUser", (user, changes) => { if(user.id===game.user.id&&"role" in changes){card.hide();cards.enforceAccess();if(layer.journey)layer.setJourney(...layer.journey);refreshEncounters();} if (userChangeMatters(changes)) authorityChanged(); });
 
 const planner = { open: () => hud.toggle() };
 // On a scene an encounter links to: the encounter's small box (its assets, and back to the journey).
@@ -866,9 +867,9 @@ editor.onClose = () => {
 };
 const card = new PlaceCard({
   isBlocked: () => editor.active || hud.editing, hoverDelayMs: () => setting("hoverDelayMs"), getPlace,
-  getTrade: p => current && !/^(river-hazard|encounter):/.test(p.id) ? trade.get(current.region.world, p) : null,
+  getTrade: p => current && !p.gmOnly && !/^(river-hazard|encounter):/.test(p.id) ? trade.get(current.region.world, p) : null,
   editTrade: p => current && openTradeEditor({ service: trade, world: current.region.world, place: p, changed: () => cards.refresh() }),
-  openCard: id => current && openCard({kind:/^(river-hazard|encounter):/.test(id)?"encounter":"realm",world:current.region.world,id:id.replace(/^(river-hazard|encounter):/,"")})
+  openCard: id => {if(!current||(!game.user.isGM&&privateEncounterId(id)))return;return openCard(getPlace(id)?.cardRef??{kind:/^(river-hazard|encounter):/.test(id)?"encounter":"realm",world:current.region.world,id:id.replace(/^(river-hazard|encounter):/,"")});}
 });
 registerKinds(cards, {
   realmPlaces, savePlaceEdit, localMaps, trade, cityTravel,

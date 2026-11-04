@@ -55,6 +55,8 @@ Hooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld({
 - **Carriage ride sound**: a looping sound for the settlement carriage ride. None ships with KG Realms; empty keeps the ride silent.
 - **Manage map files** (Ctrl+Shift+M): each player can save a world's map tiles to a folder on their computer instead of streaming them.
 
+GM encounter previews: hover a red encounter dot on the realm or regional map to read its description, Perception DC and GM notes. Double-click to open the full card. Both cards have an orange-yellow outline and a GM only badge. These encounter dots and cards are blocked for players, independently of the encounter's discovery setting.
+
 ## Credits and licences
 
 - [MapLibre GL JS](https://maplibre.org/) (BSD 3-Clause), `lib/maplibre`.

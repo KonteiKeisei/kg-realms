@@ -8,7 +8,8 @@ import { Archive } from "./pmtiles.mjs";
 import { buildStyle } from "./realm-style.mjs";
 import { TerrainDetail } from "./terrain/detail.mjs";
 import { SatelliteDetail } from "./terrain/satellite-detail.mjs";
-import { isRiverHazard, hazardSubtype } from "./river-hazards.mjs";
+import { isRiverHazard, hazardSubtype, hazardVisible } from "./river-hazards.mjs";
+import {journeyEncounterRef} from './encounter-map.mjs';
 import { riverLabelFeatures, riverLabelLayer } from "./river-labels.mjs";
 
 /** Render this much extra on each side so short pans never show an empty edge. */
@@ -96,20 +97,21 @@ export class RealmLayer {
 
   /** A planned journey's path ([lon, lat] list), or null to clear it. wet: whether each point is by water. */
   setJourney(coords, camps = [], wet = null, parts = null) {
-    this.journey = [coords, camps, wet, parts];
+    this.journey = [coords, (camps??[]).filter(c=>c.kind!=='encounter'||globalThis.game?.user?.isGM), wet, parts];
     this.onJourneyChanged?.(parts?null:coords);
     this.#apply("journey", (map) => {
       const [line, marks, water, segments] = this.journey;
+      map.setGlobalStateProperty?.('gm',!!globalThis.game?.user?.isGM);
       map.getSource("journey")?.setData({ type: "FeatureCollection", features: segments?segments.flatMap(s=>journeyFeatures(s.coords,s.wet)):journeyFeatures(line, water) });
-      map.getSource("journey-camps")?.setData({ type: "FeatureCollection", features: (marks ?? []).map((c) => ({ type: "Feature", properties: { label: c.label ?? "", name: c.name ?? "", kind: c.kind ?? "camp", selected: !!c.selected }, geometry: { type: "Point", coordinates: c.at } })) });
+      map.getSource("journey-camps")?.setData({ type: "FeatureCollection", features: (marks ?? []).filter(c=>c.kind!=='encounter'||globalThis.game?.user?.isGM).map((c) => ({ type: "Feature", properties: { label: c.label ?? "", name: c.name ?? "", kind: c.kind ?? "camp", selected: !!c.selected,cardKey:c.kind==='encounter'?c.cardKey??'':'' }, geometry: { type: "Point", coordinates: c.at } })) });
     });
   }
 
-  /** Encounter markers, prefiltered for the viewer: { [id]: { lon, lat, name } }. */
+  /** Filter again here so callers cannot put GM encounter dots into player map sources. */
   setEncounters(map) {
-    this.encounters = map;
-    this.hasRiverHazards=Object.values(map??{}).some(isRiverHazard);
-    this.#apply("encounters", (map) => map.getSource("encounters")?.setData({ type: "FeatureCollection", features: Object.entries(this.encounters ?? {}).map(([id, e]) => ({ type: "Feature", properties: { id, name: e.name, kind:hazardSubtype(e)??e.kind??"encounter",hazard:isRiverHazard(e) }, geometry: { type: "Point", coordinates: [e.lon, e.lat] } })) }));
+    this.encounters = Object.fromEntries(Object.entries(map??{}).filter(([,e])=>hazardVisible(e,!!globalThis.game?.user?.isGM)));
+    this.hasRiverHazards=Object.values(this.encounters).some(isRiverHazard);
+    this.#apply("encounters", (map) => {map.setGlobalStateProperty?.('gm',!!globalThis.game?.user?.isGM);map.getSource("encounters")?.setData({ type: "FeatureCollection", features: Object.entries(this.encounters).filter(([,e])=>hazardVisible(e,!!globalThis.game?.user?.isGM)).map(([id, e]) => ({ type: "Feature", properties: { id, name: e.name, kind:hazardSubtype(e)??e.kind??"encounter",hazard:isRiverHazard(e),public:hazardVisible(e,false) }, geometry: { type: "Point", coordinates: [e.lon, e.lat] } })) });});
   }
 
   /** Named biome polygons are an editor overlay; location inference does not depend on drawing. */
@@ -332,7 +334,9 @@ export class RealmLayer {
     const query = (ids) => this.#maps().flatMap((m) => { const layers = ids.filter((id) => m.getLayer(id)); return layers.length ? m.queryRenderedFeatures(box, { layers }) : []; });
     const hazardLayers=["encounter-marks","encounter-labels"];
     // Encounters: river hazards for everyone who can see them; for the GM, every encounter marker too.
-    const gm=!!globalThis.game?.user?.isGM;if(this.hasRiverHazards||gm){const hits=query(hazardLayers);const hazard=hits.find(f=>f.properties.hazard===true);if(hazard)return`river-hazard:${hazard.properties.id}`;if(gm&&hits.length)return`encounter:${hits[0].properties.id}`;}
+    const gm=!!globalThis.game?.user?.isGM;
+    if(gm){const hit=query(['journey-camps','journey-stop-names']).find(f=>f.properties.kind==='encounter'&&journeyEncounterRef(f.properties.cardKey));if(hit)return hit.properties.cardKey;}
+    if(this.hasRiverHazards||gm){const hits=query(hazardLayers);const hazard=hits.find(f=>f.properties.hazard===true);if(hazard)return`river-hazard:${hazard.properties.id}`;if(gm&&hits.length)return`encounter:${hits[0].properties.id}`;}
     // Transparent settlement/site circles cover every catalogued place, even
     // when its symbol was hidden by zoom or a label collision. They remain in
     // the style for editor use, but must not open hover cards.
