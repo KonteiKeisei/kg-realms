@@ -4,6 +4,7 @@ import {runMapBuild} from './homebrew/map-build.mjs';
 import {TileEncoder,cutTile,ktx2Header} from './homebrew/tiles.mjs';
 import {MAX_PICTURE,TILE_SUFFIX} from './homebrew/plan.mjs';
 import {BuildWindow,ensureDir,upload} from './homebrew/homebrew.mjs';
+import {verifyTilePreview} from './tile-preview.mjs';
 
 const ID='kg-realms';
 const hash=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');
@@ -99,7 +100,7 @@ export async function stagePlacedMapTiles(scene,io={}){
       let bytes;
       if(io.preview)bytes=await io.preview(bitmap);
       else{const factor=Math.min(1,512/Math.max(bitmap.width,bitmap.height)),canvas=new OffscreenCanvas(Math.max(1,Math.round(bitmap.width*factor)),Math.max(1,Math.round(bitmap.height*factor)));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bytes=new Uint8Array(await(await canvas.convertToBlob({type:'image/png'})).arrayBuffer());}
-      preview=`${plan.dataRoot}/preview.png`;preview=savedPath(await write(preview,bytes,'image/png'),preview);if(await hash(await read(preview))!==await hash(bytes))throw Error('The server changed a tile preview.');
+      preview=`${plan.dataRoot}/preview.png`;preview=savedPath(await write(preview,bytes,'image/png'),preview);await verifyTilePreview(bytes,await read(preview),io.previewValidation);
     }});
     patches.push({_id:id,'texture.src':preview,[`flags.${ID}.tileAsset`]:{...asset,tileId:id,preview}});
     old.push({id,src:current,asset:structuredClone(previous)});

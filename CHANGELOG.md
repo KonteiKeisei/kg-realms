@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.94.2: accept re-encoded tile previews
+
+- Validate rewritten tile previews as decoded images rather than requiring identical file bytes. Accept ordinary PNG/WebP re-encoding while checking aspect, image content and transparency. Reject corrupt images, lost transparency and mismatched previews. Keep byte-exact checks for compressed KTX2 artwork and detail catalogues, with the previous map selection retained on failure.
+- Bound MapLibre's requested pixel ratio to the canvas size and GPU limits before creating or resizing the ground and label canvases. Keep the existing 4096-pixel ceiling and avoid requesting oversized canvases on large or high-DPI displays.
+
 ## 0.94.1: tile upload readback and Regional map labels
 
 - Use the file path confirmed by Foundry after upload. Verify placed tile previews, compressed chunks and catalogues at their saved locations instead of assuming their requested names. Reject uploads without a confirmed path and retry briefly when a saved file is not yet available. Readback errors include the file path, and failed builds retain the previous map selection.

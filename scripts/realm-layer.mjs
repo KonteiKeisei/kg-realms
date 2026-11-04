@@ -1,4 +1,5 @@
 import { placeZooms } from "./source-map.mjs";
+import {mapCanvasSizing} from './map-canvas-size.mjs';
 import { journeyFeatures } from "./waterways.mjs";
 import { installMapSymbols } from './map-symbols.mjs';
 import { worldUrl } from "./worlds.mjs";
@@ -466,7 +467,7 @@ export class RealmLayer {
       interactive: false,
       attributionControl: false,
       renderWorldCopies: false,
-      pixelRatio: options.sharp ? Math.min(window.devicePixelRatio, 2) : 1,
+      ...this.#canvasSizing(),
       // The drawing is copied into Foundry as soon as it is drawn (#copy), so it need not be kept for
       // later. Smoothing only where the map is drawn at screen resolution: at double, edges are fine
       // without it. Labels appear without a fade (the settle delay times them instead).
@@ -482,7 +483,7 @@ export class RealmLayer {
       this.labelEl.style.width = this.el.style.width; this.labelEl.style.height = this.el.style.height;
       this.labels = new maplibregl.Map({
         container: this.labelEl, style: this.#style("top"), interactive: false, attributionControl: false, renderWorldCopies: false,
-        pixelRatio: options.sharp ? Math.min(window.devicePixelRatio, 2) : 1,
+        ...this.#canvasSizing(),
         canvasContextAttributes: { antialias: !(options.sharp && window.devicePixelRatio >= 2), preserveDrawingBuffer: false },
         fadeDuration: 0, minZoom: 0, maxZoom: 22
       });
@@ -559,7 +560,7 @@ export class RealmLayer {
   update() {
     if (!this.ready) return;
     const view = screenInScene();
-    if (this.#sizeElement()) for (const m of this.#maps()) m.resize();
+    if (this.#sizeElement()) for (const m of this.#maps()) {m.setPixelRatio(this.#canvasSizing().pixelRatio);m.resize();}
     const center = sceneToLatLon(this.frame, { x: view.cx, y: view.cy });
     // MapLibre zoom z draws the world 512 * 2^z CSS pixels wide.
     const zoom = Math.log2((view.scale * this.frame.k) / (TILE_SIZE * 2));
@@ -575,6 +576,8 @@ export class RealmLayer {
    * The hidden map's size follows the screen's: kept here rather than read back from the page, which
    * would make the browser lay the page out again on every pan.
    */
+  #canvasSizing(){const gl=canvas.app.renderer.gl;return mapCanvasSizing(this.elSize,{sharp:this.options?.sharp,devicePixelRatio:window.devicePixelRatio,maxTextureSize:gl?.getParameter(gl.MAX_TEXTURE_SIZE),maxRenderbufferSize:gl?.getParameter(gl.MAX_RENDERBUFFER_SIZE)});}
+
   #sizeElement() {
     const { width, height } = canvas.app.renderer.screen;
     const w = Math.ceil(width * (1 + 2 * MARGIN));
