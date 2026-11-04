@@ -163,7 +163,7 @@ const localMaps = new LocalMaps({
   travel:()=>cityTravel.open(),
   needsDock: scene => localMapNeedsDock(scene),
   applyEffects: (scene, entry, world) => localMapEffects.apply(scene, entry, world),
-  getRealmPlaces: async (world) => applyEdits((await loadWorld(world)).places, editsOf(world), "surface"),
+  getRealmPlaces: realmPlaces,
   savePlaceEdit,
   openCard,
   hoverDelayMs: () => setting("hoverDelayMs"),

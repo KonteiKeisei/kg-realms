@@ -4,7 +4,7 @@
 // double-click, keeps hidden places from players, and turns an existing scene with journal pins
 // into a local map (the pins' journal text goes into the places' cards; no journal stays linked).
 import { CATEGORIES, VISIBILITY, categoryFor, cleanLabel, scaleCheck, across, localRecord, localAssetEdits, markerAtZoom, alwaysShown } from "./local-places.mjs";
-import { worldUrl, defaultWorldId } from "./worlds.mjs";
+import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
 import { asHtml, asSecret, excerptHtml } from "./place-card.mjs";
 import { LocalEditor } from "./ui-local.mjs";
 import { isPrimaryGM } from "./authority.mjs";
@@ -378,8 +378,30 @@ export class LocalMaps {
     return this.ensureEntrance(scene,{afterPlacement:true});
   }
 
+  /** Prefer this scene's saved pin link, including inherited Regional places, over a name guess. */
+  async #conversionPlaces(scene, requestedWorld) {
+    const viewed = globalThis.canvas?.scene;
+    const preferred = requestedWorld ?? viewed?.getFlag?.(MODULE_ID, "world") ?? localMapOf(viewed)?.world ?? defaultWorldId();
+    const worlds = requestedWorld ? [requestedWorld] : [...new Set([preferred, ...allWorlds().map(w => w.id)].filter(Boolean))];
+    let fallback, failure;
+    for (const world of worlds) {
+      try {
+        // This is GM authoring. A secret place can have a prepared map too.
+        const places = (await this.getRealmPlaces(world)).filter(p => p && KINDS_WITH_MAPS.has(p.kind) && !p.regionalEntry && typeof p.name === "string" && p.name.trim());
+        const linked = places.filter(p => p.scene === scene.id);
+        if (linked.length) return { world, places, guess: linked.length === 1 ? linked[0] : null };
+        if (!fallback || !fallback.places.length && places.length) fallback = { world, places, guess: places.find(p => p.name.toLowerCase() === scene.name.toLowerCase()) };
+      } catch (error) {
+        failure ??= error;
+        console.warn(`kg-realms | local map places for ${world}:`, error);
+      }
+    }
+    if (!fallback && failure) throw failure;
+    return fallback ?? { world: preferred, places: [] };
+  }
+
   /** Choose the realm place a scene maps, then convert its journal pins into local places. */
-  async make(scene, world = defaultWorldId()) {
+  async make(scene, world) {
     if (!scene || !game.user.isGM) return;
     // A place's own scene (linked from a local place): it becomes that place's local map.
     const back = returnOf(scene), from = back ? game.scenes.get(back.scene) : null;
@@ -395,9 +417,12 @@ export class LocalMaps {
       await this.settings(scene);
       return this.ensureEntrance(scene);
     }
-    const places = (await this.getRealmPlaces(world)).filter((p) => p && KINDS_WITH_MAPS.has(p.kind) && !p.hidden && typeof p.name === "string" && p.name.trim());
-    if (!places.length) return ui.notifications.warn("KG Realms: this realm has no named, visible settlements or sites to link. Name a place on the realm map first.");
-    const guess = places.find((p) => p.scene === scene.id) ?? places.find((p) => p.name.toLowerCase() === scene.name.toLowerCase());
+    let choices;
+    try { choices = await this.#conversionPlaces(scene, world); }
+    catch (error) { return ui.notifications.error(`KG Realms: could not load places for local-map setup: ${error.message}`); }
+    const { places, guess } = choices;
+    world = choices.world;
+    if (!places.length) return ui.notifications.warn("KG Realms: no named settlements or sites were found on the available maps. Create or name a place first.");
     const sorted = [...places].sort((a, b) => a.name.localeCompare(b.name));
     const pins = scene.notes.filter((n) => !localOf(n) && (n.entryId || n.pageId)).length;
     const id = await foundry.applications.api.DialogV2.prompt({

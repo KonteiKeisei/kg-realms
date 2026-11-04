@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.93.13: local-map setup from realm and Regional place links
+
+- Read the same combined place list as map cards, including places inherited from a parent realm. Prefer the viewed map and find an existing scene-to-place link across registered maps before guessing by name. An explicitly supplied map remains authoritative.
+- Allow the GM to prepare local maps for hidden places without changing player visibility. Exclude synthetic road-crossing markers from the picker.
+- Keep the shared scene link on the canonical place while retaining independent Regional marker positions. Report map-loading failures as loading failures instead of claiming places are missing.
+
 ## 0.93.12: local-map conversion with unnamed realm places
 
 - Keep unnamed, blank or invalid-name settlement and site records out of the Make local map picker. These records no longer crash the dialog, and the realm's records remain unchanged.
