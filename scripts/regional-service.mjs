@@ -18,7 +18,7 @@ export class RegionalMaps {
   init(){
     game.settings.register(ID,KEY,{scope:'world',config:false,type:Object,default:{},onChange:()=>{this.networks.clear();this.onChange?.();}});
     for(const hook of ['getSceneContextOptions','getSceneDirectoryEntryContext'])Hooks.on(hook,(_app,options)=>{
-      options.push({name:'Regional map settings',icon:'<i class="fa-solid fa-map-location-dot"></i>',condition:li=>game.user.isGM&&!!this.sceneFrom(li)?.getFlag(ID,'world'),callback:li=>this.configure(this.sceneFrom(li)).catch(e=>ui.notifications.error(`KG Realms: ${e.message}`))});
+      options.push({name:'Regional map settings',icon:'<i class="fa-solid fa-map-location-dot"></i>',condition:li=>{const scene=this.sceneFrom(li),world=scene?.getFlag(ID,'world');return !!(game.user.isGM&&world&&(this.links[world]||scene.getFlag(ID,'regionalMap')));},callback:li=>this.configure(this.sceneFrom(li)).catch(e=>ui.notifications.error(`KG Realms: ${e.message}`))});
     });
   }
   sceneFrom(li){const el=li?.[0]??li;return game.scenes.get(el?.dataset?.entryId??el?.dataset?.documentId);}
@@ -149,13 +149,6 @@ export class RegionalMaps {
         else{const data=token.toObject();delete data._id;await scene.createEmbeddedDocuments('Token',[{...data,...position,flags:{...data.flags,[ID]:{...data.flags?.[ID],regionalProxy:`${owner.id}:${token.id}`}}}],{kgRealmsTravel:true});}
       }
     }
-  }
-  async manage(scene){
-    const world=scene?.getFlag(ID,'world');if(this.links[world])return this.configure(scene);
-    const candidates=Array.from(game.scenes).filter(s=>s.getFlag(ID,'world')&&s.getFlag(ID,'world')!==world&&(!this.links[s.getFlag(ID,'world')]||this.links[s.getFlag(ID,'world')].parent===world));
-    if(!candidates.length)return ui.notifications.info('Add the detailed picture as a Foundry scene, then right-click it and choose Make regional map. Its rectangle will be placed on this realm after tile creation.');
-    const id=await foundry.applications.api.DialogV2.wait({window:{title:'Regional maps'},rejectClose:false,content:`<p>Choose a detailed map to link or adjust. New pictures can be converted with Make regional map in the scene directory.</p><div class="form-group"><label>Detailed map</label><select name="scene">${candidates.map(s=>`<option value="${s.id}">${esc(s.name)}${this.links[s.getFlag(ID,'world')]?' (linked)':''}</option>`).join('')}</select></div>`,buttons:[{action:'edit',label:'Configure regional map',callback:(_e,b)=>b.form.elements.scene.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
-    if(id)return this.configure(game.scenes.get(id));
   }
   async configure(scene){
     if(!isPrimaryGM())throw Error('The primary GM configures regional maps.');

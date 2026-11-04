@@ -213,7 +213,7 @@ export function zipStore(files) {
 export const moduleIdFrom = (title) => `kg-realms-${worldIdFrom(String(title ?? "").replace(/^kg\s*realms\s*:?\s*/i, ""))}`;
 
 /** The script an exported world module runs: it registers the world with KG Realms. */
-export function moduleScript(moduleId, def, { snow, markers, rules, packs, calendar } = {}) {
+export function exportWorldDefinition(moduleId, def, { snow, markers, rules, packs, calendar, localMapAssets, regionalMaps } = {}) {
   const world = { id: def.id, title: def.title, module: moduleId, mapName: def.mapName ?? def.title, terrainPack: "terrain-pack.json" };
   // Its snow as the GM set it (the Snow tab, 0.75) becomes the module's own.
   if (snow && Object.keys(snow).length) world.snow = snow;
@@ -221,7 +221,15 @@ export function moduleScript(moduleId, def, { snow, markers, rules, packs, calen
   if (markers && Object.keys(markers).length) world.markers = markers;
   if (rules) world.rules = rules;
   if (packs?.length) world.packs = packs;
+  if (localMapAssets?.length) world.localMapAssets = localMapAssets;
   // Its Calendaria calendar, set when the module is first loaded (0.81).
   if (calendar) world.calendar = calendar;
-  return `// ${def.title} for KG Realms: registers the world as KG Realms starts.\nHooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld(${JSON.stringify(world)}));\n`;
+  if (regionalMaps?.links?.length) world.regionalMaps = regionalMaps;
+  return world;
+}
+
+export function moduleScript(moduleId, def, { additionalWorlds = [], ...options } = {}) {
+  const world = exportWorldDefinition(moduleId, def, options);
+  if (!additionalWorlds.length) return `// ${def.title} for KG Realms: registers the world as KG Realms starts.\nHooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld(${JSON.stringify(world)}));\n`;
+  return `// ${def.title} and its Regional maps for KG Realms.\nHooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => {\n${[world,...additionalWorlds].map(w=>`  registerWorld(${JSON.stringify(w)});`).join('\n')}\n});\n`;
 }

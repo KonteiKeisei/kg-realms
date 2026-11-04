@@ -63,6 +63,45 @@ const realData = async () => ({
 });
 setExportData(realData);
 
+test('a companion realm exports its terrain grid and compressed local maps without source-module dependencies', async () => {
+  install();
+  const source='modules/example-companion',root=`${source}/data/worlds/companion-export`;
+  const tilePath='assets/terrain/tile.ktx2',catalogue=`${root}/local/town-lods.json`;
+  const localTile=`${source}/assets/maps/ktx2/town/z0.ktx2`;
+  const map={id:'town',city:'town',placeId:'p1',width:10,height:10,source:`${source}/assets/maps/town.webp`,lodManifest:catalogue};
+  const single={id:'yard',city:'yard',placeId:'p2',source:`${source}/assets/maps/yard.webp`,tiles:[{src:`${source}/assets/maps/ktx2/yard/chunk.ktx2`}]};
+  const def=registerWorld({id:'companion-export',title:'Example Realm',module:'example-companion',terrainPack:'realm-pack.json',localMapAssets:[map,single]});
+  served.set(`${root}/index.json`,JSON.stringify({world:def.id,places:[],routes:'roads.json',terrain:{file:'terrain.png',cell:4}}));
+  served.set(`${root}/realm-pack.json`,JSON.stringify({lods:[{tiles:[{path:tilePath}]}]}));
+  served.set(`${root}/roads.json`,JSON.stringify({type:'FeatureCollection',features:[]}));
+  served.set(`${root}/terrain.png`,'BIOME GRID');
+  served.set(`${source}/${tilePath}`,'REALM TILE');
+  served.set(catalogue,JSON.stringify({schema:1,id:'town',width:10,height:10,lods:[{tiles:[{src:localTile}]}]}));
+  served.set(localTile,'LOCAL TILE');
+  served.set(single.tiles[0].src,'SINGLE CHUNK');
+  served.set(single.source,'RETAINED ORIGINAL');
+  game.scenes.push(plain({_id:'yard000000000000',tokens:[],notes:[],background:{src:single.source},flags:{'kg-realms':{localMap:{world:def.id,placeId:'p2'}}}}));
+  const built=await buildExport({id:def.id},{moduleId:'exported-realm',title:'Edited Realm',version:'1.0.0'});
+  const files=await readZip(built.parts),base='exported-realm/data/worlds/companion-export';
+  assert.equal(files.get(`${base}/terrain.png`),'BIOME GRID');
+  assert.equal(JSON.parse(files.get(`${base}/index.json`)).terrain.file,'terrain.png');
+  assert.equal(files.get(`exported-realm/${tilePath}`),'REALM TILE');
+  const world=JSON.parse(files.get('exported-realm/scripts/main.mjs').match(/registerWorld\((.*)\)\);/)[1]);
+  const asset=world.localMapAssets[0];
+  assert.equal(asset.source,'modules/exported-realm/assets/maps/town-source.webp');
+  const local=JSON.parse(files.get(asset.lodManifest.replace(/^modules\//,'')));
+  const src=local.lods[0].tiles[0].src;
+  assert.match(src,/^modules\/exported-realm\/assets\/maps\/ktx2\/town\//);
+  assert.equal(files.get(src.replace(/^modules\//,'')),'LOCAL TILE');
+  assert.equal(files.get(world.localMapAssets[1].tiles[0].src.replace(/^modules\//,'')),'SINGLE CHUNK');
+  assert.equal(files.get(world.localMapAssets[1].source.replace(/^modules\//,'')),'RETAINED ORIGINAL');
+  assert.equal(built.problems,2,'the fixture has one missing card image and one missing linked actor');
+  assert.ok(!built.report.includes('terrain.png: HTTP 404'));
+  assert.equal(map.source,`${source}/assets/maps/town.webp`,'registered source metadata is unchanged');
+  served.delete(`${root}/terrain.png`);
+  await assert.rejects(()=>buildExport({id:def.id},{moduleId:'exported-realm',title:'Edited Realm',version:'1.0.0'}),/terrain.png: HTTP 404/);
+});
+
 /** A stored zip's files, read back by its central directory: name -> text. */
 async function readZip(parts) {
   const b = new Uint8Array(await new Blob(parts).arrayBuffer()), v = new DataView(b.buffer), dec = new TextDecoder();

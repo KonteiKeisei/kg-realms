@@ -321,7 +321,9 @@ setExportData(async (world) => {
   return {
     places: [...levels].flatMap((level) => applyEdits(index.places, edits, level)),
     routeEdits: routeEditsOf(world), waterways: waterwaysOf(world), biomes: biomesOf(world), encounters: encountersOf(world),
-    tradeEdits: (setting("tradeEdits") ?? {})[world] ?? {}, snow: (setting("snow") ?? {})[world], markers: setting("customMarkers") ?? {}
+    tradeEdits: (setting("tradeEdits") ?? {})[world] ?? {}, snow: (setting("snow") ?? {})[world], markers: setting("customMarkers") ?? {},
+    regionalLinks: structuredClone(Object.values(setting("regionalMaps") ?? {}).filter(link => link.parent === world)),
+    regionalEdits: structuredClone(edits), regionalSnow: (setting("regionalSnow") ?? {})[world]
   };
 });
 /** Each world's shipped encounters (its encounters.json, if it has one), adopted once (the primary GM). */
@@ -1506,7 +1508,6 @@ Hooks.on("getSceneControlButtons", (controls) => {
       name: "kgRealmsTravel", title: "Travel", icon: "fa-solid fa-person-hiking",
       order: 101, button: true, onChange: () => planner.open()
     };
-    if(game.user.isGM) controls.tokens.tools.kgRealmsRegions={name:"kgRealmsRegions",title:"Regional maps: link and configure detailed maps",icon:"fa-solid fa-map-location-dot",order:104,button:true,onChange:()=>regional.manage(canvas.scene).catch(e=>ui.notifications.error(e.message))};
     // The GM's map editor, beside Search and Travel (E opens and closes it too).
     if (game.user.isGM) controls.tokens.tools.kgRealmsEditor = {
       name: "kgRealmsEditor", title: "Map editor: places, roads, encounters (E)", icon: "fa-solid fa-pen-ruler",

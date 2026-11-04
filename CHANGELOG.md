@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.93.8: realm exports include linked Regional maps
+
+- Show Export as module on companion realm scenes as well as maps created from an image. Export the current world's edits without converting the companion realm into a homebrew map.
+- Include every linked Regional map's scene, data, scale, roads, artwork and referenced documents in the same module ZIP. Give each map its own terrain tile paths so equal source filenames cannot overwrite one another.
+- Register the exported Regional worlds automatically. Importing the realm scene brings its Regional scenes with it and restores coverage, alignment, crossing and marker adjustments, and Regional snow choices. Existing links and edits in the destination game world retain priority. Missing linked map data blocks an incomplete export.
+- Carry the companion's terrain grid, declared terrain package and compressed local-map artwork into the export. Rewrite local-map catalogues and registry metadata to the exported module's paths, and retain original local images when referenced and available.
+- Remove Regional map settings from realm scene context menus. Keep it on linked Regional maps and newly created Regional maps awaiting parent placement.
+- Remove the Regional maps toolbar button. Create detailed maps through Make regional map in the scene directory and configure them from their own scene menu.
+
 ## 0.93.6: Areas terminology
 
 - Use Areas as the umbrella for Domains and Territories in the place list and map filter rail. Keep Domain and Territory as the individual place kinds.

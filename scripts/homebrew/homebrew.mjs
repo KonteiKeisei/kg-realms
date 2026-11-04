@@ -10,7 +10,7 @@ import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
-import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars } from "./export.mjs";
+import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars, restoreModuleRegionalMaps } from "./export.mjs";
 import { startBiomeClimates } from "../biome-weather.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, detailLevels, nextTileFolder } from "./plan.mjs";
 
@@ -51,6 +51,7 @@ export function registerHomebrew() {
     if (game.user !== game.users.activeGM) return;
     await moveWorlds();
     await fillModulePacks();
+    await restoreModuleRegionalMaps();
     if (!game.modules.get("calendaria")?.active) await applyModuleCalendars();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
@@ -164,11 +165,17 @@ function contextOptions(options) {
   const gm = () => game.user.isGM;
   options.push(
     { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li); return gm() && !!s?.background?.src && !isVideo(s.background.src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
-    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world"))await game.modules.get(ID).api.regionalMaps.configure(scene);} },
+    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world")){await scene.setFlag(ID,"regionalMap",true);await game.modules.get(ID).api.regionalMaps.configure(scene);}} },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
-    { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => exportModule(homebrewOf(sceneOf(li))) }
+    { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!exportWorldOf(sceneOf(li)), callback: (li) => exportModule(exportWorldOf(sceneOf(li))) }
   );
+}
+
+/** Companion realms and made maps can both export this world's edited content. */
+function exportWorldOf(scene) {
+  const id = scene?.getFlag(ID, "world");
+  return id ? worldDef(id) ?? homebrewOf(scene) : null;
 }
 
 /** The homebrew world a realm scene draws, if it is one saved in this game world. */
@@ -483,7 +490,7 @@ async function revert(scene) {
 
 async function worldSettings(scene) {
   const def = homebrewOf(scene); if (!def) return;
-  const regional=!!game.settings.get(ID,"regionalMaps")?.[def.id];
+  const regional=!!(scene.getFlag(ID,"regionalMap")||game.settings.get(ID,"regionalMaps")?.[def.id]);
   const values = await foundry.applications.api.DialogV2.wait({
     window: { title: `${def.title}: settings`, icon: "fa-solid fa-gear" }, position: { width: 420 }, rejectClose: false,
     content: `<div class="form-group"><label>${regional?"Regional map name":"World name"}</label><input name="name" type="text" value="${esc(def.title)}"></div>
