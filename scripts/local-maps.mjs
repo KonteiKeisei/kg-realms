@@ -395,7 +395,8 @@ export class LocalMaps {
       await this.settings(scene);
       return this.ensureEntrance(scene);
     }
-    const places = (await this.getRealmPlaces(world)).filter((p) => KINDS_WITH_MAPS.has(p.kind) && !p.hidden);
+    const places = (await this.getRealmPlaces(world)).filter((p) => p && KINDS_WITH_MAPS.has(p.kind) && !p.hidden && typeof p.name === "string" && p.name.trim());
+    if (!places.length) return ui.notifications.warn("KG Realms: this realm has no named, visible settlements or sites to link. Name a place on the realm map first.");
     const guess = places.find((p) => p.scene === scene.id) ?? places.find((p) => p.name.toLowerCase() === scene.name.toLowerCase());
     const sorted = [...places].sort((a, b) => a.name.localeCompare(b.name));
     const pins = scene.notes.filter((n) => !localOf(n) && (n.entryId || n.pageId)).length;

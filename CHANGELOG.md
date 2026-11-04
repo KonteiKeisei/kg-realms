@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.93.12: local-map conversion with unnamed realm places
+
+- Keep unnamed, blank or invalid-name settlement and site records out of the Make local map picker. These records no longer crash the dialog, and the realm's records remain unchanged.
+- Explain when no named, visible settlement or site is available instead of opening an empty place picker. Keep named-place matching, pin conversion and scene linking intact.
+
 ## 0.93.11: fit the layer rail to the Travel HUD
 
 - Keep the layer rail within the Travel HUD's height when the HUD is collapsed or resized. Its buttons shrink to fit and return to their normal size when space is available.
