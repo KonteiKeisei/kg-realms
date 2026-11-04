@@ -74,18 +74,19 @@ test('ordinary encounter cards deny players even if discovered, and direct card 
   }
 });
 
-test('GM hover cards are marked private and delayed hovers or direct opens cannot expose them to players',async()=>{
+test('GM hover cards are marked private and delayed hovers or direct opens cannot expose them to players',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
   const {document,window}=parseHTML('<html><body><canvas></canvas></body></html>'),handlers=new Map(),view=document.querySelector('canvas');view.getBoundingClientRect=()=>({left:0,top:0});document.elementFromPoint=()=>view;
   Object.assign(globalThis,{document,window,game:{user:{isGM:true}},foundry:{utils:{escapeHTML:String,getRoute:String}},canvas:{app:{view},stage:{on:(k,v)=>handlers.set(k,v),off:k=>handlers.delete(k)},tokens:{controlled:[]}},requestAnimationFrame:fn=>setTimeout(fn,0),cancelAnimationFrame:clearTimeout});
   const key=journeyEncounterKey({id:'realm'},'ambush'),p=encounterPreview(secret,key,journeyEncounterRef(key));let opened=0;
   const card=new PlaceCard({getPlace:()=>p,openCard:()=>opened++,hoverDelayMs:()=>20});card.attach({placeAt:()=>key,frame:null});
   const move={global:{x:100,y:100},client:{clientX:100,clientY:100},getLocalPosition:()=>({x:100,y:100})};
-  handlers.get('pointermove')(move);await new Promise(r=>setTimeout(r,55));
+  handlers.get('pointermove')(move);t.mock.timers.tick(0);t.mock.timers.tick(20);
   assert.ok(card.el?.classList.contains('kgr-gm-only'));assert.match(card.el.textContent,/GM only/);assert.match(card.el.textContent,/Perception DC: 15/);assert.match(card.el.textContent,/Hidden GM plan/);
   card.open(key);assert.equal(opened,1);
-  handlers.get('pointermove')(move);await new Promise(r=>setTimeout(r,8));game.user.isGM=false;await new Promise(r=>setTimeout(r,50));
+  handlers.get('pointermove')(move);t.mock.timers.tick(0);t.mock.timers.tick(8);game.user.isGM=false;t.mock.timers.tick(50);
   assert.equal(card.el,null);assert.equal(card.cue,null);card.open(key);assert.equal(opened,1);
-  handlers.get('pointermove')(move);await new Promise(r=>setTimeout(r,30));assert.equal(document.querySelector('.kgr-card,.kgr-hover-cue'),null);card.detach();
+  handlers.get('pointermove')(move);t.mock.timers.tick(30);assert.equal(document.querySelector('.kgr-card,.kgr-hover-cue'),null);card.detach();
 });
 
 test('map styles independently gate private encounter circles and their labels',()=>{

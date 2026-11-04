@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.94.0: complete map packages and local tile rebuilding
+
+- Export a realm with its linked Regional maps, local maps and interiors, including full scene contents and referenced files. Re-exports retain packaged scenes and documents that have not been generated in the current world. Missing required files block download and appear in a repair report. Large archives use ZIP64.
+- Offer a map checklist on first GM load and through Generate in the Scenes sidebar. Show realm, Regional, local and interior hierarchy, select required parent maps, and leave existing scenes intact. Unselected packaged maps remain available from their place cards. Discover the scene catalogue in older exported modules without rebuilding their code.
+- Add Regenerate map on linked place cards and Regenerate copy in the checklist. Create a fresh linked copy from the package while retaining the previous scene. Include scene tokens is off by default for regeneration, and selectable in the checklist.
+- Add Regenerate local map tiles from Background Image in Configure Scene. Build and verify three compressed detail levels before switching the background. Optimize standard and overhead image tiles separately, preserving each tile's geometry, elevation, sort, transparency and occlusion settings. Keep videos native. Preserve pins, roads, grid, walls, lights and links. Background rebuilding currently requires one Foundry scene level.
+- Load optimized placed tile artwork according to zoom and the client's texture budget. Release offscreen display textures, retain small native previews, and keep Foundry's tile meshes and elevation handling. Export the detail catalogues, editable source images and previews with the scene.
+- Keep Edit Scene available in Token Controls for scene configuration, including scenes awaiting conversion. Put the map editor in Token Controls on realm, Regional and local maps, with E to open or close it. Retain the Local places shortcut under Journal Notes. The removed Regional setup shortcut stays removed.
+
 ## 0.93.13: local-map setup from realm and Regional place links
 
 - Read the same combined place list as map cards, including places inherited from a parent realm. Prefer the viewed map and find an existing scene-to-place link across registered maps before guessing by name. An explicitly supplied map remains authoritative.

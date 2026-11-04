@@ -11,6 +11,7 @@ import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
 import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars, restoreModuleRegionalMaps } from "./export.mjs";
+import {promptInstalledScenes,registerSceneSetup,adoptPackagedScenes} from '../module-scenes.mjs';
 import { startBiomeClimates } from "../biome-weather.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, detailLevels, nextTileFolder } from "./plan.mjs";
 
@@ -28,6 +29,7 @@ let reloading = false;
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
+  registerSceneSetup();
   Hooks.on("createScene", sceneFromModule);
   // A world's map was rebuilt: everyone reloads, so nobody keeps drawing the old one.
   Hooks.on("updateScene", (scene, changes) => {
@@ -48,10 +50,12 @@ export function registerHomebrew() {
   }
   for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (app, options) => contextOptions(options));
   Hooks.once("ready", async () => {
+    await adoptPackagedScenes();
     if (game.user !== game.users.activeGM) return;
     await moveWorlds();
     await fillModulePacks();
     await restoreModuleRegionalMaps();
+    await promptInstalledScenes();
     if (!game.modules.get("calendaria")?.active) await applyModuleCalendars();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
@@ -168,7 +172,7 @@ function contextOptions(options) {
     { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world")){await scene.setFlag(ID,"regionalMap",true);await game.modules.get(ID).api.regionalMaps.configure(scene);}} },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
-    { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!exportWorldOf(sceneOf(li)), callback: (li) => exportModule(exportWorldOf(sceneOf(li))) }
+    { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!exportWorldOf(sceneOf(li)), callback: (li) => exportModule(exportWorldOf(sceneOf(li)),sceneOf(li)?.id) }
   );
 }
 
@@ -186,7 +190,7 @@ function homebrewOf(scene) {
 
 /* ------------------------------------------------------------------ files */
 
-async function ensureDir(path) {
+export async function ensureDir(path) {
   const FP = FilePickerImpl();
   let at = "";
   for (const part of path.split("/")) {
@@ -195,7 +199,7 @@ async function ensureDir(path) {
   }
 }
 
-async function upload(dir, name, bytes, type) {
+export async function upload(dir, name, bytes, type) {
   const file = new File([bytes], name, { type });
   const result = await FilePickerImpl().upload("data", dir, file, {}, { notify: false });
   if (result === false || result?.status === "error") throw Error(result?.message ?? `could not save ${name}`);
@@ -222,11 +226,11 @@ async function checkUploads(dir) {
 
 // Made on first use: Foundry's application classes are not there when this file loads in tests.
 let BuildWindowClass = null;
-const BuildWindow = function (...args) { BuildWindowClass ??= buildWindowClass(); return new BuildWindowClass(...args); };
+export const BuildWindow = function (...args) { BuildWindowClass ??= buildWindowClass(); return new BuildWindowClass(...args); };
 const buildWindowClass = () => class extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = { id: "kgr-realm-build", classes: ["kg-realms-build"], window: { title: "Making realm world", icon: "fa-solid fa-earth-europe" }, position: { width: 420 } };
-  constructor(name, onStop, { title = `Making ${name}`, steps = [["backup", "Back up the scene"], ["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Save the world"], ["scene", "Turn the scene into a realm map"]] } = {}) {
-    super({ window: { title } });
+  constructor(name, onStop, { title = `Making ${name}`, id, steps = [["backup", "Back up the scene"], ["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Save the world"], ["scene", "Turn the scene into a realm map"]] } = {}) {
+    super({ window: { title }, ...(id?{id}:{}) });
     this.onStop = onStop;
     this.steps = steps.map(([key, label]) => ({ key, label, state: "todo", note: "" }));
     this.done = 0; this.total = 0; this.started = Date.now(); this.message = "";

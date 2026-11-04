@@ -17,9 +17,9 @@ export class TileEncoder {
     })));
   }
   /** One tile's KTX2 file from its RGBA pixels (the buffer is handed to the worker). */
-  encode(worker, rgba, width, height) {
+  encode(worker, rgba, width, height, {alpha=false}={}) {
     const id = this.next++;
-    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.workers[worker].postMessage({ id, rgba, width, height }, [rgba]); });
+    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.workers[worker].postMessage({ id, rgba, width, height, alpha }, [rgba]); });
   }
   stop() { for (const w of this.workers) w.terminate(); for (const j of this.pending.values()) j.reject(Error("stopped")); this.pending.clear(); }
 }

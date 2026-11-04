@@ -92,7 +92,7 @@ export class LocalMaps {
     this.bar = null;
     this.focus = null; // { scene, note } or { scene, placeId }: where to centre once that scene is drawn
     this.editor = new LocalEditor(this);
-    this.editor.onClose = () => { const t = ui.controls?.controls?.notes?.tools?.kgRealmsLocal; if (t) t.active = false; ui.controls?.render(); };
+    this.editor.onClose = () => { for(const t of [ui.controls?.controls?.notes?.tools?.kgRealmsLocal,ui.controls?.controls?.tokens?.tools?.kgRealmsEditor])if(t)t.active=false;ui.controls?.render(); };
   }
 
   localMapOf(scene) { return localMapOf(scene); }
@@ -369,6 +369,8 @@ export class LocalMaps {
   }
 
   editorOpened(scene) {
+    for(const tool of [ui.controls?.controls?.tokens?.tools?.kgRealmsEditor,ui.controls?.controls?.notes?.tools?.kgRealmsLocal])if(tool)tool.active=true;
+    ui.controls?.render();
     this.entrancePrompts?.delete(`${scene.id}:land`);
     this.entrancePrompts?.delete(`${scene.id}:dock`);
     this.ensureEntrance(scene,{editorOpen:true}).catch(error=>console.warn('kg-realms | entrance setup:',error));

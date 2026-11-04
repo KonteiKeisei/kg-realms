@@ -1,6 +1,7 @@
 import {partyScene} from './party-groups.mjs';
 import { hierarchyOf, hierarchyLine, placeClass } from "./map-layers.mjs";
-import { defaultWorldId } from "./worlds.mjs";
+import { defaultWorldId, worldDef } from "./worlds.mjs";
+import {templateForPlace,generatePlaceScene,regenerateSceneCopy} from './module-scenes.mjs';
 import {entranceType} from './settlement-entry.mjs';
 // What the place card shows and saves for each kind of place: realm places (the world's place
 // edits), local places (their notes on a local map), encounters placed in the map editor (a world
@@ -75,6 +76,7 @@ export function registerKinds(cards, deps) {
       const sceneId = p.scene || p.regionalMapScene;
       const scene = sceneId ? game.scenes.get(sceneId) : null, map = localMapOf(scene);
       const local = map?.placeId === p.id;
+      const template=game.user.isGM?templateForPlace(ref.world,p,sceneId):null;
       // Where it sits in the realms, worked out from their borders and links. Hidden ones only for the GM.
       const line = hierarchyLine(p, hierarchyOf(p, await deps.realmPlaces(ref.world), { showHidden: game.user.isGM }));
       const known_as = [p.alt, p.location].filter(Boolean).join(", ");
@@ -91,7 +93,7 @@ export function registerKinds(cards, deps) {
         actor: p.actor ?? null, url: p.url ?? null, locate: true,
         enter: enterFor(sceneId, p.name, !!p.regionalMapScene),
         rows: [["Factions", p.factions ? p.factions.split(",").slice(0, 5).join(", ") : null]],
-        gmActions: preset ? [{ act: "setup", label: `Set up the local map (${preset.places} places)`, icon: "fa-map-location-dot" }] : [],
+        gmActions: template&&!scene?[{act:'generate',label:`Generate ${p.name}`,icon:'fa-map-location-dot'}]:[...(preset?[{act:'setup',label:`Set up the local map (${preset.places} places)`,icon:'fa-map-location-dot'}]:[]),...(template&&scene&&['local','scene'].includes(template.kind)?[{act:'regenerate',label:'Regenerate map',icon:'fa-rotate-right'}]:[])],
         // Any place can go: one the GM added is deleted, one the module ships is removed from this
         // world (restored from the map editor's Places tab).
         canDelete: true, deleteLabel: p.added ? "Delete" : "Remove from the map",
@@ -126,6 +128,13 @@ export function registerKinds(cards, deps) {
     },
     async locate(ref) { const p = await realm(ref); if (p) deps.locate(p.lon, p.lat, p); },
     async act(ref, act) {
+      if(!game.user.isGM)return;
+      if(act==='generate'||act==='regenerate'){
+        const p=await realm(ref),node=p?templateForPlace(ref.world,p,p.scene||p.regionalMapScene):null;
+        if(!node)return;
+        const scene=act==='regenerate'?await regenerateSceneCopy(worldDef(ref.world),node):await generatePlaceScene(ref.world,node);
+        if(scene&&act==='generate')await scene.view();return;
+      }
       if (act !== "setup") return;
       const p = await realm(ref), preset = p ? await deps.presetFor(p) : null;
       const r = preset ? await deps.setupLocal(preset) : null;
@@ -140,13 +149,14 @@ export function registerKinds(cards, deps) {
       const n = note(ref), rec = localOf(n);
       if (!rec) return null;
       const cat = CATEGORIES[rec.category] ?? CATEGORIES.other, map = localMapOf(n.parent);
+      const template=game.user.isGM&&map?templateForPlace(map.world,rec,rec.scene):null,linked=rec.scene?game.scenes.get(rec.scene):null;
       const known = rec.known ?? `${asHtml(rec.summary)}${legacyText(rec.journal)}`;
       return {
         name: rec.name, type: cat.label, icon: cat.icon, subtitle: map ? `in ${map.name}` : n.parent.name,
         img: rec.img || legacyImage(rec.journal), known, gmNotes: asHtml(rec.gmNotes), rumours: rec.rumours ?? "", visibility: rec.visibility ?? "discovered",
         actor: rec.actor ?? null, locate: canvas.scene?.id === ref.scene, enter: enterFor(rec.scene, rec.name),
         rows: entranceType(rec) ? [['Arrival', entranceType(rec) === 'dock' ? 'Dock entrance' : 'Land entrance'], ['Access',rec.privateEntry ? 'Private, entry may be prohibited without permission' : 'Public']] : [], canDelete: true,
-        gmActions:map&&deps.cityTravel?[{act:'travel',label:'Travel here',icon:'fa-person-walking'}]:[],
+        gmActions:[...(map&&deps.cityTravel?[{act:'travel',label:'Travel here',icon:'fa-person-walking'}]:[]),...(template&&!linked?[{act:'generate',label:`Generate ${rec.name}`,icon:'fa-map-location-dot'}]:[]),...(template&&linked&&['local','scene'].includes(template.kind)?[{act:'regenerate',label:'Regenerate map',icon:'fa-rotate-right'}]:[])],
         form: { name: rec.name, category: rec.category, visibility: rec.visibility, img: rec.img ?? "", known, rumours: rec.rumours ?? "", gmNotes: asHtml(rec.gmNotes), scene: rec.scene ?? "", actor: rec.actor ?? "", iconSize: n.iconSize, iconPack:iconPackOverride(rec.iconPack)??'', keyPlace: !!rec.keyPlace, entry: !!rec.entry, entryType: rec.entryType ?? '', privateEntry: !!rec.privateEntry },
         fields: [ART, TEXT("name", "Name", { wide: true }), { name: "category", label: "Category", type: "select", group: "identity", options: Object.entries(CATEGORIES).map(([k, c]) => [k, c.label]) },
           WHO, RUMOURS, KNOWN, GM_NOTES, sceneField(ref.scene), ACTOR,
@@ -178,7 +188,10 @@ export function registerKinds(cards, deps) {
       if (entranceType(rec)) await deps.localMaps.entrancePlaced?.(n.parent);
     },
     async remove(ref) { const n = note(ref); if (!n) return; await deps.localMaps.unlinkScene(n); await n.delete(); },
-    async act(ref,act){if(act==='travel'&&game.user.isGM){const n=note(ref);if(n)return deps.cityTravel?.open(n.parent,{note:n.id});}},
+    async act(ref,act){if(!game.user.isGM)return;const n=note(ref),rec=localOf(n),world=localMapOf(n?.parent)?.world;
+      if(act==='travel'&&n)return deps.cityTravel?.open(n.parent,{note:n.id});
+      if(act==='generate'||act==='regenerate'){const template=world&&rec?templateForPlace(world,rec,rec.scene):null;if(!template)return;const scene=act==='regenerate'?await regenerateSceneCopy(worldDef(world),template):await generatePlaceScene(world,template);if(scene&&act==='generate')await scene.view();}
+    },
     async enter(ref, all) {
       const n = note(ref), rec = localOf(n);
       if (!game.user.isGM || !rec?.scene) return;

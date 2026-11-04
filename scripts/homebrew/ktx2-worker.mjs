@@ -21,7 +21,7 @@ self.onmessage = async ({ data }) => {
     encoder.setFormatMode(m.basis_tex_format.cETC1S.value);
     encoder.setMipGen(false);
     encoder.setPerceptual(true);
-    encoder.setCheckForAlpha(false);
+    encoder.setCheckForAlpha(!!data.alpha);
     encoder.setQualityLevel(255);
     encoder.setETC1SCompressionLevel(2);
     const out = new Uint8Array(width * height * 4 + 65536), size = encoder.encode(out);

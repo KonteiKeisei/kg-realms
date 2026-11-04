@@ -183,24 +183,38 @@ export function zipEntry(name, bytes) {
 }
 /** Whether entries fit a plain zip: 65,535 files and 4 GB. */
 export const zipFits = (entries) => entries.length < 65535 && entries.reduce((n, e) => n + e.size + 76 + e.name.length * 2, 22) < 2 ** 32;
+/** ZIP64 carries large exports without dropping maps or asking the GM to split the content. */
+export const zipCanBuild=entries=>{let total=98;const enc=new TextEncoder();return entries.every(e=>{if(!Number.isSafeInteger(e.size)||e.size<0||enc.encode(e.name).length>65535)return false;total+=e.size+160+enc.encode(e.name).length*2;return Number.isSafeInteger(total);});};
 /** The zip's pieces in order, stored without compression (the tiles are compressed already). */
 export function zipParts(entries) {
+  if(!zipCanBuild(entries))throw Error('The export exceeds the browser archive limits.');
   const enc = new TextEncoder(), parts = [], central = [];
-  let offset = 0;
+  let offset = 0, needs64=false;
   for (const f of entries) {
     const name = enc.encode(f.name), bytes = f.body, crc = f.crc, size = f.size;
+    const bigSize=size>=0xffffffff,bigOffset=offset>=0xffffffff;needs64||=bigSize||bigOffset;
+    const localExtra=new DataView(new ArrayBuffer(bigSize?20:0)),extra=new DataView(new ArrayBuffer((bigSize||bigOffset)?4+(bigSize?16:0)+(bigOffset?8:0):0));
+    if(bigSize){localExtra.setUint16(0,1,true);localExtra.setUint16(2,16,true);localExtra.setBigUint64(4,BigInt(size),true);localExtra.setBigUint64(12,BigInt(size),true);}
+    if(extra.byteLength){extra.setUint16(0,1,true);extra.setUint16(2,extra.byteLength-4,true);let p=4;if(bigSize){extra.setBigUint64(p,BigInt(size),true);extra.setBigUint64(p+8,BigInt(size),true);p+=16;}if(bigOffset)extra.setBigUint64(p,BigInt(offset),true);}
     const local = new DataView(new ArrayBuffer(30));
-    local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true);
-    local.setUint32(14, crc, true); local.setUint32(18, size, true); local.setUint32(22, size, true); local.setUint16(26, name.length, true);
+    local.setUint32(0, 0x04034b50, true); local.setUint16(4, bigSize?45:20, true); local.setUint16(6, 0x0800, true);
+    local.setUint32(14, crc, true); local.setUint32(18, bigSize?0xffffffff:size, true); local.setUint32(22, bigSize?0xffffffff:size, true); local.setUint16(26, name.length, true);local.setUint16(28,localExtra.byteLength,true);
     const head = new DataView(new ArrayBuffer(46));
-    head.setUint32(0, 0x02014b50, true); head.setUint16(4, 20, true); head.setUint16(6, 20, true); head.setUint16(8, 0x0800, true);
-    head.setUint32(16, crc, true); head.setUint32(20, size, true); head.setUint32(24, size, true); head.setUint16(28, name.length, true); head.setUint32(42, offset, true);
-    parts.push(new Uint8Array(local.buffer), name, bytes); central.push(new Uint8Array(head.buffer), name);
-    offset += 30 + name.length + size;
+    head.setUint32(0, 0x02014b50, true); head.setUint16(4, extra.byteLength?45:20, true); head.setUint16(6, extra.byteLength?45:20, true); head.setUint16(8, 0x0800, true);
+    head.setUint32(16, crc, true); head.setUint32(20, bigSize?0xffffffff:size, true); head.setUint32(24, bigSize?0xffffffff:size, true); head.setUint16(28, name.length, true);head.setUint16(30,extra.byteLength,true);head.setUint32(42, bigOffset?0xffffffff:offset, true);
+    parts.push(new Uint8Array(local.buffer), name,...(localExtra.byteLength?[new Uint8Array(localExtra.buffer)]:[]), bytes); central.push(new Uint8Array(head.buffer), name,...(extra.byteLength?[new Uint8Array(extra.buffer)]:[]));
+    offset += 30 + name.length + localExtra.byteLength + size;
   }
   const size = central.reduce((n, p) => n + p.length, 0), end = new DataView(new ArrayBuffer(22));
-  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true); end.setUint32(12, size, true); end.setUint32(16, offset, true);
-  return [...parts, ...central, new Uint8Array(end.buffer)];
+  needs64||=entries.length>=65535||size>=0xffffffff||offset>=0xffffffff;
+  const tail=[];
+  if(needs64){
+    const extended=new DataView(new ArrayBuffer(56)),locator=new DataView(new ArrayBuffer(20));
+    extended.setUint32(0,0x06064b50,true);extended.setBigUint64(4,44n,true);extended.setUint16(12,45,true);extended.setUint16(14,45,true);extended.setBigUint64(24,BigInt(entries.length),true);extended.setBigUint64(32,BigInt(entries.length),true);extended.setBigUint64(40,BigInt(size),true);extended.setBigUint64(48,BigInt(offset),true);
+    locator.setUint32(0,0x07064b50,true);locator.setBigUint64(8,BigInt(offset+size),true);locator.setUint32(16,1,true);tail.push(new Uint8Array(extended.buffer),new Uint8Array(locator.buffer));
+  }
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, needs64?65535:entries.length, true); end.setUint16(10, needs64?65535:entries.length, true); end.setUint32(12, needs64?0xffffffff:size, true); end.setUint32(16, needs64?0xffffffff:offset, true);
+  return [...parts, ...central,...tail,new Uint8Array(end.buffer)];
 }
 /** A zip of `files` ({ name, bytes }) as one array. */
 export function zipStore(files) {
@@ -213,7 +227,7 @@ export function zipStore(files) {
 export const moduleIdFrom = (title) => `kg-realms-${worldIdFrom(String(title ?? "").replace(/^kg\s*realms\s*:?\s*/i, ""))}`;
 
 /** The script an exported world module runs: it registers the world with KG Realms. */
-export function exportWorldDefinition(moduleId, def, { snow, markers, rules, packs, calendar, localMapAssets, regionalMaps } = {}) {
+export function exportWorldDefinition(moduleId, def, { snow, markers, rules, packs, calendar, localMapAssets, regionalMaps, sceneTemplates } = {}) {
   const world = { id: def.id, title: def.title, module: moduleId, mapName: def.mapName ?? def.title, terrainPack: "terrain-pack.json" };
   // Its snow as the GM set it (the Snow tab, 0.75) becomes the module's own.
   if (snow && Object.keys(snow).length) world.snow = snow;
@@ -225,6 +239,7 @@ export function exportWorldDefinition(moduleId, def, { snow, markers, rules, pac
   // Its Calendaria calendar, set when the module is first loaded (0.81).
   if (calendar) world.calendar = calendar;
   if (regionalMaps?.links?.length) world.regionalMaps = regionalMaps;
+  if (sceneTemplates) world.sceneTemplates = sceneTemplates;
   return world;
 }
 

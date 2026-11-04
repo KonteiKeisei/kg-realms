@@ -72,7 +72,7 @@ test("a scene ships its pins, lights, walls and tokens, without this table's jou
   const doc = { _id: "a", name: "Town", _stats: {}, folder: "f", thumb: "worlds/x/thumb.webp", active: true, ownership: { x: 3 }, tokens: [{ actorId: "npc" }, { actorId: "pc" }], lights: [{}], walls: [{}], journal: "j", notes: [{ entryId: "e", pageId: "p", flags: { "kg-realms": { local: { name: "Inn" } } } }],
     flags: { fxmaster: { on: 1 }, "kg-realms": { localMap: { world: "t" }, cityRoads: { roads: [] }, journey: {}, partyJourneys: {}, partyFocus: "p", cityAsk: {}, homebrewOriginal: {} } } };
   const out = sceneForExport(doc, "t", (token) => token.actorId !== "pc");
-  assert.deepEqual(out.tokens, [{ actorId: "npc" }]); assert.equal(out.active, false); assert.equal(out.journal, null);
+  assert.deepEqual(out.tokens, [{ actorId: "npc" }]); assert.equal(out.active, false); assert.equal(out.journal, 'j');
   for (const gone of ["_stats", "folder", "thumb", "ownership"]) assert.ok(!(gone in out), gone);
   assert.equal(out.lights.length, 1); assert.equal(out.walls.length, 1);
   assert.equal(out.notes[0].entryId, null); assert.equal(out.notes[0].flags["kg-realms"].local.name, "Inn");

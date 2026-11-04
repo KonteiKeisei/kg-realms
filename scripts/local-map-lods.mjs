@@ -1,8 +1,11 @@
 import { assetModules } from "./worlds.mjs";
 /** A tile picture may only come from the engine or a registered world's module, in that city's folder. */
-export function lodSrcAllowed(src, city) {
+export function lodSrcAllowed(src, city, asset = {}) {
+  if(!/^[\w-]+$/.test(city??''))return false;
   const m = /^modules\/([\w-]+)\/assets\/maps\/ktx2\/([\w-]+)\/[\w-]+\.ktx2$/.exec(src ?? "");
-  return !!m && m[2] === city && assetModules().has(m[1]);
+  if(m)return m[2] === city && assetModules().has(m[1]);
+  const root=asset.dataRoot;
+  return typeof root==='string'&&/^KG Realms Data\/Local\/[\w-]+\/[\w-]+$/.test(root)&&typeof src==='string'&&src.startsWith(`${root}/assets/maps/ktx2/${city}/`)&&/^[\w-]+\.ktx2(?:\.fbx)?$/.test(src.slice(`${root}/assets/maps/ktx2/${city}/`.length));
 }
 import {chooseView,LodCache} from './terrain/lod-cache.mjs';
 import {KtxDecoder} from './terrain/ktx-decoder.mjs';
@@ -18,7 +21,7 @@ export async function resolveLocalLods(asset) {
       if(!Number.isFinite(lod.z)||!lod.tiles?.length||(i&&lod.z<=data.lods[i-1].z))throw Error('Invalid map detail level.');
       for(const t of lod.tiles){
         const geometry=['x','y','width','height','textureWidth','textureHeight','frameX','frameY','frameWidth','frameHeight'];
-        if(t.lod!==lod.z||ids.has(t.id)||typeof t.id!=='string'||!lodSrcAllowed(t.src,asset.city)||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216||geometry.some(k=>!Number.isFinite(t[k])||t[k]<0)||!t.width||!t.height||t.textureWidth>4096||t.textureHeight>4096||t.textureWidth%4||t.textureHeight%4||t.frameWidth<=0||t.frameHeight<=0||t.frameX+t.frameWidth>t.textureWidth||t.frameY+t.frameHeight>t.textureHeight||t.x+t.width>data.width+.001||t.y+t.height>data.height+.001)throw Error('Invalid local map texture geometry.');
+        if(t.lod!==lod.z||ids.has(t.id)||typeof t.id!=='string'||!lodSrcAllowed(t.src,asset.city,asset)||!/^[a-f0-9]{64}$/.test(t.hash??'')||!Number.isSafeInteger(t.ktxBytes)||t.ktxBytes<=0||t.ktxBytes>16777216||geometry.some(k=>!Number.isFinite(t[k])||t[k]<0)||!t.width||!t.height||t.textureWidth>4096||t.textureHeight>4096||t.textureWidth%4||t.textureHeight%4||t.frameWidth<=0||t.frameHeight<=0||t.frameX+t.frameWidth>t.textureWidth||t.frameY+t.frameHeight>t.textureHeight||t.x+t.width>data.width+.001||t.y+t.height>data.height+.001)throw Error('Invalid local map texture geometry.');
         ids.add(t.id);
       }
     }

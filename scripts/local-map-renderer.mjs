@@ -35,6 +35,8 @@ export function sceneBackground(scene) {
 export function mapAsset(scene, assets = index().bySource, fallback = index().defaults) {
   if ((scene?.levels?.size ?? scene?.levels?.contents?.length ?? 0) > 1) return null;
   const src = sceneBackground(scene);
+  const own=scene?.getFlag?.(ID,'localMap')??scene?.flags?.[ID]?.localMap;
+  if(own?.tileAsset&&(!src||assetPath(src)===assetPath(own.tileAsset.source)))return own.tileAsset;
   if (src) return assets.get(assetPath(src)) ?? null; // Keep a GM's custom map.
   const local = scene?.getFlag?.(ID, "localMap") ?? scene?.flags?.[ID]?.localMap;
   if (!local) return null;
@@ -268,7 +270,7 @@ export class LocalMapRenderer {
   status() { return {...this.#status}; }
 
   install() {
-    game.settings.register(ID,'localMapBudget',{name:'Local map texture budget',hint:'GPU texture payload for maps with several detail levels. Other scene graphics and decoder memory are additional.',scope:'client',config:true,type:Number,default:128,choices:{64:'64 MiB',128:'128 MiB',256:'256 MiB'},requiresReload:true});
+    game.settings.register(ID,'localMapBudget',{name:'Local map texture budget',hint:'Background GPU texture payload for maps with several detail levels. Optimized placed tiles share up to half this amount in additional display textures. Native previews, other scene graphics and decoder memory are additional.',scope:'client',config:true,type:Number,default:128,choices:{64:'64 MiB',128:'128 MiB',256:'256 MiB'},requiresReload:true});
     // KTX2 only (0.65.6): the bundled maps no longer ship their WebP pictures.
     const enabled = () => true;
     const Loader = foundry.canvas.TextureLoader;
@@ -300,8 +302,8 @@ export class LocalMapRenderer {
     Hooks.on("createScene", refresh);
     Hooks.on("updateScene", (scene, changes = {}) => {
       this.#register(enabled, {defer: "background" in changes || "background.src" in changes});
-      if (scene === canvas.scene && (changes.flags?.[ID]?.localMap?.seasons ||
-          Object.keys(changes).some(key => key.startsWith(`flags.${ID}.localMap.seasons`)))) this.refreshSeason();
+      if (scene === canvas.scene && (changes.flags?.[ID]?.localMap?.seasons || changes.flags?.[ID]?.localMap?.tileAsset ||
+          Object.keys(changes).some(key => key.startsWith(`flags.${ID}.localMap.seasons`)||key.startsWith(`flags.${ID}.localMap.tileAsset`)))) this.refreshSeason();
     });
     Hooks.on("canvasReady", () => {
       if (this.#refresh && CONFIG.Canvas.managedScenes[canvas.scene?.id] === this.#Manager &&

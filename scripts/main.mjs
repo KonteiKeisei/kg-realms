@@ -1,6 +1,10 @@
 import {registerPartyAppearance} from './party-appearance.mjs';
 import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
+import {localMapPicture} from './local-map-tiles.mjs';
+import {PlacedTileLods} from './placed-tile-lods.mjs';
+import {sceneEditorTools} from './scene-tools.mjs';
 Hooks.once('init',registerIntegrationSetup);
+const placedTileLods=new PlacedTileLods();Hooks.once('init',()=>placedTileLods.install());
 Hooks.once('ready',async()=>{
   try {await promptIntegrations();}
   catch(error){console.error('kg-realms | integration setup',error);ui.notifications.error(`KG Realms: ${error.message}`);}
@@ -1058,10 +1062,14 @@ Hooks.once("init", () => {
     }
   });
   game.keybindings.register(MODULE_ID, "mapEditor", {
-    name: "Map editor", hint: "Open or close the realm map's editor (places, roads, encounters, waterways). GM only.",
+    name: "Map editor", hint: "Open or close the current realm, Regional or local map's editor. GM only.",
     editable: [{ key: "KeyE" }], restricted: true,
     onDown: () => {
-      if (!game.user.isGM || !regionOf(canvas.scene)) return false;
+      if (!game.user.isGM) return false;
+      if (!regionOf(canvas.scene)) {
+        if (!canvas.scene?.getFlag(MODULE_ID, 'localMap')) return false;
+        localMaps.editor.toggle(!localMaps.editor.active);return true;
+      }
       setMapEditor(!editor.active);
       return true;
     }
@@ -1431,6 +1439,7 @@ Hooks.on("renderSceneConfig", (app, html) => {
   const scene = app.document ?? app.object, root = html instanceof HTMLElement ? html : html?.[0];
   scenePartyPicker(root, scene);
   sceneMapPicture(root, scene);
+  localMapPicture(root,scene);
 });
 // Once (0.56.0): a world that foraged at camp keeps foraging, now a task of Advanced watches.
 Hooks.once("ready", async () => {
@@ -1499,6 +1508,8 @@ Hooks.on("updateWorldTime", () => {
 /* ---------------------------------------- */
 
 Hooks.on("getSceneControlButtons", (controls) => {
+  const realm=!!regionOf(canvas.scene),local=!realm&&!!canvas.scene?.getFlag(MODULE_ID,'localMap');
+  sceneEditorTools(controls,{scene:canvas.scene,isGM:game.user.isGM,realm,local,active:local?localMaps.editor.active:editor.active,edit:on=>local?localMaps.editor.toggle(on):setMapEditor(on),configure:scene=>scene.sheet.render(true)});
   // A local map: search its places.
   if (!regionOf(canvas.scene) && canvas.scene?.getFlag(MODULE_ID, "localMap") && controls.tokens) {
     controls.tokens.tools.kgRealmsSearch = { name: "kgRealmsSearch", title: "Search this map's places (Ctrl+F)", icon: "fa-solid fa-magnifying-glass-location", order: 100, button: true, onChange: () => search.toggle() };
@@ -1514,11 +1525,6 @@ Hooks.on("getSceneControlButtons", (controls) => {
       name: "kgRealmsTravel", title: "Travel", icon: "fa-solid fa-person-hiking",
       order: 101, button: true, onChange: () => planner.open()
     };
-    // The GM's map editor, beside Search and Travel (E opens and closes it too).
-    if (game.user.isGM) controls.tokens.tools.kgRealmsEditor = {
-      name: "kgRealmsEditor", title: "Map editor: places, roads, encounters (E)", icon: "fa-solid fa-pen-ruler",
-      order: 102, toggle: true, active: editor.active, onChange: (event, active) => setMapEditor(active)
-    };
   }
 });
 
@@ -1529,7 +1535,8 @@ Hooks.on("renderSceneDirectory", (app, html) => {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "kg-realms-generate-button";
-  const one = allWorlds().length === 1 ? allWorlds()[0] : null;
+  const available=allWorlds().filter(w=>w.sceneTemplates?.role!=='regional');
+  const one = available.length === 1 ? available[0] : null;
   button.innerHTML = `<i class="fa-solid fa-map"></i> Generate ${one ? (one.mapName ?? one.title) : "world map"}`;
   button.addEventListener("click", () => openGenerator());
   const actions = root.querySelector(".header-actions") ?? root.querySelector(".directory-header") ?? root;

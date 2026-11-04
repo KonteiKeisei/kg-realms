@@ -599,7 +599,7 @@ function cardClass() {
         await this.def.save(this.ref, values);
         return this.editOnly ? this.close() : this.render();
       }
-      if (act.startsWith("x-")) { await this.def.act?.(this.ref, act.slice(2)); return this.rendered && this.render(); }
+      if (act.startsWith("x-")) { try{await this.def.act?.(this.ref, act.slice(2));}catch(error){console.error('kg-realms | place action',error);ui.notifications.error(`KG Realms: ${error.message}`);} return this.rendered && this.render(); }
       if (act === "delete") {
         const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: d.deleteLabel ?? "Delete" }, content: `<p>${esc(d.deleteLabel ?? "Delete")} <b>${esc(d.name)}</b>?</p>${d.deleteNote ? `<p class="hint">${esc(d.deleteNote)}</p>` : ""}`, rejectClose: false });
         if (!ok) return;

@@ -1,5 +1,6 @@
 import { aspect } from "./geo.mjs";
 import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
+import {openSceneChecklist} from './module-scenes.mjs';
 import { SOURCE_MAP } from './source-map.mjs';
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "./scene-ambience.mjs";
 
@@ -87,7 +88,7 @@ export function mainMapOf(def, index) {
 export async function openGenerator() {
   if (!game.user.isGM) return;
   // With several worlds registered, the GM picks one; else the one there is (worlds.mjs).
-  const worlds = allWorlds();
+  const worlds = allWorlds().filter(w=>w.sceneTemplates?.role!=='regional');
   if (!worlds.length) return ui.notifications.warn("KG Realms: no world is installed. Install a world module (such as KG Realms: Faerûn).");
   let def = worlds[0];
   if (worlds.length > 1) {
@@ -98,6 +99,7 @@ export async function openGenerator() {
     });
     def = worlds.find((w) => w.id === id); if (!def) return;
   }
+  if(def.sceneTemplates?.schema===1&&def.sceneTemplates.root){try{return await openSceneChecklist(def);}catch(error){ui.notifications.error(`KG Realms: ${error.message}`);return null;}}
   let index;
   try { index = await loadWorld(def.id); }
   catch (err) { return ui.notifications.error(`KG Realms: ${err.message}`); }

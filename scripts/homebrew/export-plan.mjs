@@ -2,7 +2,7 @@
 // files its JSON and card text name, and their new paths in the module. Files a world's data names are
 // found by walking every value, so a new field that holds a picture is carried without a change here.
 
-const IMAGE = "webp|png|jpe?g|gif|svg|avif|apng|bmp|tiff?";
+const IMAGE = "webp|png|jpe?g|gif|svg|avif|apng|bmp|tiff?|ktx2(?:\\.fbx)?";
 const VIDEO = "webm|mp4|m4v|ogv";
 const AUDIO = "mp3|ogg|oga|wav|flac|m4a|opus";
 const HAS_EXT = new RegExp(`\\.(${IMAGE}|${VIDEO}|${AUDIO})(\\?[^\\s"'<>]*)?$`, "i");
@@ -105,14 +105,14 @@ export function scenesOfWorld(all, places, world) {
   while (queue.length) {
     const s = queue.pop(), f = s.flags?.[REALM_FLAG] ?? {};
     for (const n of s.notes ?? []) reach(n.flags?.[REALM_FLAG]?.local?.scene);
-    reach(f.localMap?.parent);
+    reach(typeof f.localMap?.parent === 'string' ? f.localMap.parent : f.localMap?.parent?.scene);
     reach(f.returnTo?.scene);
   }
   return { scenes: [...keep.values()], missing: [...missing] };
 }
 
 /** This table's own use of a scene, which is not the world's: its party, its journey, its backup. */
-const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "cityAsk", "homebrewOriginal"];
+const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "partyToken", "cityAsk", "homebrewOriginal"];
 /**
  * A scene as a module ships it, marked with the id it must keep so places and pins still find it.
  * keepToken(token) says which tokens go: the players' party stays at this table.
@@ -122,8 +122,8 @@ export function sceneForExport(doc, world, keepToken = () => true) {
   const own = { ...(doc.flags?.[REALM_FLAG] ?? {}), moduleScene: { world, id: doc._id } };
   for (const k of PLAY_FLAGS) delete own[k];
   return {
-    ...rest, tokens: (doc.tokens ?? []).filter(keepToken), active: false, journal: null, playlist: null, playlistSound: null,
-    notes: (doc.notes ?? []).map((n) => ({ ...n, entryId: null, pageId: null })),
+    ...rest, tokens: (doc.tokens ?? []).filter(keepToken), active: false, playlistSound: null,
+    notes: (doc.notes ?? []).map((n) => n.flags?.[REALM_FLAG]?.local ? ({ ...n, entryId: null, pageId: null }) : ({...n})),
     flags: { ...doc.flags, [REALM_FLAG]: own }
   };
 }
@@ -131,13 +131,15 @@ export function sceneForExport(doc, world, keepToken = () => true) {
 /** What a scene links to beyond its text: its tokens' actors, its pins' journals and scenes, its settlement's way back. */
 export function sceneLinks(doc, keepToken = () => true) {
   const f = doc.flags?.[REALM_FLAG] ?? {}, out = new Set();
+  if(doc.journal)out.add(`JournalEntry.${doc.journal}`);
+  if(doc.playlist)out.add(`Playlist.${doc.playlist}`);
   for (const t of doc.tokens ?? []) if (t.actorId && keepToken(t)) out.add(`Actor.${t.actorId}`);
   for (const n of doc.notes ?? []) {
     if (n.entryId) out.add(`JournalEntry.${n.entryId}`);
     const s = n.flags?.[REALM_FLAG]?.local?.scene;
     if (s) out.add(`Scene.${s}`);
   }
-  for (const s of [f.localMap?.parent, f.returnTo?.scene]) if (s) out.add(`Scene.${s}`);
+  for (const s of [typeof f.localMap?.parent === 'string' ? f.localMap.parent : f.localMap?.parent?.scene, f.returnTo?.scene]) if (s) out.add(`Scene.${s}`);
   return [...out];
 }
 

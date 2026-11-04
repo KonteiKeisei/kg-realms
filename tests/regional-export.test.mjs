@@ -6,6 +6,7 @@ import {registerWorld} from '../scripts/worlds.mjs';
 import {buildExport,setExportData,restoreModuleRegionalMaps,sceneFromModule} from '../scripts/homebrew/export.mjs';
 import {homebrewSheet,planTiles,packManifest} from '../scripts/homebrew/plan.mjs';
 import {packFiles} from '../scripts/terrain/asset-store.mjs';
+import {generateSelectedScenes} from '../scripts/module-scenes.mjs';
 
 async function unzip(parts){
   const b=new Uint8Array(await new Blob(parts).arrayBuffer()),v=new DataView(b.buffer),decode=new TextDecoder();
@@ -70,9 +71,12 @@ test('one realm ZIP carries every linked Regional map, independent tiles, scale,
   const imported=worlds.flatMap(w=>read(files,`${M}/data/worlds/${w.id}/packs/scenes.json`));
   game.packs={get:()=>({getIndex:async()=>imported.map(s=>({_id:s._id})),getDocument:async id=>({toObject:()=>structuredClone(imported.find(s=>s._id===id))})})};
   globalThis.getDocumentClass=()=>({create:async d=>{const s=doc(d);f.collection.set(s.id,s);return s;}});
-  // Importing the realm brings its detailed scenes in, then adopts coverage and local adjustments.
+  // Import the realm, then generate only the detailed scenes selected in the checklist.
   f.collection.set('overview',doc(imported.find(s=>s._id==='overview')));
-  await sceneFromModule(f.collection.get('overview'),{},'gm');
+  await sceneFromModule(f.collection.get('overview'),{kgRealmsSceneSetup:true},'gm');
+  assert.equal(f.collection.has('region0'),false,'new exports do not eagerly import unchecked scenes');
+  for(const [path,bytes] of files)f.served.set(`modules/${path}`,new TextDecoder().decode(bytes));
+  await generateSelectedScenes(worlds[0],['region0','region1']);
   for(const [i,id] of f.children.entries()){
     assert.ok(f.collection.has(`region${i}`));assert.deepEqual(f.settings.get('regionalMaps')[id],f.links[i]);
     assert.deepEqual(f.settings.get('placeEdits')[id],f.data[id].regionalEdits);
