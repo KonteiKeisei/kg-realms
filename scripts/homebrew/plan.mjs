@@ -227,7 +227,7 @@ export function zipStore(files) {
 export const moduleIdFrom = (title) => `kg-realms-${worldIdFrom(String(title ?? "").replace(/^kg\s*realms\s*:?\s*/i, ""))}`;
 
 /** The script an exported world module runs: it registers the world with KG Realms. */
-export function exportWorldDefinition(moduleId, def, { snow, markers, rules, packs, calendar, localMapAssets, regionalMaps, sceneTemplates } = {}) {
+export function exportWorldDefinition(moduleId, def, { snow, markers, rules, packs, calendar, localMapAssets, regionalMaps, sceneTemplates,configuration } = {}) {
   const world = { id: def.id, title: def.title, module: moduleId, mapName: def.mapName ?? def.title, terrainPack: "terrain-pack.json" };
   // Its snow as the GM set it (the Snow tab, 0.75) becomes the module's own.
   if (snow && Object.keys(snow).length) world.snow = snow;
@@ -238,6 +238,7 @@ export function exportWorldDefinition(moduleId, def, { snow, markers, rules, pac
   if (localMapAssets?.length) world.localMapAssets = localMapAssets;
   // Its Calendaria calendar, set when the module is first loaded (0.81).
   if (calendar) world.calendar = calendar;
+  if(configuration)world.configuration=configuration;
   if (regionalMaps?.links?.length) world.regionalMaps = regionalMaps;
   if (sceneTemplates) world.sceneTemplates = sceneTemplates;
   return world;

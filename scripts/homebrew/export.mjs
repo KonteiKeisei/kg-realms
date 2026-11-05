@@ -16,6 +16,7 @@ import { fileRef, rewriteFiles, assetNamer, placeForExport, scenesOfWorld, scene
 import {collectExportFiles,exportFileProblem,exportRepairReport} from './export-sources.mjs';
 import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
 import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors} from '../scene-package-support.mjs';
+import {configurationSnapshot,exportCalendariaSettings} from '../companion-configuration.mjs';
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -68,7 +69,7 @@ async function gatherDocuments(seeds, systemId, known = new Map(), scene = null)
 }
 
 /** The world as a module: { name, parts, report, problems }. onStep(message, 0 to 1) tells how far along it is. */
-export async function buildExport(def, { moduleId, title, version, rootScene, includeTravel=false, includeCardActors=false }, onStep = () => {}) {
+export async function buildExport(def, { moduleId, title, version, rootScene, includeTravel=false, includeCardActors=false,calendariaSettings=null }, onStep = () => {}) {
   const options={includeTravel:!!includeTravel,includeCardActors:!!includeCardActors};
   const records=[],seen=new Set(),links=[],queue=[{def,data:worldForExport(await worldData(def.id),options)}];
   const sourceScenes=new Map();
@@ -91,13 +92,16 @@ export async function buildExport(def, { moduleId, title, version, rootScene, in
       const child=worldDef(link.world),scene=child&&await sceneAvailable(link.scene,child),parent=await sceneAvailable(link.parentScene,worldDef(record.def.id)??record.def);
       if(!child||!scene||!parent)throw Error(`Regional map ${link.title??link.world} is missing its registered data or linked scene. Repair it before exporting.`);
       const data=await worldData(child.id),state=allWorlds().map(w=>w.regionalMaps?.state?.[child.id]).find(Boolean);
-      if(state&&!Object.keys(data.regionalEdits?.edits??{}).length&&!Object.keys(data.regionalEdits?.added??{}).length)data.regionalEdits=structuredClone(state.placeEdits??{});
+      if(state&&!Object.keys(data.regionalEdits?.edits??{}).length&&!Object.keys(data.regionalEdits?.added??{}).length&&!data.regionalEdits?.deleted?.length)data.regionalEdits=structuredClone(state.placeEdits??{});
       if(data.regionalSnow===undefined&&state?.snow!==undefined)data.regionalSnow=state.snow;
       links.push(structuredClone(link));queue.push({def:child,data:worldForExport(data,options)});
     }
   }
+  const deletions=new Map(records.map(r=>[r.def.id,new Set(r.data.regionalEdits?.deleted??[])]));
+  for(const record of records)record.data.places=record.data.places.filter(p=>!deletions.get(record.def.id).has(p.id)&&!deletions.get(p.canonicalWorld)?.has(p.canonicalId??p.id));
   const shared={claim:assetNamer(moduleId),written:new Set()},built=[];
-  for(const [i,record] of records.entries())built.push(await buildWorldExport(record.def,{moduleId,title,version},(message,pct)=>onStep(`${record.def.title??record.def.id}: ${message}`,(i+pct)/records.length),{...shared,options,data:record.data,namespace:links.length?record.def.id:null,regional:i>0,rootScene:i?links.find(l=>l.world===record.def.id)?.scene:rootScene,parentScene:links.find(l=>l.world===record.def.id)?.parentScene}));
+  const configuration=configurationSnapshot(calendariaSettings);
+  for(const [i,record] of records.entries())built.push(await buildWorldExport(record.def,{moduleId,title,version},(message,pct)=>onStep(`${record.def.title??record.def.id}: ${message}`,(i+pct)/records.length),{...shared,configuration:i===0?configuration:null,options,data:record.data,namespace:links.length?record.def.id:null,regional:i>0,rootScene:i?links.find(l=>l.world===record.def.id)?.scene:rootScene,parentScene:links.find(l=>l.world===record.def.id)?.parentScene}));
   for(const link of links){
     const bundle=built.find(b=>b.registration.id===link.world),node=bundle?.registration.sceneTemplates.scenes.find(n=>n.id===link.scene);
     const place=regionalPlace(link,records.find(r=>r.def.id===link.parent)?.data.places??[]);
@@ -163,7 +167,15 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
     ["local/index.json", presets]
   ]);
   for (const entry of presets) for (const rel of [entry.file, entry.effects?.file]) if (rel) files.set(`local/${rel}`, presetForExport(await getJson(`local/${rel}`),options));
-  const calendar = currentCalendar();
+  let calendar = currentCalendar();
+  if(!calendar&&def.calendar?.file)calendar=await getJson(def.calendar.file);
+  let configuration=context.configuration;
+  if(configuration&&def.configuration?.file){
+    const previous=await getJson(def.configuration.file);configuration={...configuration,engine:{...previous.engine,...configuration.engine}};
+    if(!configuration.calendaria&&previous.calendaria)configuration={...configuration,calendaria:previous.calendaria,calendariaTechnical:previous.calendariaTechnical??{}};
+  }
+  if(configuration)files.set('configuration.json',configuration);
+  if(calendar&&configuration?.calendaria?.calendarData)calendar.data=structuredClone(configuration.calendaria.calendarData);
   if (calendar) files.set("calendar.json", calendar);
 
   // The scenes. The players' own tokens stay at this table.
@@ -330,8 +342,9 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const minimum=kg?.version&&(Number(kg.version.split('.')[0])>0||Number(kg.version.split('.')[1])>=94)?kg.version:'0.94.0';
   const manifest={ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: String(game.release?.generation??13), maximum:'14' }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) };
   manifest.relationships.requires.push(...sceneBehaviorRequirements(groups.get('Scene')??[]));
+  if(!calendar&&configuration?.calendaria)manifest.relationships.recommends=[{id:'calendaria',type:'module',reason:'Restores this world\'s Calendaria settings and weather configuration.'}];
   const sceneTemplates=sceneTemplateCatalog(def.id,groups.get('Scene')??[],places,{...context,presets});
-  const registrationOptions={snow:data.snow,markers:finalMarkers,rules:def.rules,packs:packList,localMapAssets:localMapAssets.filter(a=>!a.tileId),sceneTemplates,calendar:calendar?{file:'calendar.json',name:calendar.name,signature:crc32(json(calendar.data))}:null};
+  const registrationOptions={snow:data.snow,markers:finalMarkers,rules:def.rules,packs:packList,localMapAssets:localMapAssets.filter(a=>!a.tileId),sceneTemplates,configuration:configuration?{file:'configuration.json'}:null,calendar:calendar?{file:'calendar.json',name:calendar.name,signature:crc32(json(calendar.data))}:null};
   const registration=exportWorldDefinition(moduleId,def,registrationOptions);
   await add(`${moduleId}/module.json`, encoder.encode(JSON.stringify(manifest, null, 2)));
   await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, registrationOptions)));
@@ -362,7 +375,7 @@ export function restoreModuleRegionalMaps(){
         if(child?.getFlag?.(ID,'world')!==link.world||parent?.getFlag?.(ID,'world')!==link.parent)continue;
         links[link.world]=structuredClone(link);changed=true;
         const state=bundle.state?.[link.world];
-        if(state?.placeEdits&&!Object.keys(edits[link.world]?.edits??{}).length&&!Object.keys(edits[link.world]?.added??{}).length){edits[link.world]=structuredClone(state.placeEdits);changedEdits=true;}
+        if(state?.placeEdits&&!Object.keys(edits[link.world]?.edits??{}).length&&!Object.keys(edits[link.world]?.added??{}).length&&!edits[link.world]?.deleted?.length){edits[link.world]=structuredClone(state.placeEdits);changedEdits=true;}
         if(state?.snow!==undefined&&!Object.hasOwn(snow,link.world)){snow[link.world]=state.snow;changedSnow=true;}
       }
     }
@@ -385,6 +398,7 @@ export async function exportModule(def, rootScene) {
       <div class="form-group"><label class="checkbox"><input type="checkbox" name="includeCardActors"> Export linked Card actors</label><p class="hint">Include actors attached or linked to place and encounter cards. Actors needed by placed scene tokens are always included.</p></div>
       <p class="notes">The zip holds the realm, places, roads, rivers, biomes, trade and snow, each linked Regional map and its placement, linked scenes with their contents, required documents and their files. Travel and Card actors follow the choices above. ${q("Pictures on cards and markers go to assets/poi-img, scene maps to assets/maps, and actor, journal and item art to their own folders. Links into your game system's own compendiums stay as they are. Your players' tokens stay out of the scenes.")}</p>
       <p class="notes">Calendar: ${esc(here ? calendarLabel(here) : "none, Calendaria is not active")}. ${q("The calendar this game world uses now, complete, whether built in, edited or your own, and today's in-game date. When a GM first loads the module, the calendar is added if need be and set as active. The date is used only where the clock has not started. A campaign already running on another calendar keeps its own.")}</p>
+      ${here?'<label><input type="checkbox" name="includeCalendaria" checked> Include all Calendaria settings using its Export Settings dialog</label><p class="notes">Calendaria will open its own export dialog next. Its settings file, custom weather assets and the configured carriage sound are included in the companion. The receiving GM chooses whether to apply the settings.</p>':''}
       <p class="notes">Afterwards you get a report of anything that could not be carried. It is also in the zip, as export-report.txt.</p>
       <p class="notes">After enabling the module, choose maps from its hierarchy checklist. Generate the realm and any Regional or local maps now, or generate a linked map from its place card later. ${q("Complete scene snapshots keep their map tiles, walls, lights, pins, roads and linked documents. Existing generated scenes keep their edits.")}</p>`,
     buttons: [{ action: "go", label: "Download zip", icon: "fa-solid fa-download", default: true, callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object }, { action: "cancel", label: "Cancel" }]
@@ -395,6 +409,9 @@ export async function exportModule(def, rootScene) {
   try {
     const checked=value=>value===true||value==='on'||value==='true';
     const options={moduleId,title,version,rootScene,includeTravel:checked(values.includeTravel),includeCardActors:checked(values.includeCardActors)};
+    if(here&&values.includeCalendaria!==false&&values.includeCalendaria!=='false'){
+      options.calendariaSettings=await exportCalendariaSettings();if(!options.calendariaSettings)return;
+    }
     const built = await buildExport(def, options, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
     if(built.problems){
       await foundry.applications.api.DialogV2.wait({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Download the repair report to share the broken paths, owning scenes, document IDs and exact fields for cleanup.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,buttons:[{action:'download',label:'Download repair report',icon:'fa-solid fa-download',callback:()=>{
@@ -465,18 +482,18 @@ export async function fillModulePacks() {
 }
 
 /**
- * Each world module's calendar, set by the first GM to load it, and again only if a new version of
- * the module brings a different one, so a GM who changes calendar afterwards keeps their choice.
+ * Each world module's calendar is installed once. Later GM changes survive module updates.
+ * force is reserved for a GM-approved companion configuration import.
  * Runs once Calendaria is ready. Foundry reloads to finish, as Calendaria's own switch asks.
  */
-export async function applyModuleCalendars() {
+export async function applyModuleCalendars({worldId=null,force=false,reload=true}={}) {
   if (game.user !== game.users.activeGM) return;
   const applied = foundry.utils.deepClone(game.settings.get(ID, "calendarsApplied") ?? {});
   const C = globalThis.CALENDARIA, ready = !!game.modules.get("calendaria")?.active && !!C?.managers?.CalendarManager;
-  let changed = false, needReload = false;
-  for (const world of allWorlds().filter((w) => w.calendar)) {
+  let changed = false, needReload = false,failed=false;
+  for (const world of allWorlds().filter((w) => w.calendar&&(!worldId||w.id===worldId))) {
     const want = world.calendar, signature = String(want.signature ?? want.id);
-    if (applied[world.id] === signature) continue;
+    if(!force&&applied[world.id]&&!String(applied[world.id]).startsWith('missing:'))continue;
     if (!ready) {
       if (applied[world.id] === `missing:${signature}`) continue;
       ui.notifications.warn(`KG Realms: ${world.title} uses the calendar ${want.name ?? want.id}. Enable Calendaria and it will be set.`, { permanent: true });
@@ -491,7 +508,7 @@ export async function applyModuleCalendars() {
         calendar = await res.json();
       }
       const M = C.managers.CalendarManager, id = calendar.id, worldTime = game.time?.worldTime ?? 0, activeId = M.getActiveCalendar?.()?.metadata?.id;
-      if (keepsOwnCalendar(activeId, id, worldTime)) {
+      if (!force&&keepsOwnCalendar(activeId, id, worldTime)) {
         ui.notifications.info(`KG Realms: ${world.title} uses the calendar ${calendar.name ?? id}. This game world's campaign is already running on another, so it is left as it is. Calendaria's settings can change it.`, { permanent: true });
         applied[world.id] = signature; changed = true;
         continue;
@@ -505,6 +522,7 @@ export async function applyModuleCalendars() {
       // Already there, as it should be: nothing to change, and nothing to reload for.
       const moved = action !== "switch" || activeId !== target;
       if (moved && !await C.api.switchCalendar(target)) throw Error("Calendaria could not switch to it");
+      if(force&&worldTime>0&&game.time?.worldTime!==worldTime)await game.time.set(worldTime);
       if (moved && calendar.displayFormats) await game.settings.set("calendaria", "displayFormats", calendar.displayFormats);
       if (moved) needReload = true;
       const date = startingDate(calendar, worldTime);
@@ -517,12 +535,14 @@ export async function applyModuleCalendars() {
       applied[world.id] = signature; changed = true;
       if (moved || date) ui.notifications.info(`KG Realms: the calendar is now ${calendar.name ?? id}${date?.year != null ? `, year ${date.year}` : date ? ", at the date it was exported" : ""}, for ${world.title}. You can change it in Calendaria's settings; this will not set it again.`, { permanent: true });
     } catch (err) {
+      failed=true;
       console.error(`${ID} | calendar of ${world.id}`, err);
       ui.notifications.error(`KG Realms: could not set the calendar of ${world.title}: ${err?.message ?? err}. It will try again next load.`, { permanent: true });
     }
   }
   if (changed) await game.settings.set(ID, "calendarsApplied", applied);
-  if (needReload) await foundry.applications.settings?.SettingsConfig?.reloadConfirm?.({ world: true });
+  if (needReload&&reload) await foundry.applications.settings?.SettingsConfig?.reloadConfirm?.({ world: true });
+  return {needReload,failed};
 }
 
 /** A document from a module's compendium, into this game world under its own id, unless it is here. */

@@ -81,13 +81,15 @@ test("a custom calendar is added and set, its formats follow, and it is set only
   assert.equal(calls.length, 0, "a GM who changes calendar afterwards keeps their choice");
 });
 
-test("a new version of the module with a different calendar sets it again", async () => {
+test("a module update keeps the GM's calendar unless the GM explicitly reapplies its configuration", async () => {
   const { calls, settings, files } = install({ custom: { "custom-t": {} } });
   const id = world({ file: "calendar.json", name: "T", signature: 8 });
   files.set(`modules/${id}/w/calendar.json`, JSON.stringify({ id: "custom-t", name: "T", kind: "custom", data: {} }));
   settings.set("calendarsApplied", { [id]: "7" });
-  await applyModuleCalendars();
+  await applyModuleCalendars({worldId:id});assert.equal(calls.length,0,'a module update does not replace calendar customizations');
+  await applyModuleCalendars({worldId:id,force:true,reload:false});
   assert.deepEqual(calls.slice(0, 2), [["update", "custom-t"], ["switch", "custom-t"]]);
+  assert.ok(!calls.some(([kind])=>kind==='reload'),'configuration import can wait until all settings are applied before requesting reload');
 });
 
 test("a module naming a built-in calendar just switches to it, as Faerun's Harptos would", async () => {

@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.94.9: editable companion worlds and portable settings
+
+- Change a local marker between Place, Gate and Dock directly in the Local Places list or on its card. Keep its position, text, artwork and linked scene; update its travel entrance behavior with its type.
+- Permanently delete local and realm places from this world. Remember source identities after local-place renames, preserve deletions across preset reloads and Regional projections, and exclude deleted canonical places from new exports. Existing preset maps keep their edited places, roads, art and effects. Restore deleted preset places only through the explicit restore action. Companion updates no longer reset the GM's calendar selection or edits.
+- Include carriage audio settings, the referenced sound file and portable settlement travel settings in companion exports. Preserve settings and bundled audio when re-exporting a companion.
+- Use Calendaria's native Export Settings dialog during realm export. Bundle its settings payload, custom weather assets and the requested technical values its current exporter omits. Ask the receiving GM before applying the companion configuration, back up changed settings, and keep later GM changes. Applying a different companion calendar preserves elapsed world time and defers reload until settings finish importing.
+- Offer a GM-only Calendaria recommendations prompt for lighting, weather, clock speed, pause/combat handling and rest durations. Explain each proposed change, allow individual selection, and support Maybe later or Keep my settings. Skip the prompt when values already match. Calendaria remains recommended rather than required by KG Realms.
+
 ## 0.94.8: companion scene folders and behavior dependencies
 
 - Keep generated realm maps at the Scenes root, put Regional maps in Regional Maps, and place each settlement and its linked interiors together in Places/<place name>. Apply the same folder rules to checklist generation, place-card generation, regenerated copies and compendium imports. Arrange already imported companion scenes once on load, including when the setup prompt was dismissed. Preserve unrelated scenes and later GM folder changes.

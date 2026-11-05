@@ -101,3 +101,17 @@ test('Regional import preserves existing campaign links, marker edits and snow c
   f.settings.set('regionalMaps',{[id]:prior});f.settings.set('placeEdits',{[id]:{edits:{capital:{lon:123}},added:{}}});f.settings.set('regionalSnow',{[id]:true});
   await restoreModuleRegionalMaps();assert.deepEqual(f.settings.get('regionalMaps')[id],prior);assert.equal(f.settings.get('placeEdits')[id].edits.capital.lon,123);assert.equal(f.settings.get('regionalSnow')[id],true);
 });
+
+test('Regional source restoration preserves a world whose only customization is permanent deletions',async()=>{
+  const f=fixture(),id=f.children[0];
+  registerWorld({...f.defs[f.root],regionalMaps:{schema:1,links:f.links,state:{[id]:{placeEdits:{edits:{capital:{name:'Source'}},added:{}},snow:false}}}});
+  const own={edits:{},added:{},deleted:['capital']};f.settings.set('placeEdits',{[id]:own});await restoreModuleRegionalMaps();assert.deepEqual(f.settings.get('placeEdits')[id],own);
+});
+
+test('realm exports omit permanently deleted canonical places from Regional copies too',async()=>{
+  const f=fixture(),id=f.children[0],M='deletion-export';
+  f.data[f.root].regionalEdits={edits:{},added:{},deleted:['doomed']};f.data[f.root].places.push({id:'doomed',name:'Deleted place',kind:'site',lon:0,lat:0});f.data[id].places.push({id:'copy',name:'Deleted copy',kind:'site',canonicalWorld:f.root,canonicalId:'doomed',lon:0,lat:0});
+  const built=await buildExport(f.defs[f.root],{moduleId:M,title:'Realm',version:'1'}),files=await unzip(built.parts);
+  assert.ok(!read(files,`${M}/data/worlds/${f.root}/index.json`).places.some(p=>p.id==='doomed'));assert.ok(!read(files,`${M}/data/worlds/${id}/index.json`).places.some(p=>p.id==='copy'));
+  assert.ok(f.data[id].places.some(p=>p.id==='copy'),'live source data is unchanged');
+});

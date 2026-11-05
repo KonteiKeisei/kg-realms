@@ -29,10 +29,12 @@ export function placeMinZoom(p) {
  * A place the GM removed (the world has moved on: it is gone by then) is left out, unless
  * `removed` is asked for (the list to restore from).
  */
-export function applyEdits(places, { edits = {}, added = {} } = {}, level = "surface", { removed = false } = {}) {
+export function applyEdits(places, { edits = {}, added = {},deleted=[] } = {}, level = "surface", { removed = false } = {}) {
   const out = [];
+  const gone=new Set(deleted);
   // A place the GM added that the module now ships (an adopted export) is one place, not two.
   for (const p of [...places.filter((x) => !added[x.id]), ...Object.values(added)]) {
+    if(gone.has(p.id))continue;
     if ((p.level ?? "surface") !== level) continue;
     const e = { ...(added[p.id] ?? {}), ...(edits[p.id] ?? {}) };
     if (!!e.removed !== removed) continue;

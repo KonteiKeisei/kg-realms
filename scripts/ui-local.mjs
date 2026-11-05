@@ -7,7 +7,7 @@
 //  Map style: the map's icon pack and its settings.
 // The footer: Travel here, and export and import of the scene's places as JSON. Places are edited on
 // their own cards (click a row, or double-click a marker); markers are moved by dragging them.
-import { CATEGORIES, localRecord, categoryFor } from "./local-places.mjs";
+import { CATEGORIES, localRecord, categoryFor,localPlaceType } from "./local-places.mjs";
 import { asSecret } from "./place-card.mjs";
 import { editBar } from "./ui-editbar.mjs";
 import { onCanvas } from "./canvas-input.mjs";
@@ -64,6 +64,7 @@ export class LocalEditor {
     document.body.append(this.el);
     this.el.addEventListener("click", (e) => this.#click(e));
     this.el.addEventListener('change',async e=>{
+      if(e.target.matches('[data-place-type]')){const select=e.target,note=this.scene.notes.get(select.dataset.note);select.disabled=true;try{await this.maps.changePlaceType(note,select.value);}catch(error){ui.notifications.error(`KG Realms: ${error.message}`);}this.render();return;}
       if(!e.target.matches('[data-map-icon-pack]'))return;const select=e.target,scene=this.scene;select.disabled=true;
       try{await this.maps.setIconPack(scene,select.value);this.render();}catch(err){ui.notifications.error(`KG Realms: could not save icon pack (${err.message}).`);select.disabled=false;}
     });
@@ -162,7 +163,7 @@ export class LocalEditor {
     const row = ({ n, rec }) => {
       const cat = CATEGORIES[rec.category] ?? CATEGORIES.other, way = entranceType(rec);
       const chips = [way ? `<span class="kgr-sh-chip">${way === "dock" ? "Dock" : "Land"}</span>` : "", rec.privateEntry ? `<span class="kgr-sh-chip warn">Private</span>` : "", rec.visibility === "hidden" ? `<span class="kgr-sh-chip">Hidden</span>` : rec.visibility === "rumoured" ? `<span class="kgr-sh-chip">Rumoured</span>` : ""].join("");
-      return `<div class="kgr-sh-row kgr-local-row" data-note="${esc(n.id)}" data-name="${esc(rec.name.toLowerCase())}" role="button" tabindex="0" title="Open its card"><span class="kgr-sh-ico"><i class="fa-solid ${cat.icon}"></i></span><span class="kgr-sh-main"><b>${esc(rec.name)}</b><small>${esc(cat.label)}</small></span>${chips}<button data-act="locate" data-note="${esc(n.id)}" title="Show it on the map"><i class="fa-solid fa-crosshairs"></i> Locate</button></div>`;
+      return `<div class="kgr-sh-row kgr-local-row" data-note="${esc(n.id)}" data-name="${esc(rec.name.toLowerCase())}" role="button" tabindex="0" title="Open its card"><span class="kgr-sh-ico"><i class="fa-solid ${cat.icon}"></i></span><span class="kgr-sh-main"><b>${esc(rec.name)}</b><small>${esc(cat.label)}</small></span>${chips}<select data-place-type data-note="${esc(n.id)}" aria-label="Place type for ${esc(rec.name)}" style="width:90px">${[['place','Place'],['gate','Gate'],['dock','Dock']].map(([id,label])=>`<option value="${id}" ${localPlaceType(rec)===id?'selected':''}>${label}</option>`).join('')}</select><button data-act="locate" data-note="${esc(n.id)}" title="Show it on the map"><i class="fa-solid fa-crosshairs"></i> Locate</button><button data-act="delete-place" data-note="${esc(n.id)}" title="Delete permanently" aria-label="Delete ${esc(rec.name)} permanently"><i class="fa-solid fa-trash"></i></button></div>`;
     };
     const ways = recs.filter((x) => entranceType(x.rec)), rest = recs.filter((x) => !entranceType(x.rec));
     const waiting = unplaced.map((u, i) => { const cat = CATEGORIES[u.category] ?? CATEGORIES.other; return `<div class="kgr-sh-row" data-name="${esc(String(u.name).toLowerCase())}"><span class="kgr-sh-ico"><i class="fa-solid ${cat.icon}"></i></span><span class="kgr-sh-main"><b>${esc(u.name)}</b><small>${esc(cat.label)}</small></span><button data-act="place" data-i="${i}" title="Place it on the map"><i class="fa-solid fa-location-crosshairs"></i> Place</button><button data-act="drop-unplaced" data-i="${i}" title="Remove from the list" aria-label="Remove ${esc(u.name)} from the list"><i class="fa-solid fa-xmark"></i></button></div>`; }).join("");
@@ -171,7 +172,7 @@ export class LocalEditor {
       <label class="kgr-sh-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-local-filter placeholder="Find a place" aria-label="Find a place" value="${esc(this.filter)}"></label>
       ${shellSection("Ways in", ways.map(row).join("") || `<p class="hint">No gate or dock yet: Gate or Dock above.</p>`, { count: ways.length, open: !this.shut.has("ways"), key: "ways" })}
       ${shellSection("Placed", rest.map(row).join("") || `<p class="hint">No places yet: Place above, then click the map.</p>`, { count: rest.length, open: !this.shut.has("placed"), key: "placed" })}
-      ${unplaced.length ? shellSection("Not yet on the map", waiting, { count: unplaced.length, open: !this.shut.has("unplaced"), key: "unplaced" }) : ""}`;
+      ${unplaced.length ? shellSection("Not yet on the map", waiting, { count: unplaced.length, open: !this.shut.has("unplaced"), key: "unplaced" }) : ""}${map.presetId&&map.deletedPlaces?.length?'<button data-act="restore-source">Restore deleted source places</button>':''}`;
   }
 
   /** The Map style tab: the icon pack, and the map's settings. */
@@ -202,6 +203,7 @@ export class LocalEditor {
   }
 
   async #click(e) {
+    if(e.target.closest('[data-place-type]'))return;
     // The Roads tab's own buttons are the road editor's.
     if (e.target.closest(".kgr-sh-host")) return;
     const tabBtn = e.target.closest("[data-local-tab]");
@@ -220,10 +222,12 @@ export class LocalEditor {
     if (act === "settings") return this.maps.settings(this.scene);
     if (act === "travel") { this.close(); return this.maps.travel?.(); }
     if (act === "locate") { const note = this.scene.notes.get(actEl.dataset.note); if (note) canvas.animatePan({ x: note.x, y: note.y, duration: 400 }); return; }
+    if(act==='delete-place'){const note=this.scene.notes.get(actEl.dataset.note);if(note&&await foundry.applications.api.DialogV2.confirm({window:{title:'Delete place permanently'},content:`<p>Delete ${esc(this.maps.localOf(note).name)} from this world? It will not return when the companion reloads.</p>`,rejectClose:false}))await this.maps.deletePlace(note);return;}
+    if(act==='restore-source'){if(await foundry.applications.api.DialogV2.confirm({window:{title:'Restore deleted source places'},content:'<p>Restore deleted places from the companion preset? Existing places and your edits are kept.</p>',rejectClose:false}))await this.maps.restoreSourcePlaces(this.scene);this.render();return;}
     if (act === "gate" || act === "dock") return this.startEntrance(act === "dock" ? "dock" : "land");
     if (act === "add") { this.placing = { name: "New place", category: "other", known: "" }; return this.render(); }
     if (act === "place") { this.placing = { ...map.unplaced[i], index: i }; return this.render(); }
-    if (act === "drop-unplaced") return this.scene.setFlag(MODULE_ID, "localMap", { ...map, unplaced: map.unplaced.filter((_, k) => k !== i) });
+    if (act === "drop-unplaced") return this.maps.deleteUnplaced(this.scene,i);
     if (act === "export") return this.#export();
     if (act === "import") return this.#import();
   }

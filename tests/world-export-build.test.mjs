@@ -63,6 +63,23 @@ const realData = async () => ({
 });
 setExportData(realData);
 
+test('world settings carry carriage audio and native Calendaria weather assets into a standalone export',async()=>{
+  install();registerWorld({id:'t',title:'T',root:ROOT,assetBase:ROOT});
+  game.settings={settings:new Map([['kg-realms.cityCarriageSound',{}]]),get:()=> 'worlds/game/audio/carriage.ogg'};
+  served.set('worlds/game/audio/carriage.ogg','CARRIAGE AUDIO');served.set('worlds/game/audio/storm.ogg','STORM AUDIO');
+  const native={version:'1.4.0',settings:{customWeatherPresets:[{name:'Storm',soundFx:'worlds/game/audio/storm.ogg'}],darknessSyncAllScenes:true}};
+  const built=await buildExport({id:'t',title:'T',root:ROOT,assetBase:ROOT},{moduleId:'configured-export',title:'T',version:'1',calendariaSettings:native});
+  const files=await readZip(built.parts),config=JSON.parse(files.get('configured-export/data/worlds/t/configuration.json'));
+  assert.equal(config.engine.cityCarriageSound,'modules/configured-export/assets/audio/carriage.ogg');assert.equal(files.get('configured-export/assets/audio/carriage.ogg'),'CARRIAGE AUDIO');
+  assert.equal(config.calendaria.settings.customWeatherPresets[0].soundFx,'modules/configured-export/assets/audio/storm.ogg');assert.equal(files.get('configured-export/assets/audio/storm.ogg'),'STORM AUDIO');assert.equal(config.calendaria.settings.darknessSyncAllScenes,true);
+  const registration=JSON.parse(files.get('configured-export/scripts/main.mjs').match(/registerWorld\((.*)\)\);/)[1]);assert.equal(registration.configuration.file,'configuration.json');
+  assert.equal(native.settings.customWeatherPresets[0].soundFx,'worlds/game/audio/storm.ogg','the native export payload is not mutated');
+  for(const [name,text]of files)served.set(`modules/${name}`,text);
+  const source=registerWorld(registration);game.settings={settings:new Map(),get:()=>undefined};
+  const again=await buildExport(source,{moduleId:'reconfigured-export',title:'T',version:'2'}),second=await readZip(again.parts),copied=JSON.parse(second.get('reconfigured-export/data/worlds/t/configuration.json'));
+  assert.equal(copied.engine.cityCarriageSound,'modules/reconfigured-export/assets/audio/carriage.ogg');assert.equal(copied.calendaria.settings.customWeatherPresets[0].soundFx,'modules/reconfigured-export/assets/audio/storm.ogg');
+});
+
 test('import history on linked documents and embedded items does not become an export dependency', async () => {
   install();
   const history='Compendium.world.old-imports.Item.history000000000';

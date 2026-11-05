@@ -887,13 +887,16 @@ registerKinds(cards, {
   realmPlaces, savePlaceEdit, localMaps, trade, cityTravel,
   // A coastal or riverside settlement is a port unless the GM says otherwise.
   autoPort: (p) => hud.autoPort(p),
-  // A place the GM added goes for good; one the module ships is marked removed (kept with its
-  // edits, so restoring it in the Places tab brings it back as it was).
-  removePlace: (world, id) => saveEdits(world, (w) => {
-    if (w.added?.[id]) { delete w.added[id]; delete w.edits?.[id]; return w; }
-    w.edits = { ...(w.edits ?? {}), [id]: { ...(w.edits?.[id] ?? {}), removed: true } };
-    return w;
-  }),
+  // Deletions belong to this world. A later companion reload must not restore them.
+  removePlace: (world, id) => {
+    const place=regional.places(world).find(p=>p.id===id),ref=regional.recordRef(world,id);
+    const targetId=place?.canonicalId??ref.id;
+    return saveEdits(place?.canonicalWorld??ref.world, (w) => {
+      w.deleted=[...new Set([...(w.deleted??[]),targetId])];
+      delete w.added?.[targetId];delete w.edits?.[targetId];
+      return w;
+    });
+  },
   presetFor: (p) => localMaps.presetFor(p.id, current?.region.world ?? defaultWorldId()),
   setupLocal: (entry) => localMaps.applyPreset(entry, { create: true, world: current?.region.world ?? defaultWorldId() }),
   // Show a spot on the realm map, when one is drawn.

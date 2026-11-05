@@ -41,6 +41,22 @@ export const CATEGORIES = {
 
 export const VISIBILITY = { hidden: "Hidden", rumoured: "Rumoured", discovered: "Discovered" };
 
+export function localPlaceType(rec){
+  if(['dock','land'].includes(rec?.entryType)&&(rec.entry||rec.category==='gate'))return rec.entryType==='dock'?'dock':'gate';
+  return rec?.category==='gate'?'gate':rec?.entry?(rec.category==='harbour'?'dock':'gate'):'place';
+}
+export function changeLocalPlaceType(rec,type){
+  if(!['place','gate','dock'].includes(type))throw Error('Choose Place, Gate or Dock.');
+  const out={...rec};
+  if(localPlaceType(rec)==='place')out.placeCategory=rec.category==='gate'?'other':rec.category;
+  if(type==='gate')Object.assign(out,{category:'gate',entry:true,entryType:'land'});
+  else if(type==='dock')Object.assign(out,{category:'harbour',entry:true,entryType:'dock'});
+  else Object.assign(out,{category:rec.placeCategory??(rec.category==='gate'?'other':rec.category),entry:false,entryType:null,privateEntry:false});
+  return out;
+}
+export function localSourceKeys(rec){return [...(rec.id?[`id:${rec.id}`]:[]),`name:${String(rec.sourceName??rec.name??'').trim().toLowerCase()}`];}
+export function deletedLocalPlace(map,rec){const gone=new Set(map?.deletedPlaces??[]);return localSourceKeys(rec).some(key=>gone.has(key));}
+
 /** Places shown at every zoom: the ways in, the landmarks and the wards (with ways in and key places). */
 export const ALWAYS_SHOWN = new Set(["gate", "landmark", "district"]);
 export const alwaysShown = (rec) => !!rec && (ALWAYS_SHOWN.has(rec.category) || !!rec.keyPlace || !!rec.entry);

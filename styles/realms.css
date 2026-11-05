@@ -2074,6 +2074,9 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-scene-checklist .kgr-scene-tokens { display: flex; align-items: center; gap: 8px; padding-top: 14px; }
 .kgr-scene-checklist [data-regenerate] { margin: 2px 0 4px 28px; width: auto; font-size: 12px; }
 .kgr-export-problems { max-height: 50vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kgr-config-choices { max-height: 55vh; overflow: auto; }
+.kgr-config-choice { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem 0; }
+.kgr-config-choice input { flex: 0 0 auto; margin-top: .2rem; }
 /* Private encounter cards are marked in both hover previews and full windows. */
 .kgr-ui.kgr-card.kgr-gm-only, .kgr-ui.kgr-hover-cue.kgr-gm-only, .kgr-ui.kgr-place-card.kgr-gm-only { border: 2px solid #ffbd45; box-shadow: 0 0 0 1px #e88124, 0 0 14px rgba(255, 165, 35, .28), 0 6px 24px rgba(0, 0, 0, .55); }
 .kgr-card .badge.gm-only, .kgr-place-card .kgc-vis.gm-only { display: inline-block; margin: 4px 0; padding: 3px 7px; border: 1px solid #e88124; border-radius: 4px; color: #ffd06b; background: rgba(130, 66, 10, .35); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }

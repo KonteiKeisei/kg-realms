@@ -13,6 +13,7 @@ import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.
 import { TileEncoder, cutTile, ktx2Header } from "./tiles.mjs";
 import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars, restoreModuleRegionalMaps } from "./export.mjs";
 import {promptInstalledScenes,registerSceneSetup,adoptPackagedScenes} from '../module-scenes.mjs';
+import {registerCompanionConfigurations,applyCompanionConfigurations} from '../companion-configuration.mjs';
 import { startBiomeClimates } from "../biome-weather.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, detailLevels, nextTileFolder } from "./plan.mjs";
 
@@ -31,6 +32,7 @@ let reloading = false;
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
   registerSceneSetup();
+  registerCompanionConfigurations();
   Hooks.on("createScene", sceneFromModule);
   // A world's map was rebuilt: everyone reloads, so nobody keeps drawing the old one.
   Hooks.on("updateScene", (scene, changes) => {
@@ -45,6 +47,7 @@ export function registerHomebrew() {
   Hooks.once("calendaria.ready", async () => {
     await applyModuleCalendars().catch((err) => console.error(`${ID} | calendars`, err));
     await startBiomeClimates().catch((err) => console.error(`${ID} | biome climates`, err));
+    await applyCompanionConfigurations();
   });
   for (const def of Object.values(game.settings.get(ID, SETTING) ?? {})) {
     try { registerWorld(def); } catch (err) { console.warn(`${ID} | homebrew world ${def?.id}:`, err); }
@@ -58,6 +61,7 @@ export function registerHomebrew() {
     await restoreModuleRegionalMaps();
     await promptInstalledScenes();
     if (!game.modules.get("calendaria")?.active) await applyModuleCalendars();
+    await applyCompanionConfigurations();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
   });

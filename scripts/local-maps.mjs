@@ -3,7 +3,7 @@
 // them (a badge for the category, the place's name), shows a hover card, opens a place's card on a
 // double-click, keeps hidden places from players, and turns an existing scene with journal pins
 // into a local map (the pins' journal text goes into the places' cards; no journal stays linked).
-import { CATEGORIES, VISIBILITY, categoryFor, cleanLabel, scaleCheck, across, localRecord, localAssetEdits, markerAtZoom, alwaysShown } from "./local-places.mjs";
+import { CATEGORIES, VISIBILITY, categoryFor, cleanLabel, scaleCheck, across, localRecord, localAssetEdits, markerAtZoom, alwaysShown,changeLocalPlaceType,localSourceKeys,deletedLocalPlace } from "./local-places.mjs";
 import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
 import { asHtml, asSecret, excerptHtml } from "./place-card.mjs";
 import { LocalEditor } from "./ui-local.mjs";
@@ -106,6 +106,42 @@ export class LocalMaps {
   localMapOf(scene) { return localMapOf(scene); }
   localOf(note) { return localOf(note); }
 
+  async changePlaceType(note,type){
+    if(!game.user?.isGM||!localOf(note))throw Error('Only a GM can change a local place.');
+    await note.update({[`flags.${MODULE_ID}.local`]:changeLocalPlaceType(localOf(note),type)});
+    if(type!=='place')await this.entrancePlaced?.(note.parent);
+  }
+
+  async rememberDeletedPlace(scene,rec){
+    if(!game.user?.isGM||!localMapOf(scene))return;
+    this.deletionJobs??=new Map();
+    const work=(this.deletionJobs.get(scene.id)??Promise.resolve()).catch(()=>{}).then(async()=>{
+      const map=localMapOf(scene);if(!map)return;
+      const deletedPlaces=[...new Set([...(map.deletedPlaces??[]),...localSourceKeys(rec)])];
+      if(deletedPlaces.length===(map.deletedPlaces??[]).length)return;
+      await scene.setFlag(MODULE_ID,'localMap',{...map,deletedPlaces});
+    });
+    this.deletionJobs.set(scene.id,work);try{await work;}finally{if(this.deletionJobs.get(scene.id)===work)this.deletionJobs.delete(scene.id);}
+  }
+
+  async deletePlace(note){
+    if(!game.user?.isGM||!localOf(note))throw Error('Only a GM can delete a local place.');
+    await this.rememberDeletedPlace(note.parent,localOf(note));await note.delete();await this.unlinkScene(note);
+  }
+
+  async deleteUnplaced(scene,index){
+    const map=localMapOf(scene),rec=map?.unplaced?.[index];if(!rec||!game.user?.isGM)return;
+    await this.rememberDeletedPlace(scene,rec);
+    await scene.setFlag(MODULE_ID,'localMap',{...localMapOf(scene),unplaced:map.unplaced.filter((_,i)=>i!==index)});
+  }
+
+  async restoreSourcePlaces(scene){
+    if(!game.user?.isGM)throw Error('Only a GM can restore source places.');
+    const map=localMapOf(scene),entry=(await this.presets(map.world)).find(p=>p.id===map.presetId);
+    if(!entry)throw Error('This map has no source place preset. Regenerate a copy from its companion to recover the original scene.');
+    return this.applyPreset(entry,{world:map.world,scene,onlyDeleted:map.deletedPlaces??[]});
+  }
+
   async setIconPack(scene,value){
     if(!game.user.isGM||!localMapOf(scene))return;
     await scene.setFlag(MODULE_ID,'localMap.iconPack',iconPackOverride(value));this.refreshMarkers(scene,true);
@@ -145,6 +181,7 @@ export class LocalMaps {
     Hooks.on("canvasPan", () => this.fitAllToZoom());
     Hooks.on("refreshNote", (note) => this.#style(note));
     Hooks.on('updateNote', (doc) => { if(doc.parent === canvas.scene){const note=doc.object??canvas.notes?.get(doc.id);if(note)this.#style(note);} });
+    Hooks.on('deleteNote',(note,_options,userId)=>{if(userId===game.user.id&&game.user.isGM&&localOf(note)&&game.scenes.get(note.parent?.id))this.rememberDeletedPlace(note.parent,localOf(note)).catch(error=>console.error('kg-realms | deleted place',error));});
     // The hover card waits as the realm map's does (the Place card hover delay setting).
     Hooks.on("hoverNote", (note, hovered) => {
       clearTimeout(this.hoverTimer);
@@ -735,7 +772,7 @@ export class LocalMaps {
    * when the scene has one, else the preset's), as a GM-only secret block. No journal is made or
    * linked. Places already there are kept as they are. Returns a report, or null.
    */
-  async applyPreset(entry, { create = false, world = defaultWorldId(), scene: targetScene = null } = {}) {
+  async applyPreset(entry, { create = false, world = defaultWorldId(), scene: targetScene = null,onlyDeleted=null } = {}) {
     if (!game.user.isGM) return null;
     const preset = await fetch(worldUrl(world, `local/${entry.file}`)).then((r) => r.json());
     const place = (await this.getRealmPlaces(world)).find((p) => p.id === preset.placeId);
@@ -762,8 +799,10 @@ export class LocalMaps {
       const key = (localOf(n)?.name ?? cleanLabel(n.text ?? "").name).toLowerCase();
       if (!have.has(key)) have.set(key, n); else if (!localOf(n)) extra.push({ key, n });
     }
-    const updates = [], creates = [], drops = [];
+    const updates = [], creates = [], drops = [],restored=new Set();
     for (const { x, y, iconSize, page, known, ...rec } of preset.places) {
+      if(onlyDeleted?!deletedLocalPlace({deletedPlaces:onlyDeleted},rec):deletedLocalPlace(localMapOf(scene),rec))continue;
+      if(onlyDeleted)for(const key of localSourceKeys(rec))restored.add(key);
       const key = rec.name.toLowerCase(), n = have.get(key);
       if (n && localOf(n)) {
         const own = localOf(n);
@@ -778,7 +817,7 @@ export class LocalMaps {
       }
       const own = n ? pageHtml(this.#pageFor(n, rec.name)) : "";
       // The text of the page the GM's own pin points to, else the preset's: never both (the same page twice).
-      const r = localRecord({ ...rec, journal: null, known: own ? asSecret(own) : textOf({ known, page, name: rec.name }) });
+      const r = localRecord({ ...rec,sourceName:rec.name, journal: null, known: own ? asSecret(own) : textOf({ known, page, name: rec.name }) });
       Object.assign(r, localAssetEdits(r, preset.assetReplacements));
       if (n) updates.push({ _id: n.id, text: r.name, "texture.tint": "#ffffff", entryId: null, pageId: null, ...(preset.movePins ? { x, y, iconSize: iconSize ?? n.iconSize } : {}), [`flags.${MODULE_ID}.local`]: r });
       else creates.push({ x, y, iconSize: iconSize ?? 64, text: r.name, fontSize: 32, textAnchor: 1, global: true, texture: { src: "icons/svg/book.svg", tint: "#ffffff" }, flags: { [MODULE_ID]: { local: r } } });
@@ -788,30 +827,31 @@ export class LocalMaps {
     if (creates.length) await scene.createEmbeddedDocuments("Note", creates);
     if (drops.length) await scene.deleteEmbeddedDocuments("Note", drops);
     const unplaced = preset.unplaced.map((u) => ({ name: u.name, category: u.category, known: textOf(u) }))
-      .filter((u) => !scene.notes.some((n) => localOf(n)?.name.toLowerCase() === u.name.toLowerCase()));
+      .filter((u) => (onlyDeleted?deletedLocalPlace({deletedPlaces:onlyDeleted},u):!deletedLocalPlace(localMapOf(scene),u))&&!scene.notes.some((n) => localOf(n)?.name.toLowerCase() === u.name.toLowerCase()));
+    if(onlyDeleted)for(const rec of unplaced)for(const key of localSourceKeys(rec))restored.add(key);
     const prev = localMapOf(scene) ?? {};
     const retired = new Set((preset.retired ?? []).map(name => name.toLowerCase()));
     const placed = new Set([...have.keys(), ...preset.places.map(p => p.name.toLowerCase())]);
     const pending = new Map([...(prev.unplaced ?? []), ...unplaced].filter(p => !placed.has(p.name.toLowerCase()) && !retired.has(p.name.toLowerCase())).map(p => [p.name.toLowerCase(), p]));
     // Preserve a GM's existing unplaced text when the preset contains the same name.
     for (const p of prev.unplaced ?? []) if (!placed.has(p.name.toLowerCase()) && !retired.has(p.name.toLowerCase())) pending.set(p.name.toLowerCase(), p);
-    await scene.setFlag(MODULE_ID, "localMap", { markerScale: preset.markerScale ?? 1, ...(preset.iconPack ? {iconPack: preset.iconPack} : {}), ...prev, world, placeId: preset.placeId, name: preset.name, presetId:entry.id, presetRevision: entry.revision ?? preset.version ?? 1, unplaced: [...pending.values()], ...(preset.seasons ? { seasons: preset.seasons } : {}) });
+    await scene.setFlag(MODULE_ID, "localMap", { markerScale: preset.markerScale ?? 1, ...(preset.iconPack ? {iconPack: preset.iconPack} : {}), ...prev, world, placeId: preset.placeId, name: prev.name??preset.name, presetId:entry.id, presetRevision: entry.revision ?? preset.version ?? 1, unplaced: [...pending.values()],deletedPlaces:(prev.deletedPlaces??[]).filter(key=>!restored.has(key)), ...(!onlyDeleted&&preset.seasons ? { seasons: preset.seasons } : {}) });
     // The preset's settlement roads, on a scene that has none of its own. A scene with roads gets the
     // preset's new ones once per roads revision, beside its own: its roads are kept as they are, and a
     // road the GM deletes afterwards stays deleted.
     const sceneRoads = scene.getFlag(MODULE_ID, "cityRoads");
-    if (preset.roads?.roads?.length && !sceneRoads?.roads?.length) await scene.setFlag(MODULE_ID, "cityRoads", structuredClone(preset.roads));
-    else if (preset.roads?.roads?.length && (prev.roadsRevision ?? 1) < (preset.roads.revision ?? 1)) {
+    if (!onlyDeleted&&preset.roads?.roads?.length && !sceneRoads?.roads?.length) await scene.setFlag(MODULE_ID, "cityRoads", structuredClone(preset.roads));
+    else if (!onlyDeleted&&preset.roads?.roads?.length && (prev.roadsRevision ?? 1) < (preset.roads.revision ?? 1)) {
       const ids = new Set(sceneRoads.roads.map((r) => r.id)), extra = preset.roads.roads.filter((r) => !ids.has(r.id));
       if (extra.length) await scene.setFlag(MODULE_ID, "cityRoads", { ...sceneRoads, revision: (sceneRoads.revision ?? 0) + 1, roads: [...sceneRoads.roads, ...structuredClone(extra)] });
     }
-    if (preset.roads?.revision) await scene.setFlag(MODULE_ID, "localMap", { ...localMapOf(scene), roadsRevision: preset.roads.revision });
+    if (!onlyDeleted&&preset.roads?.revision) await scene.setFlag(MODULE_ID, "localMap", { ...localMapOf(scene), roadsRevision: preset.roads.revision });
     // The place's own text (the city's overview) goes into the realm place's card, if it has none yet.
     const overview = preset.overviewKnown ?? (preset.overview ? asSecret(pages.get(preset.overview.toLowerCase()) ?? "") : "");
     const known = overview && place && place.known == null ? `${asHtml(place.summary || place.descr)}${overview}` : null;
-    if (place && (!preset.standalone || !place.scene || !game.scenes.get(place.scene) || place.scene===scene.id)) await this.savePlaceEdit(world, place.id, { scene: scene.id, ...(known ? { known } : {}) });
+    if (!onlyDeleted&&place && (!preset.standalone || !place.scene || !game.scenes.get(place.scene) || place.scene===scene.id)) await this.savePlaceEdit(world, place.id, { scene: scene.id, ...(known ? { known } : {}) });
     this.ensureEntrance(scene).catch(error => console.warn('kg-realms | entrance setup:', error));
-    if (entry.effects) await this.applyEffects?.(scene, entry.effects, world).catch(error => console.warn(`kg-realms | ${scene.name} effects:`, error));
+    if (!onlyDeleted&&entry.effects) await this.applyEffects?.(scene, entry.effects, world).catch(error => console.warn(`kg-realms | ${scene.name} effects:`, error));
     return { scene, places: updates.length + creates.length, created: creates.length };
   }
 
@@ -855,29 +895,21 @@ export class LocalMaps {
     try { list = await this.presets(world); } catch (err) { console.warn("kg-realms | local map presets:", err); return; }
     for (const entry of list) {
       const have = game.scenes.find((s) => entry.standalone ? localMapOf(s)?.presetId===entry.id : localMapOf(s)?.placeId === entry.placeId);
-      // A local map set up before its preset had seasonal pictures gets them.
-      if (have && entry.seasons && !localMapOf(have).seasons) await have.setFlag(MODULE_ID, "localMap", { ...localMapOf(have), seasons: entry.seasons });
-      // A local map the module has a new picture for gets it.
-      if (have && entry.map?.src) await this.#takeMap(have, entry.map).catch((err) => console.warn(`kg-realms | ${entry.name}'s new map:`, err));
-      if (have && entry.effects) await this.applyEffects?.(have, entry.effects, world).catch(error => console.warn(`kg-realms | ${entry.name} effects:`, error));
-      if (have && entry.revision && (localMapOf(have).presetRevision ?? 0) < entry.revision) {
-        const report = await this.applyPreset(entry, {world, scene: have}).catch(error => console.warn(`kg-realms | ${entry.name} defaults:`, error));
-        if (report) set.push(`${entry.name} (${report.created} added places)`);
-      }
+      if(have){done.add(entry.id);continue;}
       if (done.has(entry.id) || have) continue;
       const report = await this.applyPreset(entry, { world, create:!!entry.create }).catch((err) => { console.warn(`kg-realms | preset ${entry.name}:`, err); return null; });
       if (!report) continue;
       done.add(entry.id);
       set.push(`${entry.name} (${report.places} places, on ${report.scene.name})`);
     }
+    if(JSON.stringify([...done])!==JSON.stringify(Array.isArray(was)?was:[]))await this.savePresetsDone?.([...done]);
     if (set.length) {
-      await this.savePresetsDone?.([...done]);
       ui.notifications.info(`KG Realms: local maps set up from the module: ${set.join(", ")}.`);
     }
     // Bundled local maps are selected from flags and module data. Retire only
     // known baseline background identifiers, without touching custom artwork.
     for (const scene of game.scenes) {
-      if (localMapOf(scene) && mapAsset(scene) && backgroundOf(scene)) await setBackground(scene, null);
+      if (localMapOf(scene) && mapAsset(scene)?.source===backgroundOf(scene)&&backgroundOf(scene)) await setBackground(scene, null);
     }
     await this.applySeasons();
   }

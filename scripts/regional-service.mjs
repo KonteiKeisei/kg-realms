@@ -37,6 +37,8 @@ export class RegionalMaps {
   entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
   followRoutes(world,routes){return this.links[world]?followCrossingRoads(routes,this.entrances(world)):routes;}
   places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes);const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
+    const deleted=new Set(this.getEdits?.(id)?.deleted??[]);
+    for(let i=result.length-1;i>=0;i--){const p=result[i];if(deleted.has(p.id)||p.canonicalWorld&&(this.getEdits?.(p.canonicalWorld)?.deleted??[]).includes(p.canonicalId))result.splice(i,1);}
     for(const place of result)place.regionalMapEntry=false;
     for(const link of Object.values(this.links).filter(l=>l.parent===id)){
       const place=regionalPlace(link,result),scene=game.scenes?.get(link.scene);

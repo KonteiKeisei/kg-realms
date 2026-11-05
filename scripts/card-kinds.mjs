@@ -7,7 +7,7 @@ import {entranceType} from './settlement-entry.mjs';
 // edits), local places (their notes on a local map), encounters placed in the map editor (a world
 // setting) and a journey's own encounters (the realm scene's journey flag). Old journal links are
 // shown as a GM-only secret block until saved or imported (journals.mjs), never opened.
-import { CATEGORIES, VISIBILITY } from "./local-places.mjs";
+import { CATEGORIES, VISIBILITY,localPlaceType,changeLocalPlaceType } from "./local-places.mjs";
 import { localMapOf, localOf } from "./local-maps.mjs";
 import { asHtml, asSecret } from "./place-card.mjs";
 import { iconFor } from "./ui-card.mjs";
@@ -96,8 +96,8 @@ export function registerKinds(cards, deps) {
         gmActions: template&&!scene?[{act:'generate',label:`Generate ${p.name}`,icon:'fa-map-location-dot'}]:[...(preset?[{act:'setup',label:`Set up the local map (${preset.places} places)`,icon:'fa-map-location-dot'}]:[]),...(template&&scene&&['local','scene'].includes(template.kind)?[{act:'regenerate',label:'Regenerate map',icon:'fa-rotate-right'}]:[])],
         // Any place can go: one the GM added is deleted, one the module ships is removed from this
         // world (restored from the map editor's Places tab).
-        canDelete: true, deleteLabel: p.added ? "Delete" : "Remove from the map",
-        deleteNote: p.added ? null : "Gone from this world: off the map, out of search and journeys. Restore it from the map editor's Places tab (Removed from this world), with its edits.",
+        canDelete: true, deleteLabel: 'Delete permanently',
+        deleteNote: 'Deleted from this world and future exports. The original companion module is unchanged.',
         form: { name: p.name, class: placeClass(p) ?? "", visibility: p.visibility ?? (p.hidden ? "hidden" : "discovered"), img: p.img ?? "", known, rumours: p.rumours ?? "", gmNotes: p.gmNotes ?? "", scene: p.scene ?? "", actor: p.actor ?? "", gold: !!p.gold, port: !!(p.port ?? deps.autoPort?.(p)) },
         fields: [ART, TEXT("name", "Name", { wide: true }), TEXT("class", "Type", { placeholder: "Town, Ruins, Temple..." }), { name: "gold", label: "Gold on the map", type: "check", group: "identity" },
           { name: "port", label: "Port: the party can take a boat here", type: "check", group: "identity" },
@@ -157,20 +157,19 @@ export function registerKinds(cards, deps) {
         actor: rec.actor ?? null, locate: canvas.scene?.id === ref.scene, enter: enterFor(rec.scene, rec.name),
         rows: entranceType(rec) ? [['Arrival', entranceType(rec) === 'dock' ? 'Dock entrance' : 'Land entrance'], ['Access',rec.privateEntry ? 'Private, entry may be prohibited without permission' : 'Public']] : [], canDelete: true,
         gmActions:[...(map&&deps.cityTravel?[{act:'travel',label:'Travel here',icon:'fa-person-walking'}]:[]),...(template&&!linked?[{act:'generate',label:`Generate ${rec.name}`,icon:'fa-map-location-dot'}]:[]),...(template&&linked&&['local','scene'].includes(template.kind)?[{act:'regenerate',label:'Regenerate map',icon:'fa-rotate-right'}]:[])],
-        form: { name: rec.name, category: rec.category, visibility: rec.visibility, img: rec.img ?? "", known, rumours: rec.rumours ?? "", gmNotes: asHtml(rec.gmNotes), scene: rec.scene ?? "", actor: rec.actor ?? "", iconSize: n.iconSize, iconPack:iconPackOverride(rec.iconPack)??'', keyPlace: !!rec.keyPlace, entry: !!rec.entry, entryType: rec.entryType ?? '', privateEntry: !!rec.privateEntry },
+        form: { name: rec.name,placeType:localPlaceType(rec), category: rec.category, visibility: rec.visibility, img: rec.img ?? "", known, rumours: rec.rumours ?? "", gmNotes: asHtml(rec.gmNotes), scene: rec.scene ?? "", actor: rec.actor ?? "", iconSize: n.iconSize, iconPack:iconPackOverride(rec.iconPack)??'', keyPlace: !!rec.keyPlace, entry: !!rec.entry, entryType: rec.entryType ?? '', privateEntry: !!rec.privateEntry },
         fields: [ART, TEXT("name", "Name", { wide: true }), { name: "category", label: "Category", type: "select", group: "identity", options: Object.entries(CATEGORIES).map(([k, c]) => [k, c.label]) },
-          WHO, RUMOURS, KNOWN, GM_NOTES, sceneField(ref.scene), ACTOR,
+          {name:'placeType',label:'Place type',type:'select',group:'identity',options:[['place','Place'],['gate','Gate (land entrance)'],['dock','Dock (water entrance)']]},WHO, RUMOURS, KNOWN, GM_NOTES, sceneField(ref.scene), ACTOR,
           {name:'iconPack',label:'Icon pack',type:'icon-pack',group:'map',defaultPack:resolvedIconPack(map),options:[['',`Use map default (${ICON_PACKS[resolvedIconPack(map)]})`],...iconPackOptions()]},
           { name: "iconSize", label: "Marker size", type: "number", group: "map", attrs: 'min="16" max="200" step="4"' },
-          { name: "keyPlace", label: "Key place: always shown, even zoomed far out (gates, landmarks and wards always are)", type: "check", group: "map" }, { name: "entry", label: "A way in (a gate, a dock): travel puts the party here", type: "check", group: "map" },
-          {name:'entryType',label:'Entrance type (when marked as a way in)',type:'select',group:'map',options:[['','Use category (harbour = dock)'],['land','Land entrance'],['dock','Dock entrance']]},
+          { name: "keyPlace", label: "Key place: always shown, even zoomed far out (gates, landmarks and wards always are)", type: "check", group: "map" },
           {name:'privateEntry',label:'Private entrance: warn that entry may be prohibited',type:'check',group:'map'}]
       };
     },
     async save(ref, v) {
       const n = note(ref), before = localOf(n);
       if (!before) return;
-      const rec = { ...before }, update = {};
+      let rec = { ...before,sourceName:before.sourceName??before.name }; const update = {};
       if ("name" in v) { rec.name = v.name || "Place"; update.text = rec.name; }
       for (const k of ["category", "visibility", "img", "rumours", "gmNotes"]) if (k in v) rec[k] = v[k] ?? "";
       for (const k of ["scene", "actor"]) if (k in v) rec[k] = val(v[k]);
@@ -179,6 +178,7 @@ export function registerKinds(cards, deps) {
       if ('privateEntry' in v) rec.privateEntry = !!v.privateEntry;
       if ('keyPlace' in v) rec.keyPlace = !!v.keyPlace;
       if ('iconPack' in v) rec.iconPack=iconPackOverride(v.iconPack);
+      if('placeType' in v)rec=changeLocalPlaceType(rec,v.placeType);
       // What is known takes over from the summary and the old journal: the note links no journal.
       if ("known" in v) { rec.known = v.known ?? ""; rec.summary = ""; rec.journal = null; update.entryId = null; update.pageId = null; }
       if ("iconSize" in v && v.iconSize) update.iconSize = Math.max(16, Math.min(200, v.iconSize));
@@ -187,7 +187,7 @@ export function registerKinds(cards, deps) {
       if ("scene" in v && rec.scene !== before.scene) await deps.localMaps.linkScene(n, before.scene, rec.scene);
       if (entranceType(rec)) await deps.localMaps.entrancePlaced?.(n.parent);
     },
-    async remove(ref) { const n = note(ref); if (!n) return; await deps.localMaps.unlinkScene(n); await n.delete(); },
+    async remove(ref) { const n = note(ref); if (!n) return; return deps.localMaps.deletePlace(n); },
     async act(ref,act){if(!game.user.isGM)return;const n=note(ref),rec=localOf(n),world=localMapOf(n?.parent)?.world;
       if(act==='travel'&&n)return deps.cityTravel?.open(n.parent,{note:n.id});
       if(act==='generate'||act==='regenerate'){const template=world&&rec?templateForPlace(world,rec,rec.scene):null;if(!template)return;const scene=act==='regenerate'?await regenerateSceneCopy(worldDef(world),template):await generatePlaceScene(world,template);if(scene&&act==='generate')await scene.view();}
