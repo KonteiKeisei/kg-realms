@@ -2,6 +2,8 @@ import {allWorlds,worldDef,worldUrl,registerWorld} from './worlds.mjs';
 import {mergedSceneTemplates,selectedScenePlan,sceneTemplateCatalog} from './scene-template-plan.mjs';
 import {restoreModuleRegionalMaps} from './homebrew/export.mjs';
 import {regionalPlace} from './regional-place.mjs';
+import {assertSceneBehaviors} from './scene-package-support.mjs';
+import {packagedSceneFolderData,organizePackagedScene} from './module-scene-folders.mjs';
 
 const ID='kg-realms', SETTING='sceneTemplateSetup', files=new WeakMap(), queues=new Map(), dialogs=new Map();
 const esc=value=>foundry.utils.escapeHTML(String(value??''));
@@ -10,6 +12,19 @@ const permitted=()=>!!(game.user?.isGM&&(game.user.can?.('SETTINGS_MODIFY')??tru
 const requireGM=()=>{if(!permitted())throw Error('Only a GM with settings permission can generate module maps.');};
 export const templateWorlds=()=>allWorlds().filter(w=>w.sceneTemplates?.schema===1&&w.sceneTemplates.role!=='regional');
 export const sceneTemplates=def=>mergedSceneTemplates(allWorlds().filter(w=>w.module===def.module&&w.sceneTemplates?.schema===1));
+
+export async function organizeGeneratedScene(def,scene){
+  const nodes=sceneTemplates(def),own=scene.getFlag?.(ID,'moduleScene')??scene.flags?.[ID]?.moduleScene;
+  const node=nodes.find(n=>n.id===(own?.templateId??own?.id??scene.id))??nodes.find(n=>n.preset&&generatedScene(n)?.id===scene.id);
+  return node?organizePackagedScene(def,nodes,node,scene):scene;
+}
+
+async function placedTemplateData(def,node,data){
+  assertSceneBehaviors(data);
+  const placement=await packagedSceneFolderData(def,sceneTemplates(def),node);
+  if('folder' in placement){data.folder=placement.folder;data.flags??={};data.flags[ID]??={};data.flags[ID].moduleFolder=placement.marker;}
+  return data;
+}
 
 export function generatedScene(node) {
   const copies=values(game.scenes).filter(s=>s.getFlag?.(ID,'moduleScene')?.templateId===node.id);
@@ -65,16 +80,19 @@ function relinkGeneratedScenes(def,data){
 }
 
 async function createTemplate(def,node,{includeTokens=true}={}) {
-  const existing=generatedScene(node);if(existing)return existing;
+  const existing=generatedScene(node);if(existing)return organizeGeneratedScene(def,existing);
   if(node.preset){
     const maps=game.modules.get(ID)?.api?.localMaps;if(!maps)throw Error('Local-map setup is not ready.');
-    return (await maps.applyPreset(node.preset,{create:true,world:node.world}))?.scene;
+    const scene=(await maps.applyPreset(node.preset,{create:true,world:node.world}))?.scene;
+    if(scene){const placement=await packagedSceneFolderData(def,sceneTemplates(def),node);if('folder' in placement)await scene.update({folder:placement.folder,[`flags.${ID}.moduleFolder`]:placement.marker});}
+    return scene;
   }
-  const data=relinkGeneratedScenes(def,await snapshot(node));if(!includeTokens)data.tokens=[];
+  const data=await placedTemplateData(def,node,relinkGeneratedScenes(def,await snapshot(node)));if(!includeTokens)data.tokens=[];
   await actorsFor(def,data);requireGM();
   const arrived=generatedScene(node);if(arrived)return arrived;
   // Suppress the legacy eager import. Only the selected scene and its ancestors are generated.
   const scene=await getDocumentClass('Scene').create(data,{keepId:true,kgRealmsSceneSetup:true});
+  if(!scene)throw Error(`${node.name}: Foundry did not create the scene. See its validation error in the console.`);
   await restoreModuleRegionalMaps();return scene;
 }
 
@@ -83,7 +101,7 @@ export async function generateSelectedScenes(def,selected,{includeTokens=true}={
   const previous=queues.get(def.module)??Promise.resolve();
   const work=previous.catch(()=>{}).then(async()=>{
     const scenes=[];
-    for(const node of plan){requireGM();const scene=await createTemplate(def,node,{includeTokens});if(scene)scenes.push(scene);}
+    for(const node of plan){requireGM();const scene=await createTemplate(def,node,{includeTokens});if(!scene)throw Error(`${node.name}: the scene was not generated.`);scenes.push(scene);}
     await restoreModuleRegionalMaps();return scenes;
   });
   queues.set(def.module,work);try{return await work;}finally{if(queues.get(def.module)===work)queues.delete(def.module);}
@@ -153,9 +171,12 @@ export async function promptInstalledScenes() {
   await adoptPackagedScenes();
   const state=game.settings.get(ID,SETTING)??{};
   for(const def of templateWorlds()){
-    const nodes=sceneTemplates(def),signature=JSON.stringify(nodes.map(n=>n.id));
-    if(state[def.module]==='never'||state[def.module]===signature)continue;
-    try{await openSceneChecklist(def,{automatic:true});}catch(error){console.error('kg-realms | module maps',error);ui.notifications.error(`KG Realms: ${error.message}`);}
+    try{
+      const nodes=sceneTemplates(def),signature=JSON.stringify(nodes.map(n=>n.id));
+      for(const node of nodes){const scene=generatedScene(node);if(scene)await organizePackagedScene(def,nodes,node,scene);}
+      if(state[def.module]==='never'||state[def.module]===signature)continue;
+      await openSceneChecklist(def,{automatic:true});
+    }catch(error){console.error('kg-realms | module maps',error);ui.notifications.error(`KG Realms: ${error.message}`);}
   }
 }
 
@@ -195,10 +216,11 @@ export async function regenerateSceneCopy(def,node) {
   const maps=game.modules.get(ID)?.api?.localMaps;
   if(node.bindings?.length&&(!maps?.getRealmPlaces||!maps?.savePlaceEdit))throw Error('Local-map linking is not ready. Try again after the world finishes loading.');
   const previousIds=new Set([node.id,...values(game.scenes).filter(s=>s.getFlag?.(ID,'moduleScene')?.templateId===node.id).map(s=>s.id)]);
-  const data=relinkGeneratedScenes(def,await snapshot(node)),id=foundry.utils.randomID();data._id=id;data.name=`${node.name} (regenerated)`;
+  const data=await placedTemplateData(def,node,relinkGeneratedScenes(def,await snapshot(node))),id=foundry.utils.randomID();data._id=id;data.name=`${node.name} (regenerated)`;
   if(!choice.includeTokens)data.tokens=[];
   data.flags[ID].moduleScene={world:node.world,id,templateId:node.id};
   await actorsFor(def,data);requireGM();const scene=await getDocumentClass('Scene').create(data,{keepId:true,kgRealmsSceneSetup:true});
+  if(!scene)throw Error(`${node.name}: Foundry did not create the regenerated scene. See its validation error in the console.`);
   for(const binding of node.bindings??[]){await maps.getRealmPlaces(binding.world);await maps.savePlaceEdit(binding.world,binding.place,{scene:scene.id});}
   for(const parent of values(game.scenes))for(const note of values(parent.notes))if(previousIds.has(note.getFlag?.(ID,'local')?.scene))await note.update({[`flags.${ID}.local.scene`]:scene.id});
   await scene.view();ui.notifications.info(`KG Realms: ${scene.name} is ready. The previous scene was kept.`);return scene;

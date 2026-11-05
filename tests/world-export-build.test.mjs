@@ -258,6 +258,17 @@ test("a compendium that cannot be filled says so, and locks again if writing fai
   assert.ok(second.errors.some((m) => m.includes("no room")));
 });
 
+test('partial Foundry compendium creation counts only actual documents and reports the rejected scene',async()=>{
+  const pack=fakePack('scenes'),f=install({packs:new Map([['partialfill.scenes',pack]])});
+  moduleWorld('partialfill',[{name:'scenes',type:'Scene',file:'packs/scenes.json'}]);
+  served.set('modules/m/data/worlds/partialfill/packs/scenes.json',JSON.stringify([{_id:'good',name:'Good scene'},{_id:'bad',name:'Rejected scene'}]));
+  globalThis.getDocumentClass=()=>({createDocuments:async rows=>rows.filter(row=>row._id==='good')});
+  await fillModulePacks();
+  assert.ok(f.errors.some(message=>/Rejected scene.*did not create/.test(message)));
+  assert.ok(f.infos.some(message=>/PARTIALFILL: 1 documents imported/.test(message)));
+  assert.ok(!f.infos.some(message=>/PARTIALFILL's maps and documents are ready/.test(message)));assert.deepEqual(pack.calls,[false,true]);
+});
+
 test("a scene dragged in takes the id its links know; a realm map brings its settlements and a scene its actors", async () => {
   const scenes = fakePack("scenes"), actors = fakePack("actors");
   const SETTLE = "settle0000000000";

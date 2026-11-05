@@ -114,7 +114,7 @@ export function scenesOfWorld(all, places, world) {
 }
 
 /** This table's own use of a scene, which is not the world's: its party, its journey, its backup. */
-const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "partyToken", "cityAsk", "homebrewOriginal"];
+const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "partyToken", "cityAsk", "homebrewOriginal", "moduleFolder"];
 /**
  * A scene as a module ships it, marked with the id it must keep so places and pins still find it.
  * keepToken(token) says which tokens go: the players' party stays at this table.

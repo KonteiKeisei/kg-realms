@@ -8,7 +8,7 @@ import {buildLocalMapTiles,stagePlacedMapTiles} from '../scripts/local-map-tiles
 import {placedTileAsset} from '../scripts/placed-tile-lods.mjs';
 import {mapAsset} from '../scripts/local-map-renderer.mjs';
 import {resolveLocalLods} from '../scripts/local-map-lods.mjs';
-import {sceneTemplates,generateSelectedScenes,templateForPlace,generatePlaceScene,sceneChecklistContent,bindSceneChecklist,openSceneChecklist,promptInstalledScenes,regenerateSceneCopy,adoptPackagedScenes} from '../scripts/module-scenes.mjs';
+import {sceneTemplates,generateSelectedScenes,templateForPlace,generatePlaceScene,sceneChecklistContent,bindSceneChecklist,openSceneChecklist,promptInstalledScenes,regenerateSceneCopy,adoptPackagedScenes,organizeGeneratedScene} from '../scripts/module-scenes.mjs';
 import {selectedScenePlan,sceneTemplateCatalog} from '../scripts/scene-template-plan.mjs';
 import {registerKinds} from '../scripts/card-kinds.mjs';
 import {homebrewSheet} from '../scripts/homebrew/plan.mjs';
@@ -28,6 +28,64 @@ test('mutually linked interior scenes have a usable checklist tree without rewri
   const scenes=[{_id:R,name:'Realm',flags:{'kg-realms':{world:ROOT}}},{_id:L,name:'Hall',notes:[{flags:{'kg-realms':{local:{scene:I}}}}]},{_id:I,name:'Cellar',notes:[{flags:{'kg-realms':{local:{scene:L}}}}]}];
   const before=structuredClone(scenes),catalog=sceneTemplateCatalog(ROOT,scenes,[]);
   assert.deepEqual(selectedScenePlan(catalog.scenes,[I]).map(n=>n.id),[R,L,I]);assert.deepEqual(scenes,before);
+});
+
+function enableFolderDocuments(){
+  game.folders=collection();
+  const original=getDocumentClass;
+  const update=async function(patch){for(const [key,value] of Object.entries(patch)){if(key==='flags.kg-realms.moduleFolder')this.flags['kg-realms'].moduleFolder=structuredClone(value);else this[key]=value;}};
+  globalThis.getDocumentClass=type=>type==='Folder'?{create:async raw=>{
+    const folder={...structuredClone(raw),id:`folder${game.folders.size}`,update};game.folders.set(folder.id,folder);return folder;
+  }}:{...original(type),create:async(...args)=>{const doc=await original(type).create(...args);if(doc)doc.update=update;return doc;}};
+}
+
+test('checklist and place cards generate the requested folders and keep interiors beside their place map',async()=>{
+  const f=await fixture();enableFolderDocuments();
+  await generateSelectedScenes(f.root,[L]);await generatePlaceScene(CHILD,templateForPlace(CHILD,{id:'inn'},I));
+  const folders=[...game.folders.values()],places=folders.find(f=>f.name==='Places'),town=folders.find(f=>f.name==='Stonebridge');
+  assert.equal(game.scenes.get(R).folder,null);assert.equal(game.scenes.get(D).folder,folders.find(f=>f.name==='Regional Maps').id);
+  assert.equal(town.folder,places.id);assert.equal(game.scenes.get(L).folder,town.id);assert.equal(game.scenes.get(I).folder,town.id);
+  await generateSelectedScenes(f.root,[I]);assert.equal(game.folders.size,3,'repeated generation reuses folders');
+  foundry.applications.api.DialogV2.wait=async()=>({includeTokens:false});
+  const copy=await regenerateSceneCopy(f.root,sceneTemplates(f.root).find(n=>n.id===L));assert.equal(copy.folder,town.id);
+});
+
+test('already imported module scenes are arranged once while unrelated scenes and later GM moves are preserved',async()=>{
+  const f=await fixture();await generateSelectedScenes(f.root,[I]);enableFolderDocuments();
+  for(const scene of game.scenes.values())scene.update=async function(patch){this.folder=patch.folder;this.flags['kg-realms'].moduleFolder=structuredClone(patch['flags.kg-realms.moduleFolder']);};
+  const unrelated=document({_id:'unrelated',name:'Unrelated',folder:'custom',flags:{}});game.scenes.set(unrelated.id,unrelated);
+  f.settings.set('sceneTemplateSetup',{[MODULE]:'never'});await promptInstalledScenes();
+  const town=[...game.folders.values()].find(f=>f.name==='Stonebridge');assert.equal(game.scenes.get(I).folder,town.id);assert.equal(game.scenes.get(R).folder,null);assert.equal(unrelated.folder,'custom');
+  game.scenes.get(I).folder='gm-choice';await promptInstalledScenes();assert.equal(game.scenes.get(I).folder,'gm-choice');assert.equal(game.folders.size,3);
+});
+
+test('older generated local presets receive their place folder without needing a moduleScene flag',async()=>{
+  const f=await fixture();enableFolderDocuments();
+  f.root.sceneTemplates.scenes.push({id:'preset:old-town',name:'Old Town',world:ROOT,sourceWorld:ROOT,kind:'local',parent:R,preset:{id:'old-town'}});
+  const scene=document({_id:'old-preset-scene',name:'Old Town',flags:{'kg-realms':{localMap:{world:ROOT,presetId:'old-town'}}}});
+  scene.update=async patch=>{scene.folder=patch.folder;scene.flags['kg-realms'].moduleFolder=patch['flags.kg-realms.moduleFolder'];};game.scenes.set(scene.id,scene);
+  await organizeGeneratedScene(f.root,scene);
+  const folder=[...game.folders.values()].find(f=>f.name==='Old Town');assert.ok(folder);assert.equal(scene.folder,folder.id);
+});
+
+test('Regional-only behavior dependencies survive combined export and missing providers block the affected map honestly',async()=>{
+  const f=await fixture({configure:({scenes})=>{scenes.get(L).regions=[{name:'River',behaviors:[{type:'example-fx.river',disabled:true}]}];}});
+  const manifest=jsonFile(f.files,`${MODULE}/module.json`);assert.ok(manifest.relationships.requires.some(r=>r.id==='example-fx'));
+  const old=globalThis.CONFIG;globalThis.CONFIG={RegionBehavior:{dataModels:{}}};
+  try{
+    await assert.rejects(()=>generateSelectedScenes(f.root,[L]),/Stonebridge.*River.*example-fx/);
+    assert.equal(game.scenes.has(L),false);assert.equal(f.settings.get('sceneTemplateSetup'),undefined);
+    CONFIG.RegionBehavior.dataModels['example-fx.river']=class{};
+    await generateSelectedScenes(f.root,[L]);assert.ok(game.scenes.has(L),'unchanged packaged scene can be retried after its provider is enabled');
+  }finally{globalThis.CONFIG=old;}
+});
+
+test('a rejected Scene.create cannot be reported as completed or mark the checklist finished',async()=>{
+  const f=await fixture(),original=getDocumentClass;
+  globalThis.getDocumentClass=type=>type==='Scene'?{create:async(raw,...options)=>raw._id===L?undefined:original(type).create(raw,...options)}:original(type);
+  foundry.applications.api.DialogV2.wait=async()=>({ids:[L],includeTokens:true});
+  await assert.rejects(()=>openSceneChecklist(f.root),/Stonebridge.*did not create/);
+  assert.equal(game.scenes.has(L),false);assert.equal(f.settings.get('sceneTemplateSetup'),undefined);assert.ok(!f.messages.some(m=>/maps? ready/.test(m)));
 });
 
 async function fixture({retiled=false,exportOptions={},configure,allowProblems=false}={}){

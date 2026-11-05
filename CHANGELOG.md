@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.94.8: companion scene folders and behavior dependencies
+
+- Keep generated realm maps at the Scenes root, put Regional maps in Regional Maps, and place each settlement and its linked interiors together in Places/<place name>. Apply the same folder rules to checklist generation, place-card generation, regenerated copies and compendium imports. Arrange already imported companion scenes once on load, including when the setup prompt was dismissed. Preserve unrelated scenes and later GM folder changes.
+- Record the modules required by authored Region behaviors in exported companion manifests, including requirements from linked Regional maps. Preserve the behavior data. Older exports report the affected scene, Region and missing provider before generation when a behavior type is not registered.
+- Count only documents Foundry actually creates when filling companion compendiums. Report partial failures and retain failed templates for retry. A rejected scene no longer marks checklist generation complete or produces a successful map count.
+
 ## 0.94.7: export history and missing document locations
 
 - Exclude Foundry document import history from export dependency scans, including history on embedded items, tokens and pages. An old source compendium recorded in `_stats` no longer blocks exporting the current content. Keep live documents and their import history unchanged. Required links in descriptions, cards and map data still block export if their targets are missing.

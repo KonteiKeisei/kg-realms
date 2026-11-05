@@ -15,6 +15,7 @@ import { TILE_SUFFIX, moduleIdFrom, moduleScript, exportWorldDefinition, ROUTES_
 import { fileRef, rewriteFiles, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
 import {collectExportFiles,exportFileProblem,exportRepairReport} from './export-sources.mjs';
 import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
+import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors} from '../scene-package-support.mjs';
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -105,7 +106,7 @@ export async function buildExport(def, { moduleId, title, version, rootScene, in
   if(!links.length)return built[0];
   const regionalMaps={schema:1,links,state:Object.fromEntries(records.slice(1).map((r,i)=>[r.def.id,{placeEdits:built[i+1].relink(r.data.regionalEdits??{}),snow:r.data.regionalSnow}]))};
   const root=built[0],world={...root.registration,regionalMaps};
-  const manifest={...root.manifest,...modulePacks(title,[...new Set(built.flatMap(b=>b.manifest.packs?.map(p=>p.type)??[]))],game.system?.id??'')};
+  const manifest={...root.manifest,relationships:{...root.manifest.relationships,requires:mergedPackageRequirements(built.map(b=>b.manifest))},...modulePacks(title,[...new Set(built.flatMap(b=>b.manifest.packs?.map(p=>p.type)??[]))],game.system?.id??'')};
   const replaced=new Set([`${moduleId}/module.json`,`${moduleId}/scripts/main.mjs`,`${moduleId}/export-report.txt`]),entries=new Map();
   for(const bundle of built)for(const entry of bundle.entries)if(!replaced.has(entry.name)){
     if(entries.has(entry.name)&&!entry.name.endsWith('/'))throw Error(`Duplicate file in Regional export: ${entry.name}`);
@@ -328,6 +329,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const kg = game.modules.get(ID);
   const minimum=kg?.version&&(Number(kg.version.split('.')[0])>0||Number(kg.version.split('.')[1])>=94)?kg.version:'0.94.0';
   const manifest={ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: String(game.release?.generation??13), maximum:'14' }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) };
+  manifest.relationships.requires.push(...sceneBehaviorRequirements(groups.get('Scene')??[]));
   const sceneTemplates=sceneTemplateCatalog(def.id,groups.get('Scene')??[],places,{...context,presets});
   const registrationOptions={snow:data.snow,markers:finalMarkers,rules:def.rules,packs:packList,localMapAssets:localMapAssets.filter(a=>!a.tileId),sceneTemplates,calendar:calendar?{file:'calendar.json',name:calendar.name,signature:crc32(json(calendar.data))}:null};
   const registration=exportWorldDefinition(moduleId,def,registrationOptions);
@@ -423,7 +425,7 @@ const IN_ONE_GO = 100;
  */
 export async function fillModulePacks() {
   for (const world of allWorlds().filter((w) => w.packs?.length)) {
-    let added = 0;
+    let added = 0,failed=false;
     for (const { name, type, file } of world.packs) {
       const pack = game.packs.get(`${world.module}.${name}`);
       try {
@@ -437,17 +439,28 @@ export async function fillModulePacks() {
         if (locked) await pack.configure({ locked: false });
         try {
           const cls = getDocumentClass(type);
-          for (let i = 0; i < short.length; i += IN_ONE_GO) await cls.createDocuments(short.slice(i, i + IN_ONE_GO), { pack: pack.collection, keepId: true });
+          const rejected=[],ready=[];
+          for(const raw of short){
+            try{if(type==='Scene')assertSceneBehaviors(raw);ready.push(raw);}
+            catch(error){rejected.push(error.message);}
+          }
+          for(let i=0;i<ready.length;i+=IN_ONE_GO){
+            const batch=ready.slice(i,i+IN_ONE_GO),created=await cls.createDocuments(batch,{pack:pack.collection,keepId:true});
+            const ids=new Set((created??[]).filter(Boolean).map(d=>d.id??d._id));
+            added+=batch.filter(d=>ids.has(d._id)).length;
+            for(const raw of batch)if(!ids.has(raw._id))rejected.push(`${raw.name??raw._id}: Foundry did not create the document. See its validation error in the console.`);
+          }
+          if(rejected.length)throw Error(rejected.join('\n'));
         } finally {
           if (locked) await pack.configure({ locked: true });
         }
-        added += short.length;
       } catch (err) {
+        failed=true;
         console.error(`${ID} | filling ${world.module}.${name}`, err);
         ui.notifications.error(`KG Realms: could not fill the ${name} compendium of ${world.title}: ${err?.message ?? err} It will try again next load.`, { permanent: true });
       }
     }
-    if (added) ui.notifications.info(`KG Realms: ${world.title}'s maps and documents are ready (${added} documents). Use Generate in the Scenes sidebar to choose maps.`, { permanent: true });
+    if(added)ui.notifications.info(failed?`KG Realms: ${world.title}: ${added} documents imported. Some documents could not be imported; see the errors above.`:`KG Realms: ${world.title}'s maps and documents are ready (${added} documents). Use Generate in the Scenes sidebar to choose maps.`,{permanent:true});
   }
 }
 
@@ -518,7 +531,9 @@ async function bringIn(world, type, id, collection, folder) {
   const pack = game.packs.get(`${world.module}.${PACK_NAMES[type]}`);
   const doc = await pack?.getDocument(id);
   if (!doc) return false;
-  await getDocumentClass(type).create({ ...doc.toObject(), ...(folder ? { folder } : {}) }, { keepId: true });
+  const data={...doc.toObject(),...(folder?{folder}:{})};if(type==='Scene')assertSceneBehaviors(data);
+  const created=await getDocumentClass(type).create(data,{keepId:true});
+  if(!created)throw Error(`${doc.name??id}: Foundry did not create the ${type}. See its validation error in the console.`);
   return true;
 }
 
@@ -541,7 +556,8 @@ export async function sceneFromModule(scene, options, userId) {
     const world = allWorlds().find((w) => w.id === from.world);
     if (!world) return;
     if(world.sceneTemplates?.schema===1){
-      const {prepareSceneDocuments,openSceneChecklist}=await import('../module-scenes.mjs');
+      const {prepareSceneDocuments,openSceneChecklist,organizeGeneratedScene}=await import('../module-scenes.mjs');
+      await organizeGeneratedScene(world,scene);
       await prepareSceneDocuments(world,scene.toObject?.()??scene);await restoreModuleRegionalMaps();
       if(!options?.kgRealmsSceneSetup&&scene.flags[ID].world)await openSceneChecklist(world);
       return;
