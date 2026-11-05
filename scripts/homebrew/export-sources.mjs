@@ -36,18 +36,22 @@ function fieldLocation(value,path){
 
 /** Keep every use of a path, even when the file itself is copied just once. */
 export function collectExportFiles(groups,files,markers,{title,world,calendar,systemId='',aliases=new Map()}={}){
-  const named=new Map(),usage=new Map(),locations=new Map();
+  const named=new Map(),usage=new Map(),locations=new Map(),documentUsage=new Map(),documentLocations=new Map();
   const sourceUuids=new Map();for(const [alias,key] of aliases){if(!sourceUuids.has(key))sourceUuids.set(key,[]);sourceUuids.get(key).push(alias);}
   const maps=(groups.get('Scene')??[]).filter(s=>s.flags?.[ID]?.world===world).map(s=>label('Scene',s));
   const scenes=sceneSources(groups,systemId,[{owners:maps,links:[...uuidsIn([...files.values()],systemId)]}]);
-  const scan=(value,folder,owner,usedBy=[],source={})=>scanFiles(value,folder,named,(raw,path)=>{
-    const site=fieldLocation(value,path),description=`${owner}: ${site.label}${usedBy.length?`\n        Referenced from: ${usedBy.join(', ')}`:''}`;
-    if(!usage.has(raw))usage.set(raw,new Set());
-    if(usage.get(raw).has(description))return;
-    usage.get(raw).add(description);
-    if(!locations.has(raw))locations.set(raw,[]);
-    locations.get(raw).push({world,owner,...source,path:[...path],field:site.field,embedded:site.embedded,value:site.value,referencedFrom:[...usedBy]});
-  });
+  const scan=(value,folder,owner,usedBy=[],source={})=>{
+    const record=(raw,path,uses,sites)=>{
+      const site=fieldLocation(value,path),description=`${owner}: ${site.label}${usedBy.length?`\n        Referenced from: ${usedBy.join(', ')}`:''}`;
+      if(!uses.has(raw))uses.set(raw,new Set());
+      if(uses.get(raw).has(description))return;
+      uses.get(raw).add(description);
+      if(!sites.has(raw))sites.set(raw,[]);
+      sites.get(raw).push({world,owner,...source,path:[...path],field:site.field,embedded:site.embedded,value:site.value,referencedFrom:[...usedBy]});
+    };
+    scanFiles(value,folder,named,(raw,path)=>record(raw,path,usage,locations));
+    uuidsIn(value,systemId,new Set(),(uuid,path)=>record(uuid,path,documentUsage,documentLocations));
+  };
   const realm=`Realm ${quoted(title??world??'Unnamed')}`;
   if(calendar)scan(calendar,()=> 'assets/calendar',`${realm}, calendar.json`,maps,{kind:'world-file',file:'calendar.json'});
   for(const [rel,value] of files){
@@ -59,12 +63,12 @@ export function collectExportFiles(groups,files,markers,{title,world,calendar,sy
     const uuid=`${type}.${doc._id}`;
     scan(doc,type==='Scene'?sceneFolder:packFolder(type),label(type,doc),[...(scenes.get(uuid)??[])],{kind:'document',documentType:type,documentId:doc._id,documentName:doc.name??null,uuid,sourceUuids:sourceUuids.get(uuid)??[]});
   }
-  return{named,usage,locations};
+  return{named,usage,locations,documentUsage,documentLocations};
 }
 
 export function exportFileProblem(raw,error,usage){
   const locations=[...(usage.get(raw)??[])];
-  return `${raw}: ${error}${locations.length?`\n      ${locations.join('\n      ')}`:''}`;
+  return `${raw}${error?`: ${error}`:''}${locations.length?`\n      ${locations.join('\n      ')}`:''}`;
 }
 
 /** Save failed field values and their locations, without embedding the module ZIP. */

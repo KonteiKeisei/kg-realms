@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.94.7: export history and missing document locations
+
+- Exclude Foundry document import history from export dependency scans, including history on embedded items, tokens and pages. An old source compendium recorded in `_stats` no longer blocks exporting the current content. Keep live documents and their import history unchanged. Required links in descriptions, cards and map data still block export if their targets are missing.
+- Include owning documents, embedded IDs, exact fields, preset files and referring scenes for missing document links in the readable repair report and its JSON download.
+
 ## 0.94.6: fresh-install setup and V14 rendering
 
 - Show Generate in the Scenes sidebar only when an enabled companion module provides a root realm. Hide it on a clean install, with only manually created realms, or with only Regional definitions. Apply the same check to the generator action. Stop local-map setup from trying an implicit Toril load without any registered realm, and replace private companion examples and developer-only setup errors with generic setup instructions.

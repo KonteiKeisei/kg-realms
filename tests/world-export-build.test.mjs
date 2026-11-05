@@ -63,6 +63,37 @@ const realData = async () => ({
 });
 setExportData(realData);
 
+test('import history on linked documents and embedded items does not become an export dependency', async () => {
+  install();
+  const history='Compendium.world.old-imports.Item.history000000000';
+  const actor=await fromUuid(`Actor.${NPC}`), raw=actor.toObject();
+  raw._stats={compendiumSource:history,duplicateSource:history};
+  raw.items[0]._stats={compendiumSource:history};
+  const withHistory={...raw,toObject:()=>structuredClone(raw)}, resolve=fromUuid,requests=[];
+  globalThis.fromUuid=async uuid=>{requests.push(uuid);return uuid===`Actor.${NPC}`?withHistory:resolve(uuid);};
+  const scene=game.scenes.get(TOWN), sceneRaw=scene.toObject();
+  sceneRaw.tokens[0]._stats={compendiumSource:history};
+  scene.toObject=()=>structuredClone(sceneRaw);
+  registerWorld({id:'t',title:'T',root:ROOT,assetBase:ROOT});
+  const built=await buildExport({id:'t',title:'T',root:ROOT,assetBase:ROOT},{moduleId:'exported-history',title:'T',version:'1.0.0',includeCardActors:true});
+  assert.equal(requests.includes(history),false,'an unavailable source compendium is not fetched');
+  assert.equal(built.problems,2,'genuine missing card image and actor still block export');
+  assert.doesNotMatch(built.report,/old-imports/);
+  const missing=built.diagnostics.flatMap(world=>world.issues).find(issue=>issue.uuid===`Actor.${LOST}`);
+  assert.ok(missing);
+  assert.ok(missing.uses.some(use=>use.file==='index.json'&&use.field==='places[0].known'));
+  assert.match(built.report,/index.json: places\[0\]\.known/);
+  const files=await readZip(built.parts), actors=JSON.parse(files.get('exported-history/data/worlds/t/packs/actors.json'));
+  assert.equal(actors[0].items[0].name,'Mug');
+  assert.ok(actors[0].biography.includes(`Compendium.exported-history.items.Item.${SWORD}`),'real item content remains included');
+  assert.deepEqual(raw._stats,{compendiumSource:history,duplicateSource:history},'live import history is unchanged');
+  setExportData(async()=>{const data=await realData();data.places[0].known='<p>Map description.</p>';return data;});
+  try {
+    const complete=await buildExport({id:'t',title:'T',root:ROOT,assetBase:ROOT},{moduleId:'exported-history',title:'T',version:'1.0.0',includeCardActors:true});
+    assert.equal(complete.problems,0,'an otherwise complete world exports despite unavailable historical source compendiums');
+  } finally { setExportData(realData); }
+});
+
 test('a companion realm exports its terrain grid and compressed local maps without source-module dependencies', async () => {
   install();
   const source='modules/example-companion',root=`${source}/data/worlds/companion-export`;

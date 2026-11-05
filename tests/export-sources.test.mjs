@@ -5,6 +5,23 @@ import {cardForExport,worldForExport,presetForExport} from '../scripts/homebrew/
 import {sceneForExport} from '../scripts/homebrew/export-plan.mjs';
 
 const A='a'.repeat(16),B='b'.repeat(16),C='c'.repeat(16);
+test('missing document links identify preset fields, scene pins, embedded items and referring scenes',()=>{
+  const dead=`Compendium.world.old-items.Item.${C}`,history=`Compendium.world.deleted.Item.${B}`;
+  const groups=new Map([
+    ['Scene',[{_id:'realm',name:'Realm',flags:{'kg-realms':{world:'test'}},tokens:[{actorId:A}],notes:[{_id:'pin',flags:{'kg-realms':{local:{name:'Shop',known:`@UUID[${dead}]{Stock}`}}}}]}]],
+    ['Actor',[{_id:A,name:'Keeper',items:[{_id:'stock',name:'Book',system:{description:{value:`@UUID[${dead}]{Stock}`}},_stats:{compendiumSource:history}}]}]]
+  ]);
+  const files=new Map([['local/city.json',{overviewKnown:`@UUID[${dead}]{Shop stock}`}]]),before=structuredClone(groups);
+  const {documentLocations,documentUsage}=collectExportFiles(groups,files,{}, {world:'test',title:'Test'});
+  const uses=documentLocations.get(dead);
+  assert.equal(uses.length,3);
+  const preset=uses.find(use=>use.kind==='world-file');assert.equal(preset.file,'local/city.json');assert.equal(preset.field,'overviewKnown');
+  const pin=uses.find(use=>use.documentType==='Scene');assert.equal(pin.documentId,'realm');assert.equal(pin.embedded[0].id,'pin');assert.equal(pin.field,'notes[0].flags.kg-realms.local.known');
+  const item=uses.find(use=>use.documentType==='Actor');assert.equal(item.embedded[0].id,'stock');assert.equal(item.field,'items[0].system.description.value');assert.deepEqual(item.referencedFrom,['Scene "Realm" [realm]']);
+  assert.equal(documentLocations.has(history),false);
+  const report=exportFileProblem(dead,null,documentUsage);assert.match(report,/local\/city.json: overviewKnown/);assert.match(report,/Item "Book" \[stock\]/);assert.ok(!report.startsWith(dead+':'));
+  assert.deepEqual(groups,before);
+});
 test('a missing file lists every scene, exact field and embedded tile identity that uses it',()=>{
   const groups=new Map([['Scene',[{_id:'one',name:'Lonelywood',tiles:[{_id:'roof',name:'Roofs',texture:{src:'maps/missing.avif'}}]},{_id:'two',name:'Speakers House',background:{src:'maps/missing.avif'}}]]]);
   const before=structuredClone(groups),{named,usage}=collectExportFiles(groups,new Map(),{},{});

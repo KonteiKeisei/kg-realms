@@ -207,7 +207,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const uuids = new Map([...aliases].map(([from, key]) => [from, newUuid(key)]));
 
   // Every file those name, and where it goes.
-  const {named,usage,locations}=collectExportFiles(groups,files,markers,{title:def.title,world:def.id,calendar,systemId,aliases});
+  const {named,usage,locations,documentUsage,documentLocations}=collectExportFiles(groups,files,markers,{title:def.title,world:def.id,calendar,systemId,aliases});
 
   const where = { origin: location.origin, prefix: (foundry.utils.getRoute("") ?? "").replace(/^\/+|\/+$/g, "") };
   const claim = context.claim ?? assetNamer(moduleId), paths = new Map(), written = context.written ?? new Set(), missing = [], external = [], fileIssues=[];
@@ -335,13 +335,13 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, registrationOptions)));
 
   const report = exportReport({
-    title, version, moduleId, calendar, skippedTokens, scenesMissing, gone, missing, external, options,
+    title, version, moduleId, calendar, skippedTokens, scenesMissing, gone:gone.map(uuid=>exportFileProblem(uuid,null,documentUsage)), missing, external, options,
     counts: { "places": places.length, "roads": routes.features.length, "rivers and shores": Object.keys(data.waterways).length, "encounters": Object.keys(data.encounters).length, "scenes": counts.scenes, "actors": counts.actors, "journals": counts.journals, "items": counts.items, "tables": counts.tables, "macros": counts.macros, "playlists": counts.playlists, "card decks": counts.cards, "pictures and sounds": written.size, "custom markers": Object.keys(markers).length, "map tiles": tiles.length }
   });
   await add(`${moduleId}/export-report.txt`, encoder.encode(report));
   if (!zipCanBuild(entries)) throw Error('This realm exceeds the browser archive limits.');
   onStep("Building the zip", 0.97);
-  const diagnostics=[{world:{id:def.id,title:def.title,module:def.module??null},issues:[...fileIssues,...scenesMissing.map(id=>({kind:'missing-scene',uuid:`Scene.${id}`})),...gone.map(uuid=>({kind:'missing-document',uuid}))]}];
+  const diagnostics=[{world:{id:def.id,title:def.title,module:def.module??null},issues:[...fileIssues,...scenesMissing.map(id=>({kind:'missing-scene',uuid:`Scene.${id}`})),...gone.map(uuid=>({kind:'missing-document',uuid,uses:documentLocations.get(uuid)??[]}))]}];
   return { name: `${moduleId} v${version}.zip`, parts: zipParts(entries), report, problems: missing.length + external.length + scenesMissing.length + gone.length,entries,manifest,registration,relink,diagnostics };
 }
 

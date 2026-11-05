@@ -13,8 +13,8 @@ const IS_AUDIO = new RegExp(`\\.(${AUDIO})(\\?|$)`, "i");
 const looksLikeFile = (s) => HAS_EXT.test(s) && !/[<>\n"]/.test(s);
 /** A file named inside card text: <img src>, <a href>, <video poster>, url(...). */
 const IN_HTML = /(?:\b(?:src|href|poster)\s*=\s*)(["'])(.*?)\1|url\(\s*(&quot;|&#39;|["'])?(.*?)\3?\s*\)/gi;
-/** Fields that name a file without using it (what an image used to be; a page on the web). */
-const NOT_USED = new Set(["originalImg", "originalSrc", "url", "descrSource", "sourceReference"]);
+/** Former asset locations and document import history are not content dependencies. */
+const NOT_USED = new Set(["originalImg", "originalSrc", "url", "descrSource", "sourceReference", "_stats"]);
 
 const decode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
@@ -176,8 +176,8 @@ export function uuidParts(uuid) { const p = uuid.split("."); return { type: p.at
 export const inSystem = (uuid, systemId) => uuid.startsWith(`Compendium.${systemId}.`);
 
 /** Every document a value links to, on cards, in card text, or in any other field. */
-export function uuidsIn(value, systemId = "", found = new Set()) {
-  walk(value, (s) => { for (const m of s.matchAll(UUID)) if (!inSystem(m[0], systemId)) found.add(m[0]); });
+export function uuidsIn(value, systemId = "", found = new Set(), onUse = null) {
+  walk(value, (s,path) => { for (const m of s.matchAll(UUID)) if (!inSystem(m[0], systemId)) { found.add(m[0]); onUse?.(m[0],path); } });
   return found;
 }
 /** The value with each link in `map` (old -> new) changed, wherever it stands. */
