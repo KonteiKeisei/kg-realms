@@ -13,7 +13,7 @@ import { onCanvas, RightClick } from "./canvas-input.mjs";
 import {EditorFrame} from './editor-frame.mjs';
 import { nearestOnLine, lineMiles, editsBetween, simplifyLine, smoothLine, joinLines, ROUTE_KINDS } from "./routes.mjs";
 import { lonLatToSource, sourceToLonLat, SOURCE_MAP } from "./source-map.mjs";
-import { RIVER_HAZARDS, isRiverHazard, isHazard, hazardSubtype, hazardDefaults, normalizeEncounter, encounterFile, readEncounterFile } from "./river-hazards.mjs";
+import { RIVER_HAZARDS, HAZARD_TYPES, isRiverHazard, isNavalHazard, isHazard, hazardSubtype, hazardDefaults, normalizeEncounter, encounterFile, readEncounterFile } from "./river-hazards.mjs";
 
 /** How far (sheet px) a node may lie from the simplified line: about half a mile. */
 const SIMPLIFY_PX = 1.5;
@@ -55,7 +55,7 @@ export class RoadEditor {
   status() {
     if (this.joining) return { hint: "Click the road or trail to join onto this one", esc: "cancels joining", tip: "Click a road to join it", crosshair: true };
     if (this.draft) return { hint: `Drawing a new ${this.draft.kind} · click to add nodes · Enter or double-click finishes`, esc: `cancels the new ${this.draft.kind}`, tip: "Click to add a node · Enter finishes", crosshair: true };
-    if (this.placing) return { hint: RIVER_HAZARDS[this.placingKind]?`Click a river to place ${RIVER_HAZARDS[this.placingKind].toLowerCase()}`:"Click the map to place it; it snaps onto a road nearby", esc: "cancels placing", tip: "Click to place the encounter", crosshair: true };
+    if (this.placing) return { hint: this.placingKind === "naval" ? "Click the map to place a naval hazard (sea travel only)" : RIVER_HAZARDS[this.placingKind]?`Click a river to place ${RIVER_HAZARDS[this.placingKind].toLowerCase()}`:"Click the map to place it; it snaps onto a road nearby", esc: "cancels placing", tip: "Click to place the encounter", crosshair: true };
     if (this.encounter) {
       const e = this.getEncounters()[this.encounter];
       return { hint: `${e?.name ?? "Encounter"} · Del deletes it`, esc: "lets go of it", tip: "" };
@@ -494,7 +494,7 @@ export class RoadEditor {
   async #placeEncounter(g) {
     // Snap onto the nearest route close by, so it sits on the way.
     let at = this.getLayer().fromScreen(...g);
-    const hit = this.#routeAt(g);
+    const hit = this.placingKind === "naval" ? null : this.#routeAt(g);
     if (hit) at = this.getLayer().fromScreen(...hit.hit.point);
     let river=null;
     if(RIVER_HAZARDS[this.placingKind]){
@@ -504,7 +504,7 @@ export class RoadEditor {
     }
     const id = `enc-${foundry.utils.randomID()}`;
     this.placing = false;
-    await this.#commitEnc((w) => ({ ...w, [id]: { lon: at[0], lat: at[1], ...(river?{...hazardDefaults(this.placingKind),river}:{name:"Encounter",dc:13,radius:3,notes:""}) } }));
+    await this.#commitEnc((w) => ({ ...w, [id]: { lon: at[0], lat: at[1], ...(HAZARD_TYPES[this.placingKind]?{...hazardDefaults(this.placingKind),...(river?{river}:{})}:{name:"Encounter",dc:13,radius:3,notes:""}) } }));
     this.selectEncounter(id);
   }
 
@@ -566,7 +566,7 @@ export class RoadEditor {
       const groups=[...new Set(entries.map(([,e])=>String(e.group??"").trim()))].sort((a,b)=>a.localeCompare(b));
       return `<details data-enc-open="${key}" ${this.encOpen.has(key)||selected?"open":""}><summary>${kind==="hazard"?"Hazards":"Encounters"}<small>${entries.length}</small></summary>${groups.map(group=>{
         const rows=entries.filter(([,e])=>String(e.group??"").trim()===group).sort((a,b)=>(a[1].name??"").localeCompare(b[1].name??"")),gkey=`${kind}|${group}`;
-        return `<details class="kgr-enc-group" data-enc-open="${esc(gkey)}" ${this.encOpen.has(gkey)||rows.some(([id])=>id===this.encounter)||!group?"open":""}><summary><span>${esc(group||"Ungrouped")}</span><small>${rows.length}</small>${group?`<button type="button" data-act="enc-group-rename" data-group="${esc(group)}" aria-label="Rename group"><i class="fa-solid fa-pen"></i></button>`:""}</summary>${rows.map(([id,e])=>`<div class="kgr-enc-list-row ${id===this.encounter?"on":""}"><button type="button" data-act="enc-select" data-id="${esc(id)}"><span>${esc(e.name||"Encounter")}</span><small>${isHazard(e)?esc(RIVER_HAZARDS[hazardSubtype(e)]??hazardSubtype(e)??"Hazard"):"Encounter"}${isHazard(e)?` / ${e.visibility==="discovered"?"Discovered":"Hidden"}`:""}</small></button><button type="button" data-act="enc-locate" data-id="${esc(id)}" aria-label="Locate ${esc(e.name||"encounter")}"><i class="fa-solid fa-location-crosshairs"></i></button></div>`).join("")}</details>`;
+        return `<details class="kgr-enc-group" data-enc-open="${esc(gkey)}" ${this.encOpen.has(gkey)||rows.some(([id])=>id===this.encounter)||!group?"open":""}><summary><span>${esc(group||"Ungrouped")}</span><small>${rows.length}</small>${group?`<button type="button" data-act="enc-group-rename" data-group="${esc(group)}" aria-label="Rename group"><i class="fa-solid fa-pen"></i></button>`:""}</summary>${rows.map(([id,e])=>`<div class="kgr-enc-list-row ${id===this.encounter?"on":""}"><button type="button" data-act="enc-select" data-id="${esc(id)}"><span>${esc(e.name||"Encounter")}</span><small>${isHazard(e)?esc(HAZARD_TYPES[hazardSubtype(e)]??hazardSubtype(e)??"Hazard"):"Encounter"}${isHazard(e)?` / ${e.visibility==="discovered"?"Discovered":"Hidden"}`:""}</small></button><button type="button" data-act="enc-locate" data-id="${esc(id)}" aria-label="Locate ${esc(e.name||"encounter")}"><i class="fa-solid fa-location-crosshairs"></i></button></div>`).join("")}</details>`;
       }).join("")}</details>`;
     }).join("")}</div>`;
   }
@@ -631,14 +631,16 @@ export class RoadEditor {
     if (this.joining) {
       body = `<p class="kgr-sel node"><i class="fa-solid fa-link"></i> Click the road or trail to join to this one. It becomes part of this road, with this road's name. Esc cancels.</p><div class="row"><button data-act="join-cancel">Cancel</button></div>`;
     } else if (this.placing) {
-      body = `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> ${RIVER_HAZARDS[this.placingKind]?`Click a river to place ${RIVER_HAZARDS[this.placingKind].toLowerCase()}. It stays on the map and is hidden until discovered.`:"Click the map to place an encounter (it snaps onto a road nearby)."} Esc cancels.</p>`;
+      body = `<p class="kgr-sel node"><i class="fa-solid fa-location-crosshairs"></i> ${this.placingKind === "naval" ? "Click the map to place a Naval Hazard. Only sea travel encounters it; it stays hidden until discovered." : RIVER_HAZARDS[this.placingKind]?`Click a river to place ${RIVER_HAZARDS[this.placingKind].toLowerCase()}. It stays on the map and is hidden until discovered.`:"Click the map to place an encounter (it snaps onto a road nearby)."} Esc cancels.</p>`;
     } else if (enc) {
       body = `<div class="kgr-enc-box"><span class="cap">Selected encounter</span>
         <div class="row"><label>Name <input type="text" name="enc-name" value="${esc(enc.name)}"></label></div>
         <label>Encounter type<select name="enc-kind"><option value="encounter" ${isHazard(enc)?"":"selected"}>Encounter</option><option value="hazard" ${isHazard(enc)?"selected":""}>Hazard</option></select></label>
-        ${isHazard(enc)?`<label>Hazard subtype<select name="enc-subtype">${Object.entries(RIVER_HAZARDS).map(([id,name])=>`<option value="${id}" ${id===hazardSubtype(enc)?"selected":""}>${name}</option>`).join("")}</select></label>`:""}
+        ${isHazard(enc)?`<label>Hazard subtype<select name="enc-subtype">${Object.entries(HAZARD_TYPES).map(([id,name])=>`<option value="${id}" ${id===hazardSubtype(enc)?"selected":""}>${name}</option>`).join("")}</select></label>`:""}
         <label>Group<input name="enc-group" value="${esc(enc.group??"")}" list="kgr-enc-groups" placeholder="Ungrouped"></label><datalist id="kgr-enc-groups">${[...new Set(Object.values(this.getEncounters()).map(e=>e.group).filter(Boolean))].map(g=>`<option value="${esc(g)}"></option>`).join("")}</datalist>
-        ${isRiverHazard(enc)?`<p class="hint">Permanent ${RIVER_HAZARDS[hazardSubtype(enc)].toLowerCase()}. Only journeys following its river encounter it.</p><label>River<select name="enc-river">${Object.entries(this.getWaterways?.()??{}).filter(([,w])=>w.kind==="river").map(([id,w])=>`<option value="${esc(id)}" ${id===enc.river?"selected":""}>${esc(w.name||"Unnamed river")}</option>`).join("")}</select></label><label><input type="checkbox" name="enc-discover" ${enc.autoDiscover!==false?"checked":""}> Discover on first encounter</label><label>Visibility<select name="enc-visibility"><option value="hidden" ${(enc.visibility??"hidden")==="hidden"?"selected":""}>Hidden</option><option value="discovered" ${enc.visibility==="discovered"?"selected":""}>Discovered</option></select></label>`:""}
+        ${isNavalHazard(enc)?'<p class="hint">Only sea travel encounters this hazard. Land, flying and river travel ignore it.</p>':""}
+        ${isRiverHazard(enc)?`<p class="hint">Permanent ${RIVER_HAZARDS[hazardSubtype(enc)].toLowerCase()}. Only journeys following its river encounter it.</p><label>River<select name="enc-river">${Object.entries(this.getWaterways?.()??{}).filter(([,w])=>w.kind==="river").map(([id,w])=>`<option value="${esc(id)}" ${id===enc.river?"selected":""}>${esc(w.name||"Unnamed river")}</option>`).join("")}</select></label>`:""}
+        ${isHazard(enc)?`<label><input type="checkbox" name="enc-discover" ${enc.autoDiscover!==false?"checked":""}> Discover on first encounter</label><label>Visibility<select name="enc-visibility"><option value="hidden" ${(enc.visibility??"hidden")==="hidden"?"selected":""}>Hidden</option><option value="discovered" ${enc.visibility==="discovered"?"selected":""}>Discovered</option></select></label>`:""}
         <div class="kgr-enc-fields">
           <label for="kgr-enc-dc">Perception DC</label><span class="kgr-enc-in"><input id="kgr-enc-dc" type="number" name="enc-dc" min="0" max="30" value="${enc.dc ?? ""}" placeholder="none"><small>to notice it first</small></span>
           <label for="kgr-enc-radius">Range</label><span class="kgr-enc-in"><input id="kgr-enc-radius" type="number" name="enc-radius" min="0.5" max="50" step="0.5" value="${enc.radius ?? 3}"><small>miles from the route</small></span>
@@ -646,7 +648,7 @@ export class RoadEditor {
         </div>
         <div class="row"><button data-act="enc-card" class="grow"><i class="fa-solid fa-id-card"></i> Open card</button><button data-act="enc-delete" class="danger"><i class="fa-solid fa-trash"></i> Delete</button><button data-act="deselect">Done</button></div></div>`;
     } else if (this.focus === "encounters") {
-      body = `<p class="hint">Click an encounter on the map to edit it, or New encounter to place one. Every journey that passes within its reach meets it; fast pace takes 5 off passive Perception.</p>`;
+      body = `<p class="hint">Click an encounter on the map to edit it, or New encounter to place one. Encounters apply within their reach. Naval Hazards require sea travel; river hazards require travel along their river. Fast pace takes 5 off passive Perception.</p>`;
     } else if (this.draft) {
       body = `<p class="hint">Drawing a new ${this.draft.kind}. Click to add nodes; a click near a place or another route snaps to it. Double-click, right-click or Enter finishes; Esc cancels.</p>
         <div class="row"><button data-act="finish"><i class="fa-solid fa-check"></i> Finish</button><button data-act="cancel"><i class="fa-solid fa-xmark"></i> Cancel</button></div>`;
@@ -670,7 +672,7 @@ export class RoadEditor {
     const tools = roadsTab
       ? `<div class="row kgr-tools"><button data-act="new-road"><i class="fa-solid fa-plus"></i> New road</button><button data-act="new-trail"><i class="fa-solid fa-plus"></i> New trail</button><span class="sp"></span>
           <button data-act="undo" title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo</button></div>`
-      : `<div class="row kgr-tools"><button data-act="new-enc" class="primary"><i class="fa-solid fa-plus"></i> Encounter</button><button data-act="new-hazard"><i class="fa-solid fa-plus"></i> Hazard</button><select name="new-hazard-subtype" aria-label="New hazard subtype">${Object.entries(RIVER_HAZARDS).map(([k,v])=>`<option value="${k}" ${k===(this.newHazard??"rapids")?"selected":""}>${v}</option>`).join("")}</select></div>`;
+      : `<div class="row kgr-tools"><button data-act="new-enc" class="primary"><i class="fa-solid fa-plus"></i> Encounter</button><button data-act="new-hazard"><i class="fa-solid fa-plus"></i> Hazard</button><select name="new-hazard-subtype" aria-label="New hazard subtype">${Object.entries(HAZARD_TYPES).map(([k,v])=>`<option value="${k}" ${k===(this.newHazard??"rapids")?"selected":""}>${v}</option>`).join("")}</select></div>`;
     const files = roadsTab ? `<div class="kgr-file-row"><button data-act="simplify-all" title="Take out excess nodes on every road and trail"><i class="fa-solid fa-wand-magic-sparkles"></i> Simplify every road</button>
       <button data-act="export" title="Save every road and trail to a file"><i class="fa-solid fa-file-export"></i> Export roads</button><button data-act="import" title="Load roads and trails from a file"><i class="fa-solid fa-file-import"></i> Import roads</button></div>` : "";
     this.panel.innerHTML = `${tools}${body}${restore}${roadsTab && !this.draft && !this.joining ? this.#roadList() : ""}${files}${roadsTab?"":this.encounterList()+'<div class="kgr-file-row"><button data-act="enc-export">Export encounters</button><button data-act="enc-import">Import encounters</button></div>'}`;
@@ -708,7 +710,7 @@ export class RoadEditor {
     if (this.encounter) {
       if(t.name==="enc-group")this.#saveEncounter({group:t.value.trim().slice(0,120)});
       if(t.name==="enc-kind")this.#saveEncounter(t.value==="hazard"?{kind:"hazard",subtype:"rapids",permanent:true,autoDiscover:true,visibility:"hidden"}:{kind:"encounter",subtype:null,river:null,permanent:false});
-      if(t.name==="enc-subtype"&&RIVER_HAZARDS[t.value])this.#saveEncounter({kind:"hazard",subtype:t.value,permanent:true});
+      if(t.name==="enc-subtype"&&HAZARD_TYPES[t.value])this.#saveEncounter({kind:"hazard",subtype:t.value,permanent:true,...(t.value==="naval"?{river:null}:{})});
       if(t.name==="enc-river")this.#saveEncounter({river:t.value});
       if(t.name==="enc-discover")this.#saveEncounter({autoDiscover:t.checked});
       if(t.name==="enc-visibility")this.#saveEncounter({visibility:t.value==="discovered"?"discovered":"hidden"});

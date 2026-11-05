@@ -9,7 +9,7 @@ import { Archive } from "./pmtiles.mjs";
 import { buildStyle } from "./realm-style.mjs";
 import { TerrainDetail } from "./terrain/detail.mjs";
 import { SatelliteDetail } from "./terrain/satellite-detail.mjs";
-import { isRiverHazard, hazardSubtype, hazardVisible } from "./river-hazards.mjs";
+import { isRiverHazard, isHazard, hazardSubtype, hazardVisible } from "./river-hazards.mjs";
 import {journeyEncounterRef} from './encounter-map.mjs';
 import { riverLabelFeatures, riverLabelLayer } from "./river-labels.mjs";
 
@@ -26,6 +26,18 @@ const PROTOCOL = "kgrealms";
  */
 const TOP_SOURCES = new Set(["journey", "journey-camps", "encounters", "flash", "area-edit", "area-edit-nodes"]);
 export const onTop = (layer) => layer.type === "symbol" || TOP_SOURCES.has(layer.source);
+
+/** Animate only the canvas that owns a glow. Every style write can redraw and upload that canvas. */
+export function updateMapGlows(maps, {night, gold, phase}) {
+  if ((!night && !gold) || globalThis.document?.hidden) return;
+  const opacity = 0.25 + 0.45 * (Math.sin(phase / 2.6 * 2 * Math.PI) + 1) / 2;
+  for (const map of maps) {
+    if (!map.isStyleLoaded()) continue;
+    const shown = id => map.getLayer(id) && map.getLayoutProperty?.(id, "visibility") !== "none";
+    if (night && shown("night-glow")) map.setGlobalStateProperty("phase", phase);
+    if (gold && shown("place-glow")) map.setPaintProperty("place-glow", "circle-opacity", opacity);
+  }
+}
 
 /** Open world archives by key ("toril-surface"), read by the MapLibre protocol below. */
 const archives = new Map();
@@ -112,7 +124,8 @@ export class RealmLayer {
   setEncounters(map) {
     this.encounters = Object.fromEntries(Object.entries(map??{}).filter(([,e])=>hazardVisible(e,!!globalThis.game?.user?.isGM)));
     this.hasRiverHazards=Object.values(this.encounters).some(isRiverHazard);
-    this.#apply("encounters", (map) => {map.setGlobalStateProperty?.('gm',!!globalThis.game?.user?.isGM);map.getSource("encounters")?.setData({ type: "FeatureCollection", features: Object.entries(this.encounters).filter(([,e])=>hazardVisible(e,!!globalThis.game?.user?.isGM)).map(([id, e]) => ({ type: "Feature", properties: { id, name: e.name, kind:hazardSubtype(e)??e.kind??"encounter",hazard:isRiverHazard(e),public:hazardVisible(e,false) }, geometry: { type: "Point", coordinates: [e.lon, e.lat] } })) });});
+    this.hasHazards=Object.values(this.encounters).some(isHazard);
+    this.#apply("encounters", (map) => {map.setGlobalStateProperty?.('gm',!!globalThis.game?.user?.isGM);map.getSource("encounters")?.setData({ type: "FeatureCollection", features: Object.entries(this.encounters).filter(([,e])=>hazardVisible(e,!!globalThis.game?.user?.isGM)).map(([id, e]) => ({ type: "Feature", properties: { id, name: e.name, kind:hazardSubtype(e)??e.kind??"encounter",hazard:isHazard(e),public:hazardVisible(e,false) }, geometry: { type: "Point", coordinates: [e.lon, e.lat] } })) });});
   }
 
   /** Named biome polygons are an editor overlay; location inference does not depend on drawing. */
@@ -218,6 +231,7 @@ export class RealmLayer {
 
   setPlaces(geojson) {
     this.places = geojson;
+    this.hasGoldPlaces = !!geojson?.features.some(f => f.properties.gold);
     this.symbols?.preload(geojson);
     this.#whenLoaded((map) => {
       // The GM sees hidden places, faded, so their cards can be opened (players never get them).
@@ -334,10 +348,10 @@ export class RealmLayer {
     // Rendered features under the pointer, from whichever map draws each layer.
     const query = (ids) => this.#maps().flatMap((m) => { const layers = ids.filter((id) => m.getLayer(id)); return layers.length ? m.queryRenderedFeatures(box, { layers }) : []; });
     const hazardLayers=["encounter-marks","encounter-labels"];
-    // Encounters: river hazards for everyone who can see them; for the GM, every encounter marker too.
+    // Encounters: discovered hazards for everyone who can see them; for the GM, every encounter marker too.
     const gm=!!globalThis.game?.user?.isGM;
     if(gm){const hit=query(['journey-camps','journey-stop-names']).find(f=>f.properties.kind==='encounter'&&journeyEncounterRef(f.properties.cardKey));if(hit)return hit.properties.cardKey;}
-    if(this.hasRiverHazards||gm){const hits=query(hazardLayers);const hazard=hits.find(f=>f.properties.hazard===true);if(hazard)return`river-hazard:${hazard.properties.id}`;if(gm&&hits.length)return`encounter:${hits[0].properties.id}`;}
+    if(this.hasHazards||this.hasRiverHazards||gm){const hits=query(hazardLayers);const hazard=hits.find(f=>f.properties.hazard===true);if(hazard)return`river-hazard:${hazard.properties.id}`;if(gm&&hits.length)return`encounter:${hits[0].properties.id}`;}
     // Transparent settlement/site circles cover every catalogued place, even
     // when its symbol was hidden by zoom or a label collision. They remain in
     // the style for editor use, but must not open hover cards.
@@ -382,16 +396,8 @@ export class RealmLayer {
   /** A slow breathing glow on the points of interest, only while some glow. */
   #startPulse() {
     const start = performance.now();
-    // Night lights flicker: advance the style's phase about ten times a second. Only while the lights
-    // are in the style: each step redraws the whole map.
-    this.flicker = setInterval(() => {
-      if (this.options?.look !== "night" || !this.#maps().some((m) => m.isStyleLoaded() && m.getLayer("night-glow"))) return;
-      for (const m of this.#maps()) if (m.isStyleLoaded()) m.setGlobalStateProperty("phase", (performance.now() - start) / 1000);
-    }, 100);
     this.pulse = setInterval(() => {
-      if (!this.places?.features.some((f) => f.properties.gold)) return;
-      const t = (Math.sin(((performance.now() - start) / 2600) * 2 * Math.PI) + 1) / 2;
-      for (const m of this.#maps()) if (m.isStyleLoaded() && m.getLayer("place-glow")) m.setPaintProperty("place-glow", "circle-opacity", 0.25 + 0.45 * t);
+      updateMapGlows(this.#maps(), {night:this.options?.look === "night",gold:this.hasGoldPlaces,phase:(performance.now()-start)/1000});
     }, 100);
   }
 
@@ -530,7 +536,6 @@ export class RealmLayer {
     this.generation++;
     this.ready = false;
     clearInterval(this.pulse);
-    clearInterval(this.flicker);
     clearInterval(this.flashTimer);
     clearTimeout(this.settleTimer);
     this.pulse = this.flashTimer = null;
@@ -554,6 +559,7 @@ export class RealmLayer {
     this.labelRoot?.destroy({ children: true });
     this.labelRoot = null;
     this.camera = null;
+    this.lastView = null;
   }
 
   /** Point MapLibre where Foundry is looking. Cheap: call on every canvasPan. */
@@ -561,6 +567,8 @@ export class RealmLayer {
     if (!this.ready) return;
     const view = screenInScene();
     if (this.#sizeElement()) for (const m of this.#maps()) {m.setPixelRatio(this.#canvasSizing().pixelRatio);m.resize();}
+    if (this.lastView && ["cx", "cy", "scale", "width", "height"].every(key => view[key] === this.lastView[key])) return;
+    this.lastView = view;
     const center = sceneToLatLon(this.frame, { x: view.cx, y: view.cy });
     // MapLibre zoom z draws the world 512 * 2^z CSS pixels wide.
     const zoom = Math.log2((view.scale * this.frame.k) / (TILE_SIZE * 2));

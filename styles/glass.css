@@ -214,6 +214,10 @@ body .kgr-camp-scene :is(.cs-group, .cs-roll, .cs-check .camp-check, .cs-summary
 body .kgr-camp-scene .cs-die { background: var(--kgr-surface-2); color: var(--kgr-accent); border-color: var(--kgr-line-3); }
 
 /* Place cards, trade and reading/editing windows use the same typography. */
+/* Artwork badges need an opaque surface; theme text cannot rely on the picture behind it. */
+body .kgr-card .art .badge { color: var(--kgr-text); background: var(--kgr-surface-2); border-color: var(--kgr-line-3); font-weight: 700; }
+body .kgr-card .art .badge.gold { color: var(--kgr-gold-text); }
+body .kgr-card .art .badge i { color: inherit; }
 body .kgr-place-card .kgc-title { font-family: inherit; font-size: 25px; font-variant: normal; }
 body .kgr-place-card .kgc-sect h4 { color: var(--kgr-accent); }
 body .kgr-place-card .kgc-tabs button { border-radius: 4px; background: var(--kgr-surface-2); }

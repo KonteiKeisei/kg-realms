@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.95.3: Naval Hazards, map animation work and readable card chips
+
+- Add Naval Hazard to the Hazard subtype selectors in the map editor and encounter cards. Place it anywhere on the sea without snapping to roads or requiring a river. Retain perception, reach, linked cards, discovery and visibility controls.
+- Trigger Naval Hazards only during sea, shipping-lane and trade-wind travel. Ignore land, flying, river travel and camp encounters. Check the actual sea intervals, including short crossings and separate return passages, using Regional scale where applicable. Keep the daily schedule and journey encounter stops consistent.
+- Include permanent Naval Hazards in encounter files and realm exports even when current Travel is excluded. Keep hidden hazards private until discovered.
+- Update night flicker only on a map canvas containing its glow layer. Combine glow timers, skip hidden browser tabs and avoid repeated MapLibre camera updates when the view is unchanged. Limit settlement sprite flicker updates to 10 per second, skip offscreen light artwork and avoid resizing unchanged sprites.
+- Use an opaque theme surface and matching text for the category chip over hover-card artwork. Preserve the GM-only border and warning. Check ordinary and highlighted chips in all eight themes against light and dark Foundry themes.
+
 ## 0.95.2: route marker proportions and dropdown colours
 
 - Give route-number badges equal 24 px width and height, with matching grid columns. Keep the starting-party badge circular and numbered stops square with rounded corners.

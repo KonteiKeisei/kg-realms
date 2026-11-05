@@ -79,7 +79,7 @@ import { SnowTab } from "./ui-snow.mjs";
 import { WaterwayEditor } from "./ui-waterways.mjs";
 import { BiomeEditor } from "./ui-biomes.mjs";
 import { biomeLookup, biomeTypes, biomeFlag, onlyBiomeFlagChanged, mergeBiomeConfig, biomeEdits } from "./biomes.mjs";
-import { hazardVisible, isRiverHazard, isHazard, hazardSubtype } from "./river-hazards.mjs";
+import { hazardVisible, isRiverHazard, isHazard, hazardSubtype, HAZARD_TYPES } from "./river-hazards.mjs";
 import { EncounterBox } from "./ui-encounter-box.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
 import { seasonOf, buildSea, automaticPort, terrainHarbours } from "./waterways.mjs";
@@ -289,7 +289,7 @@ function refreshPlaces() {
   nightLights.draw(current.places, layer.frame);
   pins.refresh();
 }
-const hazardPlaces = world => Object.entries(encountersOf(world)).filter(([,e])=>isHazard(e)&&hazardVisible(e,game.user.isGM)).map(([id,e])=>({...e,id:`river-hazard:${id}`,class:hazardSubtype(e)==="rapids"?"Rapids":hazardSubtype(e)==="waterfall"?"Waterfall":"Hazard",kind:"natural",hidden:false}));
+const hazardPlaces = world => Object.entries(encountersOf(world)).filter(([,e])=>isHazard(e)&&hazardVisible(e,game.user.isGM)).map(([id,e])=>({...e,id:`river-hazard:${id}`,class:HAZARD_TYPES[hazardSubtype(e)]??"Hazard",kind:"natural",hidden:false}));
 // An encounter marker the GM hovers (realm-layer.mjs placeAt): its card, as a place's.
 const encounterPlace = id => { if (!game.user.isGM || !current) return null; const e = encountersOf(current.region.world)[id.slice(10)]; return e ? encounterPreview(e,id,{kind:"encounter",world:current.region.world,id:id.slice(10)}) : null; };
 const getPlace = id => id?.startsWith("journey-encounter:") ? journeyEncounterPreview(id) : id?.startsWith("river-hazard:") ? hazardPlaces(current?.region.world).find(p=>p.id===id)??null : id?.startsWith("encounter:") ? encounterPlace(id) : current?.places.find(p=>p.id===id)??null;

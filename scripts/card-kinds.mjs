@@ -11,7 +11,7 @@ import { CATEGORIES, VISIBILITY,localPlaceType,changeLocalPlaceType } from "./lo
 import { localMapOf, localOf } from "./local-maps.mjs";
 import { asHtml, asSecret } from "./place-card.mjs";
 import { iconFor } from "./ui-card.mjs";
-import { isHazard, hazardSubtype, normalizeEncounter, RIVER_HAZARDS, hazardVisible } from "./river-hazards.mjs";
+import { isHazard, hazardSubtype, normalizeEncounter, HAZARD_TYPES, hazardVisible } from "./river-hazards.mjs";
 import { openTradeEditor } from "./ui-trade.mjs";
 import {ICON_PACKS,resolvedIconPack,iconPackOverride,iconPackOptions} from './local-icon-packs.mjs';
 
@@ -220,19 +220,19 @@ export function registerKinds(cards, deps) {
       const gmOnly=privateAlways||!isHazard(e);
       if(gmOnly&&!game.user.isGM)return {gmOnly:true,visibility:'hidden'};
       const known = e.known ?? `${asHtml(e.notes)}${legacyText(e.journal)}`;
-      const hazard=isHazard(e),subtype=hazardSubtype(e),hazardName=RIVER_HAZARDS[subtype]??subtype??"Hazard";
+      const hazard=isHazard(e),subtype=hazardSubtype(e),hazardName=HAZARD_TYPES[subtype]??subtype??"Hazard";
       // An encounter met in camp (a journey's own, set on a rest): when in the rest it comes.
       const camp = e.rest ? [["During the rest", `${e.rest.at ?? 0} h after camp is made`]] : [["Range", `${e.radius ?? 3} mi from the route`]];
       return {
         gmOnly,
         name: e.name ?? "Encounter", type: hazard?"Hazard":"Encounter", icon: hazard?"fa-water":"fa-triangle-exclamation", subtitle: hazard?`${hazardName}: permanent hazard`:e.rest ? "In camp, on this journey" : ref.kind === "journey" ? "On this journey" : "Placed in the map editor",
         img: e.img ?? "", known, gmNotes: e.gmNotes ?? "", rumours: "",
-        // Ordinary encounters stay with the GM; discovered river hazards have public cards.
+        // Ordinary encounters stay with the GM; discovered hazards have public cards.
         visibility: game.user.isGM ? "discovered" : hazard?(e.visibility??"hidden"):"hidden",
         actor: null, actors: actorsOf(e), images: e.images ?? [], journal: e.pinned ?? null, locate: true, enter: enterFor(e.scene, e.name),
         rows: !game.user.isGM&&hazard?[["Hazard",hazardName]]:[["Perception DC", e.dc ?? "none"], ["Noticed by", e.perception === "passive" ? "Passive Perception only" : "Wisdom (Perception) checks"], ...camp], canDelete: true,
         form: { name: e.name ?? "Encounter", group:e.group??"",subtype:subtype??"",visibility:e.visibility??"hidden",autoDiscover:e.autoDiscover!==false,dc: e.dc ?? "", radius: e.radius ?? 3, perception: e.perception ?? "active", img: e.img ?? "", known, gmNotes: e.gmNotes ?? "", scene: e.scene ?? "", actors: actorsOf(e), pinned: e.pinned ?? "", images: e.images ?? [], restAt: e.rest?.at ?? "" },
-        fields: [ART, TEXT("name", "Name", { wide: true }), TEXT("group","Encounter group"),...(hazard?[{name:"subtype",label:"Hazard subtype",type:"select",group:"identity",options:Object.entries(RIVER_HAZARDS)}]:[]), { name: "dc", label: "Perception DC (fast pace -5)", type: "number", group: "identity", attrs: 'min="0" max="30"' },
+        fields: [ART, TEXT("name", "Name", { wide: true }), TEXT("group","Encounter group"),...(hazard?[{name:"subtype",label:"Hazard subtype",type:"select",group:"identity",options:Object.entries(HAZARD_TYPES)}]:[]), { name: "dc", label: "Perception DC (fast pace -5)", type: "number", group: "identity", attrs: 'min="0" max="30"' },
           e.rest ? { name: "restAt", label: "Hours after camp is made (if its watch never comes; the watch is chosen in the camp panel)", type: "number", group: "identity", attrs: 'min="0" max="72" step="0.5"' }
             : { name: "radius", label: "Range (miles from the route)", type: "number", group: "identity", attrs: 'min="0.5" max="50" step="0.5"' },
           { name: "perception", label: "Noticed by", type: "select", group: "identity", options: PERCEPTION },
@@ -245,7 +245,7 @@ export function registerKinds(cards, deps) {
       return write(ref, (e) => {
         const out = { ...normalizeEncounter(e) };
         if("group" in v)out.group=String(v.group??"").trim().slice(0,120);
-        if(isHazard(e)&&RIVER_HAZARDS[v.subtype])out.subtype=v.subtype;
+        if(isHazard(e)&&HAZARD_TYPES[v.subtype]){out.subtype=v.subtype;if(v.subtype==="naval")delete out.river;}
         if(isHazard(e)){out.permanent=true;if("visibility" in v)out.visibility=v.visibility;if("autoDiscover" in v)out.autoDiscover=!!v.autoDiscover;}
         if ("name" in v) out.name = v.name || "Encounter";
         if ("dc" in v) out.dc = Number.isFinite(v.dc) ? v.dc : null;

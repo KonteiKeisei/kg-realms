@@ -11,7 +11,7 @@
 // distance covered; the navigator's Wisdom (Survival) DC depends on the terrain.
 // House rule (optional): trails through rough country move at 3/4 pace.
 
-import { isRiverHazard, riverHazardHours } from "./river-hazards.mjs";
+import { isRiverHazard, riverHazardHours, isNavalHazard, navalHazardHours, SEA_HAZARD_KINDS } from "./river-hazards.mjs";
 export const PACES = {
   fast: { label: "Fast", mph: 4, perception: -5, stealth: false },
   normal: { label: "Normal", mph: 3, perception: 0, stealth: false },
@@ -371,7 +371,8 @@ export function schedule(plan, { pace = "normal", hoursPerDay = 8, terrainAt = (
         const p = [a[0] + (b[0] - a[0]) * (j + 0.5) / n, a[1] + (b[1] - a[1]) * (j + 0.5) / n];
         const T=terrainAt(...p), v = speed(leg, T);
         const at = leg.nativePts ? [a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n] : p;
-        samples.push({ at, hour, ...(leg.portalTransfer?{portalTransfer:true}:{}), kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,regionalFallback:leg.regionalFallback,terrain:T}: {}) });
+        const seaPath = SEA_HAZARD_KINDS.has(leg.kind) ? [[a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n],[a[0]+(b[0]-a[0])*(j+1)/n,a[1]+(b[1]-a[1])*(j+1)/n]] : null;
+        samples.push({ at, hour, ...(seaPath?{seaPath}:{}), ...(leg.portalTransfer?{portalTransfer:true}:{}), kind: leg.kind, waterway: leg.waterway, v, ...(leg.nativePts?{miles,worldId:leg.worldId,regionTitle:leg.regionTitle,regionalFallback:leg.regionalFallback,terrain:T}: {}) });
         hour += distance / n / v; miles += distance / n;
       }
     }
@@ -386,7 +387,15 @@ export function schedule(plan, { pace = "normal", hoursPerDay = 8, terrainAt = (
     const next = samples[i + 1]?.hour ?? total, d = Math.min(dayCount - 1, Math.floor(samples[i].hour / hoursPerDay));
     days[d].miles += (next - samples[i].hour) * samples[i].v;
   }
+  const navalTrack = encounters.some(isNavalHazard) ? [...samples, {at:plan.legs.at(-1)?.pts.at(-1),hour:total}] : null;
   for (const e of encounters) {
+    if (isNavalHazard(e)) {
+      for (const hit of navalHazardHours(navalTrack,e)) {
+        const di=Math.min(dayCount-1,Math.floor(hit.hour/hoursPerDay));
+        days[di].encounters.push({...hit,hourOfDay:hit.hour-di*hoursPerDay});
+      }
+      continue;
+    }
     let best = null;
     for (const s of samples) { const d = encounterDistance(e,s.at); if (d <= (e.radius ?? 15) && (!best || d < best.d)) best = { d, s }; }
     if (best) {
@@ -522,6 +531,7 @@ export function encounterHours(track, encounters) {
   const out = [];
   for (const e of encounters) {
     if (isRiverHazard(e)) { out.push(...riverHazardHours(track,e)); continue; }
+    if (isNavalHazard(e)) { out.push(...navalHazardHours(track,e)); continue; }
     let best = null;
     for (const s of track) { if (s.timingBoundary) continue; const d = encounterDistance(e,s.at); if (d <= (e.radius ?? 15) && (!best || d < best.d)) best = { d, s }; }
     if (best) out.push({ ...e, hour: best.s.hour });
