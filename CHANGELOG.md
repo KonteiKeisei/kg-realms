@@ -2,6 +2,7 @@
 
 ## 0.94.4: export content choices and asset locations
 
+- List Video Game Music among compatible/integrated optional modules, with installed-module detection and optional enabling. Calendaria remains the recommended integration.
 - Add Export current Travel (including encounters) and Export linked Card actors to the module export form. Both start unchecked and apply to the realm and its linked Regional maps. Include saved Travel progress and encounters when selected, with the focused party's route available as the generated scene's default. Player tokens remain excluded. Permanent map hazards remain included.
 - Exclude unchecked Card actor attachments and actor links from exported place and encounter cards, including local pins and legacy local-map presets. Keep their readable link labels. Retain actors required by placed scene tokens. Gather only referenced documents so re-exporting an installed companion respects the same choices and leaves excluded actors, their items and their artwork out of the ZIP.
 - List every owning scene or document beside a failed file, including the exact field and embedded tile, token, item or page identity. Show referring scenes for actor, item and journal assets. Keep repeated uses visible even when one file is copied once, and record the selected export options in the report. Missing required files continue to block download.

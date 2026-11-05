@@ -6,7 +6,7 @@ const mod=(id,active=false,extra={})=>({id,title:id,active,version:'1.0.0',relat
 function fixture(){
   const gm={id:'gm',isGM:true,can:()=>true},settings=new Map([['core.moduleConfiguration',{calendaria:true,unrelated:true,disabled:false}],['kg-realms.integrationSetup','pending']]);
   const events=[],writes=[],registered=[],menus=[];
-  const modules=new Map([mod('calendaria',true),mod('tenacity'),mod('fxmaster'),mod('fxmaster-plus',false,{relationships:{requires:new Set([{id:'fxmaster',type:'module'}])}}),mod('unrelated',true)].map(m=>[m.id,m]));
+  const modules=new Map([mod('calendaria',true),mod('tenacity'),mod('fxmaster'),mod('fxmaster-plus',false,{relationships:{requires:new Set([{id:'fxmaster',type:'module'}])}}),mod('vgmusic'),mod('unrelated',true)].map(m=>[m.id,m]));
   const game={user:gm,users:{activeGM:gm},modules,version:'13.351',system:{id:'dnd5e',version:'5.3.3'},socket:{emit:event=>events.push(event)},settings:{get:(m,k)=>settings.get(`${m}.${k}`),set:async(m,k,v)=>{writes.push([m,k,structuredClone(v)]);settings.set(`${m}.${k}`,structuredClone(v));},register:(m,k,v)=>registered.push([m,k,v]),registerMenu:(m,k,v)=>menus.push([m,k,v])}};
   globalThis.game=game;
   globalThis.foundry={utils:{escapeHTML:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),isNewerVersion:(a,b)=>{const x=String(a).split('.').map(Number),y=String(b).split('.').map(Number);for(let i=0;i<Math.max(x.length,y.length);i++){if((x[i]??0)!==(y[i]??0))return (x[i]??0)>(y[i]??0);}return false;},debouncedReload:()=>events.push('local-reload')},applications:{api:{ApplicationV2:class {constructor(){}render(){events.push('render');return Promise.resolve(this);}async _preFirstRender(){}async _onClose(){}async close(){events.push('close');}}}}};
@@ -15,7 +15,7 @@ function fixture(){
 
 test('discovery lists installed supported integrations, keeps Calendaria recommended and marks enabled rows',()=>{
   const {game}=fixture(),rows=installedIntegrations(game);
-  assert.deepEqual(rows.map(m=>m.id),['calendaria','fxmaster','fxmaster-plus','tenacity']);
+  assert.deepEqual(rows.map(m=>m.id),['calendaria','fxmaster','fxmaster-plus','tenacity','vgmusic']);
   assert.equal(rows[0].recommended,true);assert.equal(rows[0].active,true);
   assert.equal(rows.find(m=>m.id==='tenacity').active,false);
   const html=integrationSetupContent(game);
@@ -36,7 +36,7 @@ test('automatic prompt belongs to the active GM, retries after Later and stays h
   game.modules.clear();assert.equal(shouldPromptIntegrations(game),false);
 });
 
-test('startup stays silent when all six integrations are enabled; manual review remains available',async()=>{
+test('startup stays silent when all integrations are enabled; manual review remains available',async()=>{
   const {game,settings,events,writes,menus}=fixture();
   game.modules=new Map(INTEGRATIONS.map(({id})=>[id,mod(id,true)]));
   settings.set('core.moduleConfiguration',Object.fromEntries(INTEGRATIONS.map(({id})=>[id,true])));
@@ -46,7 +46,7 @@ test('startup stays silent when all six integrations are enabled; manual review 
   assert.deepEqual(events,[]);assert.deepEqual(writes,[]);
   assert.equal(settings.get('kg-realms.integrationSetup'),'pending','skipping does not dismiss later actionable setup');
   const app=new menus[0][2].type(),html=await app._renderHTML();
-  assert.equal((html.match(/Already Enabled/g)??[]).length,6);
+  assert.equal((html.match(/Already Enabled/g)??[]).length,INTEGRATIONS.length);
   assert.doesNotMatch(html,/type="checkbox"/);
   settings.set('core.moduleConfiguration',{});
   assert.equal(shouldPromptIntegrations(game),false,'runtime active flags also suppress an unnecessary prompt');
