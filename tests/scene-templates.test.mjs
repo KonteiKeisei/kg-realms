@@ -288,9 +288,26 @@ test('the export UI refuses to download a module with a missing required file an
   const source=jsonFile(f.files,`${MODULE}/data/worlds/${CHILD}/packs/scenes.json`).find(s=>s._id===L).tiles[0].texture.src;f.served.delete(source);
   let downloads=0,report;
   foundry.utils.saveDataToFile=()=>{downloads++;};
-  foundry.applications.api.DialogV2.wait=async()=>({id:'strict-bundle',title:'Strict export',version:'1.0.0'});
-  foundry.applications.api.DialogV2.prompt=async options=>{report=options;};
+  foundry.applications.api.DialogV2.wait=async options=>{if(options.window.title==='Export needs repair'){report=options;return null;}return{id:'strict-bundle',title:'Strict export',version:'1.0.0'};};
   ui.notifications.remove=()=>{};
   await exportModule(f.root,R);
   assert.equal(downloads,0);assert.equal(report.window.title,'Export needs repair');assert.match(report.content,/module was not downloaded/);assert.ok(report.content.includes(source));
+});
+
+test('Download repair report saves source locations and failed values as JSON without exporting an incomplete module or changing scenes',async()=>{
+  const f=await fixture();exportedData(f);await generateSelectedScenes(f.root,[L]);
+  const scene=game.scenes.get(L),before=scene.toObject(),source=scene.tiles[0].texture.src;f.served.delete(source);
+  const downloads=[];
+  foundry.utils.saveDataToFile=(data,type,name)=>downloads.push({data,type,name});
+  foundry.applications.api.DialogV2.wait=async options=>{
+    if(options.window.title!=='Export needs repair')return{id:'repair-bundle',title:'Repair export',version:'2',includeTravel:false,includeCardActors:false};
+    const button=options.buttons.find(b=>b.action==='download');assert.equal(button.label,'Download repair report');return button.callback();
+  };
+  ui.notifications.remove=()=>{};
+  await exportModule(f.root,R);
+  assert.equal(downloads.length,1);assert.equal(downloads[0].type,'application/json');assert.equal(downloads[0].name,'repair-bundle-export-repair.json');
+  const packet=JSON.parse(downloads[0].data);assert.equal(packet.kind,'kg-realms-export-repair');assert.equal(packet.schema,1);assert.equal(packet.export.rootScene,R);assert.equal(packet.export.includeTravel,false);assert.equal(packet.export.includeCardActors,false);assert.ok(packet.problemCount>0);
+  const issue=packet.worlds.flatMap(w=>w.issues).find(i=>i.path===source);assert.equal(issue.kind,'missing-file');assert.match(issue.error,/HTTP 404/);
+  const location=issue.uses.find(u=>u.documentId===L);assert.equal(location.documentName,'Stonebridge');assert.equal(location.documentType,'Scene');assert.deepEqual(location.path,['tiles',0,'texture','src']);assert.equal(location.embedded[0].id,'tile');assert.equal(location.value,source);
+  assert.ok(location.sourceUuids.includes(`Scene.${L}`));assert.match(packet.report,/Stonebridge/);assert.equal(packet.parts,undefined);assert.deepEqual(scene.toObject(),before);
 });

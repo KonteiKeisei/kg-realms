@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {collectExportFiles,exportFileProblem} from '../scripts/homebrew/export-sources.mjs';
+import {collectExportFiles,exportFileProblem,exportRepairReport} from '../scripts/homebrew/export-sources.mjs';
 import {cardForExport,worldForExport,presetForExport} from '../scripts/homebrew/export-policy.mjs';
 import {sceneForExport} from '../scripts/homebrew/export-plan.mjs';
 
@@ -70,4 +70,16 @@ test('selected Travel retains progress and encounters and makes the focused part
   const scene={_id:'scene',tokens:[{actorId:A}],flags:{'kg-realms':{partyJourneys:{first:{name:'First'},second:{name:'Second',trip:{departed:25},encounters:[{actor:`Actor.${A}`,name:'Ambush'}]}},partyFocus:'second',partyToken:`Actor.${A}`,homebrewOriginal:{}}}};
   const before=structuredClone(scene),out=sceneForExport(scene,'realm',()=>true,{includeTravel:true,includeCardActors:false});
   assert.equal(out.flags['kg-realms'].journey.name,'Second');assert.equal(out.flags['kg-realms'].journey.trip.departed,25);assert.equal(out.flags['kg-realms'].journey.encounters[0].actor,undefined);assert.equal(out.flags['kg-realms'].partyJourneys.first.name,'First');assert.equal(out.flags['kg-realms'].partyToken,undefined);assert.deepEqual(scene,before);
+});
+
+test('repair locations distinguish scene sounds, shared marker settings and embedded HTML references',()=>{
+  const groups=new Map([['Scene',[{_id:'scene',name:'Lonelywood',sounds:[{_id:'wind',name:'Wind',path:'missing.ogg'}],notes:[{_id:'pin',flags:{'kg-realms':{local:{known:'<p>Keep this text.</p><img src="missing.png">'}}}}]}]]]);
+  const {locations}=collectExportFiles(groups,new Map(),{custom:{name:'Custom marker',src:'missing.png'}},{world:'toril'});
+  const sound=locations.get('missing.ogg')[0];assert.deepEqual(sound.path,['sounds',0,'path']);assert.equal(sound.embedded[0].id,'wind');assert.equal(sound.embedded[0].name,'Wind');
+  const marker=locations.get('missing.png').find(u=>u.kind==='setting');assert.equal(marker.namespace,'kg-realms');assert.equal(marker.setting,'customMarkers');assert.deepEqual(marker.path,['custom','src']);
+  const html=locations.get('missing.png').find(u=>u.kind==='document');assert.equal(html.embedded[0].id,'pin');assert.equal(html.value,'<p>Keep this text.</p><img src="missing.png">');
+  const built={problems:2,report:'Repair these files.',diagnostics:[{world:{id:'toril'},issues:[{path:'missing.png',uses:locations.get('missing.png')}]}],parts:[new Uint8Array([1,2,3])]};
+  const packet=exportRepairReport(built,{moduleId:'test',includeTravel:false,includeCardActors:false},'0.94.5');
+  assert.equal(JSON.parse(JSON.stringify(packet)).worlds[0].issues[0].uses.length,2);assert.equal(packet.parts,undefined);assert.equal(packet.engineVersion,'0.94.5');
+  packet.worlds[0].issues[0].uses[0].path[0]='changed';assert.notEqual(built.diagnostics[0].issues[0].uses[0].path[0],'changed');
 });

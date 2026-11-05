@@ -13,7 +13,7 @@ import { sceneTemplateCatalog } from '../scene-template-plan.mjs';
 import {regionalPlace} from '../regional-place.mjs';
 import { TILE_SUFFIX, moduleIdFrom, moduleScript, exportWorldDefinition, ROUTES_FILE, zipEntry, zipParts, crc32, zipCanBuild } from "./plan.mjs";
 import { fileRef, rewriteFiles, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
-import {collectExportFiles,exportFileProblem} from './export-sources.mjs';
+import {collectExportFiles,exportFileProblem,exportRepairReport} from './export-sources.mjs';
 import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
 
 const ID = "kg-realms";
@@ -118,7 +118,7 @@ export async function buildExport(def, { moduleId, title, version, rootScene, in
   const report=`Regional maps included: ${records.length-1}\nCoverage, alignment, crossings, local marker edits and Regional snow settings are restored after the linked scenes are imported.\n\n${built.map(b=>b.report).join('\n\n')}`;
   add(`${moduleId}/export-report.txt`,encoder.encode(report));
   const all=[...entries.values()];if(!zipCanBuild(all))throw Error('This realm and its Regional maps exceed the browser archive limits.');
-  return {name:root.name,parts:zipParts(all),report,problems:built.reduce((n,b)=>n+b.problems,0)};
+  return {name:root.name,parts:zipParts(all),report,problems:built.reduce((n,b)=>n+b.problems,0),diagnostics:built.flatMap(b=>b.diagnostics)};
 }
 
 async function buildWorldExport(def, { moduleId, title, version }, onStep, context = {}) {
@@ -207,10 +207,10 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const uuids = new Map([...aliases].map(([from, key]) => [from, newUuid(key)]));
 
   // Every file those name, and where it goes.
-  const {named,usage}=collectExportFiles(groups,files,markers,{title:def.title,world:def.id,calendar,systemId});
+  const {named,usage,locations}=collectExportFiles(groups,files,markers,{title:def.title,world:def.id,calendar,systemId,aliases});
 
   const where = { origin: location.origin, prefix: (foundry.utils.getRoute("") ?? "").replace(/^\/+|\/+$/g, "") };
-  const claim = context.claim ?? assetNamer(moduleId), paths = new Map(), written = context.written ?? new Set(), missing = [], external = [];
+  const claim = context.claim ?? assetNamer(moduleId), paths = new Map(), written = context.written ?? new Set(), missing = [], external = [], fileIssues=[];
   // Compressed local maps are selected by registry metadata, even with a blank scene background.
   const localMapAssets = structuredClone(def.localMapAssets ?? []);
   const inlineAssets=new Set();
@@ -289,6 +289,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
       paths.set(raw, placed.ref);
     } catch (err) {
       (ref.kind === "external" ? external : missing).push(exportFileProblem(raw,err?.message??err,usage));
+      fileIssues.push({kind:ref.kind==='external'?'external-file':'missing-file',path:raw,error:String(err?.message??err),uses:locations.get(raw)??[]});
     }
   }
 
@@ -340,7 +341,8 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   await add(`${moduleId}/export-report.txt`, encoder.encode(report));
   if (!zipCanBuild(entries)) throw Error('This realm exceeds the browser archive limits.');
   onStep("Building the zip", 0.97);
-  return { name: `${moduleId} v${version}.zip`, parts: zipParts(entries), report, problems: missing.length + external.length + scenesMissing.length + gone.length,entries,manifest,registration,relink };
+  const diagnostics=[{world:{id:def.id,title:def.title,module:def.module??null},issues:[...fileIssues,...scenesMissing.map(id=>({kind:'missing-scene',uuid:`Scene.${id}`})),...gone.map(uuid=>({kind:'missing-document',uuid}))]}];
+  return { name: `${moduleId} v${version}.zip`, parts: zipParts(entries), report, problems: missing.length + external.length + scenesMissing.length + gone.length,entries,manifest,registration,relink,diagnostics };
 }
 
 let regionalRestore=Promise.resolve();
@@ -390,9 +392,13 @@ export async function exportModule(def, rootScene) {
   const note = ui.notifications.info(`KG Realms: building ${title}...`, { permanent: true, progress: true });
   try {
     const checked=value=>value===true||value==='on'||value==='true';
-    const built = await buildExport(def, { moduleId, title, version, rootScene,includeTravel:checked(values.includeTravel),includeCardActors:checked(values.includeCardActors) }, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
+    const options={moduleId,title,version,rootScene,includeTravel:checked(values.includeTravel),includeCardActors:checked(values.includeCardActors)};
+    const built = await buildExport(def, options, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
     if(built.problems){
-      await foundry.applications.api.DialogV2.prompt({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Fix the missing files or document links listed below, then export again.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,ok:{label:'Close'},rejectClose:false});
+      await foundry.applications.api.DialogV2.wait({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Download the repair report to share the broken paths, owning scenes, document IDs and exact fields for cleanup.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,buttons:[{action:'download',label:'Download repair report',icon:'fa-solid fa-download',callback:()=>{
+        const data=exportRepairReport(built,options,game.modules.get(ID)?.version??null);
+        foundry.utils.saveDataToFile(JSON.stringify(data,null,2),'application/json',`${moduleId}-export-repair.json`);
+      }},{action:'close',label:'Close',default:true}],rejectClose:false});
       return;
     }
     foundry.utils.saveDataToFile(new Blob(built.parts, { type: "application/zip" }), "application/zip", built.name);

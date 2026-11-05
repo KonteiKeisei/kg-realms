@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.94.5: downloadable export repair reports
+
+- Add Download repair report to Export needs repair. Save a JSON file with the readable report, selected export options and failed references for every included realm and Regional map.
+- Include owning scene and document IDs, source UUIDs, field paths, embedded sound, tile, note, item and page IDs, and the affected field values. Identify shared custom marker settings separately. This provides the locations needed for targeted cleanup while keeping the world unchanged. Incomplete modules remain blocked.
+
 ## 0.94.4: export content choices and asset locations
 
 - List Video Game Music among compatible/integrated optional modules, with installed-module detection and optional enabling. Calendaria remains the recommended integration.
