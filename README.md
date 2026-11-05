@@ -1,3 +1,7 @@
+**Disclaimer, this module was coded entirely with AI**
+**The Ideas, UX/UI, functionality decisions, and testing however were all done by human ass hands**
+**Sub Disclaimer** - AI wont stop messing with my handwritten text however, no matter how hard i try. BAD MACHINE SPIRITS.
+
 # KG Realms
 
 Realm maps for Foundry VTT (v13 and v14, D&D 5e). Turn a world map into a living travel map: places with cards and journals, roads, rivers and sea lanes, areas, biomes, journeys planned and played out day by day, camps and watches, encounters, weather, night and seasons, and settlement maps the party can walk or ride through.
