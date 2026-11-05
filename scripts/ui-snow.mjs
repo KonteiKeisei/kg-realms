@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // The map editor's Snow tab (0.75): this world's snow. Snow at the north, the south or both; for
 // each, how far across the map it reaches at the depth of winter and how far it draws back by the
 // height of summer, and how wide its patchy edge is; the month the north's winter is deepest (the
@@ -142,7 +143,7 @@ export class SnowTab {
   async #click(act) {
     if (!act) return;
     if (act === "reset") {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Snow" }, content: "<p>Go back to this world's own snow, as its module sets it (or the defaults)?</p>", rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Snow" }, content: "<p>Go back to this world's own snow, as its module sets it (or the defaults)?</p>", rejectClose: false });
       if (ok) await this.saveSnow(() => ({}));
       return;
     }

@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import { borderSelect, borderHome } from "./borders.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
 // The map editor's Waterways tab: shorelines, rivers, trade winds and currents, and sea routes, which the travel
@@ -297,7 +298,7 @@ export class WaterwayEditor {
 
   async #delete() {
     const id = this.selected, w = this.all()[id];
-    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: `Delete ${WATERWAY_KINDS[w.kind].label.toLowerCase()}` }, content: `<p>Delete ${w.name ? `<b>${esc(w.name)}</b>` : `this ${esc(WATERWAY_KINDS[w.kind].label.toLowerCase())}`}? Ctrl+Z undoes it.</p>`, rejectClose: false });
+    const ok = await RealmDialog.confirm({ window: { title: `Delete ${WATERWAY_KINDS[w.kind].label.toLowerCase()}` }, content: `<p>Delete ${w.name ? `<b>${esc(w.name)}</b>` : `this ${esc(WATERWAY_KINDS[w.kind].label.toLowerCase())}`}? Ctrl+Z undoes it.</p>`, rejectClose: false });
     if (!ok) return;
     this.select(null);
     await this.#commit((all) => { const c = { ...all }; delete c[id]; return c; });
@@ -325,7 +326,7 @@ export class WaterwayEditor {
     if (near && near.k > 0 && near.k < other.pts.length - 1) {
       const miles = near.d * mpp;
       if (miles > 3) {
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Join" }, content: `<p>The nearest node is ${miles.toFixed(1)} miles away. Join to it with a straight piece?</p>`, rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: "Join" }, content: `<p>The nearest node is ${miles.toFixed(1)} miles away. Join to it with a straight piece?</p>`, rejectClose: false });
         if (!ok) return;
       }
       const node = [...other.pts[near.k]], pts = near.end === "end" ? [...mine, node] : [node, ...mine];
@@ -349,7 +350,7 @@ export class WaterwayEditor {
     }
     const miles = j.gap * SOURCE_MAP.milesPerPixel;
     if (miles > 3) {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Join" }, content: `<p>The nearest ends are ${miles.toFixed(1)} miles apart. Join them with a straight piece?</p>`, rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Join" }, content: `<p>The nearest ends are ${miles.toFixed(1)} miles apart. Join them with a straight piece?</p>`, rejectClose: false });
       if (!ok) return;
     }
     this.joining = false;
@@ -443,7 +444,7 @@ export class WaterwayEditor {
 
   /** Rename a group (every line in it), or ungroup them with an empty name. */
   async #renameGroup(kind, from) {
-    const to = await foundry.applications.api.DialogV2.prompt({
+    const to = await RealmDialog.prompt({
       window: { title: "Rename group" },
       content: `<label>Name <input type="text" name="name" value="${esc(from)}" autofocus></label><p class="hint">Leave it empty to ungroup its lines.</p>`,
       ok: { label: "Rename", callback: (ev, b) => b.form?.elements.name?.value.trim() ?? from },

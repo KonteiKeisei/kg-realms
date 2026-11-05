@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // The place card: one window for every place (realm places, places on local maps) and encounter.
 // For players it shows what they may know; for the GM everything, and the card is also the editor:
 // Edit turns it into its form in place, Save or Discard turns it back. No journal ever opens: a
@@ -313,7 +314,7 @@ function textWindow({ id, title, value, hint, getPlaces }) {
     }
     async close(options) {
       if (this.result === undefined && this.changed) {
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Unsaved text" }, content: "<p>Close the editor and lose these changes?</p>", rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: "Unsaved text" }, content: "<p>Close the editor and lose these changes?</p>", rejectClose: false });
         if (!ok) return this;
         this.changed = false;
       }
@@ -354,7 +355,7 @@ function cardClass() {
     get def() { return this.cards.kinds[this.ref.kind]; }
 
     async confirmDiscard() {
-      return foundry.applications.api.DialogV2.confirm({ window: { title: "Unsaved changes" }, content: "<p>Discard the changes to this card?</p>", rejectClose: false });
+      return RealmDialog.confirm({ window: { title: "Unsaved changes" }, content: "<p>Discard the changes to this card?</p>", rejectClose: false });
     }
 
     async close(options) {
@@ -601,7 +602,7 @@ function cardClass() {
       }
       if (act.startsWith("x-")) { try{await this.def.act?.(this.ref, act.slice(2));}catch(error){console.error('kg-realms | place action',error);ui.notifications.error(`KG Realms: ${error.message}`);} return this.rendered && this.render(); }
       if (act === "delete") {
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: d.deleteLabel ?? "Delete" }, content: `<p>${esc(d.deleteLabel ?? "Delete")} <b>${esc(d.name)}</b>?</p>${d.deleteNote ? `<p class="hint">${esc(d.deleteNote)}</p>` : ""}`, rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: d.deleteLabel ?? "Delete" }, content: `<p>${esc(d.deleteLabel ?? "Delete")} <b>${esc(d.name)}</b>?</p>${d.deleteNote ? `<p class="hint">${esc(d.deleteNote)}</p>` : ""}`, rejectClose: false });
         if (!ok) return;
         this.dirty = false;
         await this.def.remove(this.ref);

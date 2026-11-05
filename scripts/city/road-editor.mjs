@@ -1,3 +1,4 @@
+import {RealmDialog} from "../ui-theme.mjs";
 import {ROAD_TYPES,project,distance,validateRoads,joinRoads} from './routing.mjs';
 import {onCanvas,RightClick} from '../canvas-input.mjs';
 import {shellSection} from '../ui-shell.mjs';
@@ -131,7 +132,7 @@ export class SettlementRoadEditor {
     const road=this.selectedRoad();if(!road||!other||other===road)return;
     const j=joinRoads(road.points,other.points),units=this.scene.grid.units||'ft',gap=j.gap*(this.scene.grid.distance||5)/(this.scene.grid.size||100);
     const content=`<p>Join <b>${esc(other.name)}</b> onto <b>${esc(road.name)}</b>?</p><p>${j.gap<1?'Their ends meet.':`Their nearest ends are ${gap<10?gap.toFixed(1):Math.round(gap)} ${esc(units)} apart; a straight piece will link them.`} The joined road keeps the name ${esc(road.name)} and its category.</p>`;
-    const yes=await foundry.applications.api.DialogV2.confirm({window:{title:'Join roads'},content,rejectClose:false});
+    const yes=await RealmDialog.confirm({window:{title:'Join roads'},content,rejectClose:false});
     this.joining=false;
     if(!yes||!this.active)return this.render();
     this.remember();road.points=j.points;this.data.roads=this.data.roads.filter(r=>r!==other);
@@ -150,11 +151,11 @@ export class SettlementRoadEditor {
     if(act==='join'){if(this.selectedRoad()){this.joining=true;this.render();}return;}
     if(act==='join-cancel'){this.joining=false;return this.render();}
     if(act==='select'){this.selected=button.dataset.id;this.render();this.paint();const p=this.selectedRoad()?.points[0];if(p)canvas.animatePan({x:p[0],y:p[1],duration:400});return;}
-    if(act==='delete'){const road=this.selectedRoad();if(!road)return;const yes=await foundry.applications.api.DialogV2.confirm({window:{title:'Delete road'},content:`<p>Delete ${esc(road.name)}?</p>`,rejectClose:false});if(!yes)return;this.remember();this.data.roads=this.data.roads.filter(r=>r!==road);this.selected=null;this.render();this.paint();return this.save();}
+    if(act==='delete'){const road=this.selectedRoad();if(!road)return;const yes=await RealmDialog.confirm({window:{title:'Delete road'},content:`<p>Delete ${esc(road.name)}?</p>`,rejectClose:false});if(!yes)return;this.remember();this.data.roads=this.data.roads.filter(r=>r!==road);this.selected=null;this.render();this.paint();return this.save();}
     if(act==='undo'){if(!this.history.length)return;this.data=this.history.pop();this.selected=null;this.render();this.paint();return this.save();}
     if(act==='export'){await this.saving.catch(()=>{});return foundry.utils.saveDataToFile(JSON.stringify({type:'kg-realms-settlement-roads',scene:this.scene.name,width:this.scene.width,height:this.scene.height,grid:{size:this.scene.grid.size,distance:this.scene.grid.distance,units:this.scene.grid.units},...this.data},null,1),'application/json',`${this.scene.name}-roads.json`);}
     if(act==='import'){
-      const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.onchange=async()=>{try{const data=JSON.parse(await input.files[0].text());validateRoads(data);if(data.type!=='kg-realms-settlement-roads'||data.width!==this.scene.width||data.height!==this.scene.height)throw Error('This export belongs to a map with different dimensions.');const yes=await foundry.applications.api.DialogV2.confirm({window:{title:'Import settlement roads'},content:`<p>Merge ${data.roads.length} roads by ID? Existing roads with matching IDs will be replaced.</p>`,rejectClose:false});if(!yes)return;this.remember();const merged=new Map(this.data.roads.map(r=>[r.id,r]));for(const r of data.roads)merged.set(r.id,r);this.data.roads=[...merged.values()];this.render();this.paint();await this.save();}catch(error){ui.notifications.error(error.message);}};input.click();
+      const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.onchange=async()=>{try{const data=JSON.parse(await input.files[0].text());validateRoads(data);if(data.type!=='kg-realms-settlement-roads'||data.width!==this.scene.width||data.height!==this.scene.height)throw Error('This export belongs to a map with different dimensions.');const yes=await RealmDialog.confirm({window:{title:'Import settlement roads'},content:`<p>Merge ${data.roads.length} roads by ID? Existing roads with matching IDs will be replaced.</p>`,rejectClose:false});if(!yes)return;this.remember();const merged=new Map(this.data.roads.map(r=>[r.id,r]));for(const r of data.roads)merged.set(r.id,r);this.data.roads=[...merged.values()];this.render();this.paint();await this.save();}catch(error){ui.notifications.error(error.message);}};input.click();
     }
   }
 }

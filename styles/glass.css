@@ -1,0 +1,231 @@
+/* KG Realms glass surfaces. Loaded after realms.css, which retains layout and interaction rules.
+   Only module-owned windows carry .kgr-ui. Never theme Foundry or other modules' applications. */
+:root body .kgr-ui {
+  --kgr-tint: #405563;
+  --kgr-tint-top: #4a606e;
+  --kgr-well: #202a33;
+  --kgr-edge: #74818a;
+  --kgr-edge-soft: #596b77;
+  --kgr-reading: #f1eadb;
+  --kgr-secondary: #c6c6bd;
+  --kgr-metal: #ffb647;
+  --kgr-metal-ink: #222c33;
+  --kgr-panel: color-mix(in srgb, var(--kgr-tint) var(--kgr-glass-opacity, 75%), transparent);
+  --kgr-surface: color-mix(in srgb, var(--kgr-well) 88%, transparent);
+  --kgr-surface-2: color-mix(in srgb, var(--kgr-well) 94%, var(--kgr-tint));
+  --kgr-input: color-mix(in srgb, var(--kgr-well) 94%, transparent);
+  --kgr-line: color-mix(in srgb, var(--kgr-edge-soft) 70%, transparent);
+  --kgr-line-2: var(--kgr-edge-soft);
+  --kgr-line-3: var(--kgr-edge);
+  --kgr-text: var(--kgr-reading);
+  --kgr-text-2: var(--kgr-reading);
+  --kgr-muted: var(--kgr-secondary);
+  --kgr-muted-2: var(--kgr-secondary);
+  --kgr-faint: var(--kgr-secondary);
+  --kgr-accent: var(--kgr-metal);
+  --kgr-accent-soft: color-mix(in srgb, var(--kgr-metal) 14%, transparent);
+  --kgr-gold-ink: var(--kgr-metal-ink);
+  --kgr-gold-text: color-mix(in srgb, var(--kgr-metal) 65%, var(--kgr-reading));
+  --kgr-radius: 8px;
+  --kgr-control-radius: 5px;
+  --kgr-shadow: #0005;
+  --kgr-hover: color-mix(in srgb, var(--kgr-tint) 60%, var(--kgr-well));
+  --kgr-glass-background: linear-gradient(155deg,
+    color-mix(in srgb, var(--kgr-tint-top) var(--kgr-glass-opacity, 75%), transparent),
+    var(--kgr-panel) 56%);
+  font-family: Signika, "Segoe UI", system-ui, sans-serif;
+  color: var(--kgr-text);
+  color-scheme: dark;
+  scrollbar-color: var(--kgr-edge-soft) transparent;
+}
+
+body.kgr-theme-travel .kgr-ui {
+  --kgr-tint: #4d4236; --kgr-tint-top: #5b4c3d; --kgr-well: #211c17;
+  --kgr-edge: #8a795e; --kgr-edge-soft: #71614c; --kgr-reading: #f2e6cc;
+  --kgr-secondary: #d0c1a5; --kgr-metal: #d9a441; --kgr-metal-ink: #291e10;
+}
+body.kgr-theme-oxblood .kgr-ui {
+  --kgr-tint: #503139; --kgr-tint-top: #60404a; --kgr-well: #261516;
+  --kgr-edge: #98757b; --kgr-edge-soft: #805a62; --kgr-reading: #f3e4ce;
+  --kgr-secondary: #d3b7b9; --kgr-metal: #e0ae42; --kgr-metal-ink: #2d2013;
+}
+body.kgr-theme-royal .kgr-ui {
+  --kgr-tint: #344c6e; --kgr-tint-top: #435d82; --kgr-well: #121e31;
+  --kgr-edge: #7f94b3; --kgr-edge-soft: #617998; --kgr-reading: #f4edd7;
+  --kgr-secondary: #c0cbe4; --kgr-metal: #e9bb49; --kgr-metal-ink: #242914;
+}
+body.kgr-theme-emerald .kgr-ui {
+  --kgr-tint: #2e5145; --kgr-tint-top: #3d6355; --kgr-well: #142720;
+  --kgr-edge: #7b9e8d; --kgr-edge-soft: #5d8171; --kgr-reading: #e9edd4;
+  --kgr-secondary: #bfd3c7; --kgr-metal: #dbb54d; --kgr-metal-ink: #202b20;
+}
+body.kgr-theme-amethyst .kgr-ui {
+  --kgr-tint: #4b3b58; --kgr-tint-top: #5b4b68; --kgr-well: #1e1624;
+  --kgr-edge: #9a8ba9; --kgr-edge-soft: #7c6b8d; --kgr-reading: #eae4f1;
+  --kgr-secondary: #c6bbd2; --kgr-metal: #b4c9df; --kgr-metal-ink: #252332;
+}
+body.kgr-theme-iron .kgr-ui {
+  --kgr-tint: #46515b; --kgr-tint-top: #56616b; --kgr-well: #1b1d20;
+  --kgr-edge: #89949e; --kgr-edge-soft: #6c7985; --kgr-reading: #ebe4db;
+  --kgr-secondary: #c5ccd3; --kgr-metal: #f0a15f; --kgr-metal-ink: #29221d;
+}
+body.kgr-theme-holy .kgr-ui {
+  --kgr-tint: #e8e5dc; --kgr-tint-top: #f4f0e6; --kgr-well: #fbf8f1;
+  --kgr-edge: #9b8d77; --kgr-edge-soft: #b9af9e; --kgr-reading: #2d2116;
+  --kgr-secondary: #51432f; --kgr-metal: #8a601b; --kgr-metal-ink: #fff9ee;
+  --kgr-hover: #e8e1d3; --kgr-gold-text: #68450c;
+  color-scheme: light;
+}
+
+/* One backdrop filter per floating surface. Content inside it does not stack extra blur layers. */
+body .kgr-ui:is(.kgr-panel, .kgr-travel, .application, .kgr-camp-scene, .kgr-watch-banner,
+  .kgr-backbar, .kgr-layers-rail, .kgr-hover-cue, .kgr-more-menu, .kgr-editbar, .kgr-edittip, .kgr-editnote) {
+  background: var(--kgr-glass-background);
+  backdrop-filter: blur(var(--kgr-glass-blur, 8px)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--kgr-glass-blur, 8px)) saturate(1.12);
+  border-color: color-mix(in srgb, var(--kgr-edge) 80%, transparent);
+  border-radius: var(--kgr-radius);
+  box-shadow: inset 0 1px 0 #ffffff18, 0 12px 30px var(--kgr-shadow);
+}
+.application.kgr-ui {
+  --color-text-primary: var(--kgr-text);
+  --color-text-secondary: var(--kgr-muted-2);
+  --color-text-emphatic: var(--kgr-text);
+  --color-text-light-highlight: var(--kgr-text);
+  --input-background-color: var(--kgr-input);
+  --input-text-color: var(--kgr-text);
+  --input-border-color: var(--kgr-line-3);
+  --button-background-color: var(--kgr-surface-2);
+  --button-text-color: var(--kgr-text);
+  --button-border-color: var(--kgr-line-3);
+}
+body .application.kgr-ui > .window-content {
+  background: transparent;
+  color: var(--kgr-text);
+}
+body .application.kgr-ui > .window-header,
+body .kgr-ui > header.kgr-sh {
+  background: linear-gradient(180deg, #ffffff08, transparent);
+  border-bottom: 1px solid var(--kgr-line);
+  color: var(--kgr-text);
+}
+body .application.kgr-ui .window-title { font: 600 16px/1.2 Signika, "Segoe UI", sans-serif; }
+body .kgr-ui header.kgr-sh { min-height: 66px; padding: 12px; gap: 10px; }
+body .kgr-ui header.kgr-sh .kgr-sh-icon {
+  flex-basis: 34px; width: 34px; height: 34px;
+  border: 0; background: var(--kgr-surface-2); color: var(--kgr-accent); font-size: 16px;
+}
+body .kgr-ui header.kgr-sh .kgr-sh-title { font-size: 19px; line-height: 1.2; }
+body .kgr-ui header.kgr-sh .kgr-sh-eyebrow { font-size: 11px; letter-spacing: .08em; }
+body .kgr-ui header.kgr-sh .kgr-sh-ctls { gap: 5px; }
+body .kgr-ui header.kgr-sh .kgr-sh-ctls > button {
+  background: var(--kgr-input); border: 1px solid var(--kgr-line-2);
+  border-radius: 4px; color: var(--kgr-text-2);
+}
+body .kgr-ui header.kgr-sh .kgr-sh-ctls > button:hover:not(:disabled) {
+  border-color: var(--kgr-accent); color: var(--kgr-accent);
+}
+
+/* Inputs, action buttons and inset content use the darker surface of the selected theme. */
+body .kgr-ui :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea) {
+  background: var(--kgr-input); color: var(--kgr-text); border: 1px solid var(--kgr-line-3);
+  border-radius: var(--kgr-control-radius); font-family: inherit;
+}
+body .kgr-ui input::placeholder, body .kgr-ui textarea::placeholder { color: var(--kgr-muted-2); opacity: .9; }
+body .kgr-ui :is(input[type=checkbox], input[type=radio], input[type=range], progress) { accent-color: var(--kgr-accent); }
+body .kgr-ui button:not(:is(.link, .tr-via, .tr-via-del, .tr-fold, .stop-grip, .kgr-more-toggle, .kgr-rule, .kgr-sh-ctl)) {
+  background-color: var(--kgr-surface-2); color: var(--kgr-text);
+  border-color: var(--kgr-line-3); border-radius: var(--kgr-control-radius); box-shadow: none;
+  font-family: inherit; text-shadow: none;
+}
+body .kgr-ui button:not(:disabled):hover { border-color: var(--kgr-accent); }
+body .kgr-ui button:is(.primary, .main, .default):not(:disabled),
+body .kgr-ui button[data-button].default:not(:disabled) {
+  background: var(--kgr-accent); border-color: var(--kgr-accent); color: var(--kgr-gold-ink);
+}
+body .kgr-ui button.danger { color: var(--kgr-danger); border-color: var(--kgr-danger-strong); }
+body .kgr-ui :is(.hint, .kgt-hint, .kgr-sh-hint) { color: var(--kgr-muted-2); font-style: normal; opacity: 1; }
+body .kgr-ui :is(h1, h2, h3, h4) { font-family: inherit; color: var(--kgr-text); text-shadow: none; }
+body .kgr-ui :is(.kgr-sh-foot, .kgc-foot) { border-color: var(--kgr-line); background: transparent; }
+body .kgr-ui :is(.kgr-sh-tabs, .kgr-tabs) { background: var(--kgr-surface); border-color: var(--kgr-line-2); border-radius: 5px; gap: 2px; padding: 2px; }
+body .kgr-ui :is(.kgr-sh-tabs, .kgr-tabs) button { border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--kgr-muted-2); }
+body .kgr-ui :is(.kgr-sh-tabs, .kgr-tabs) button.on {
+  background: color-mix(in srgb, var(--kgr-tint) 45%, var(--kgr-well));
+  border: 1px solid var(--kgr-accent); color: var(--kgr-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kgr-accent) 18%, transparent);
+}
+body .kgr-ui :is(.kgr-sh-tabs, .kgr-tabs) small { background: var(--kgr-tint); color: var(--kgr-text); border-radius: 10px; }
+
+/* Travel retains its scrollable plan, pinned progress controls and collapsed layout. */
+body .kgr-travel { width: min(400px, calc(100vw - 62px)); font-size: 14px; }
+body .kgr-travel.collapsed { width: min(320px, calc(100vw - 62px)); }
+body .kgr-travel .body { min-height: 0; gap: 10px; padding: 12px; }
+body .kgr-travel .tr-setup { border-radius: 5px; padding: 10px; }
+body .kgr-travel .tr-stop { border-radius: 5px; border-left: 4px solid var(--kgr-accent); }
+body .kgr-travel .tr-stop.start { border-left-color: var(--kgr-haven); }
+body .kgr-travel .tr-row { gap: 7px; padding-block: 9px; }
+body .kgr-travel .tr-row .n { border-radius: 4px; width: 23px; height: 27px; font-size: 15px; }
+body .kgr-travel .tr-stop.start .n { border-radius: 50%; }
+body .kgr-travel .tr-row .t b { font-size: 16px; }
+body .kgr-travel .tr-row .r b { font-size: 14px; }
+body .kgr-travel .tr-row .t small { font-size: 12px; }
+body .kgr-travel .tr-pin { background: color-mix(in srgb, var(--kgr-well) 42%, transparent); padding: 12px; gap: 9px; }
+body .kgr-travel .tr-pin .tell { line-height: 1.4; font-size: 13px; }
+body .kgr-travel .tr-pos b { font-size: 16px; }
+body .kgr-travel .tr-pos { flex-wrap: wrap; }
+body .kgr-travel .tr-pin button { min-height: 34px; }
+body .kgr-travel :is(.seg, .tr-ask, .tr-offer, .tr-sum, .river-offer) { border-radius: 5px; }
+body .kgr-travel button:is(.tr-fold, .tr-via, .tr-via-del, .stop-grip) { background: transparent; }
+body .kgr-travel .tr-stop.bypassed { border-left-color: var(--kgr-line-3); }
+
+/* Keep the existing rail sizing algorithm and compact button heights when the HUD collapses. */
+body .kgr-layers-rail { border-radius: 5px; }
+body .kgr-layers-rail.on-panel { border-radius: 5px 0 0 5px; }
+body .kgr-layers-rail button { border-radius: 0; background: transparent; color: var(--kgr-muted-2); }
+body .kgr-layers-rail button.on:not(.fold) { background: var(--kgr-accent); color: var(--kgr-gold-ink); }
+
+/* Realm, Regional and local editors share the same inset surfaces and selected tabs. */
+body .kgr-editor .kgr-editor-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+body .kgr-editor .kgr-editor-tabs button { border: 1px solid var(--kgr-line-2); border-radius: 5px; min-width: 0; }
+body .kgr-editor .kgr-editor-tabs button.on { background: var(--kgr-accent); border-color: var(--kgr-accent); color: var(--kgr-gold-ink); }
+body .kgr-ui.kgr-editor .kgr-editor-tabs button.on i { color: inherit; }
+body .kgr-ui :is(.kgr-sh-row, .kgr-party-card, .kgr-city-trip, .kgr-city-fare, .camp-task, .camp-check) { border-radius: 5px; }
+body .kgr-editor .body { padding: 12px; }
+body .kgr-editor .hint { line-height: 1.4; }
+body .kgr-local-editor .kgr-local-row { flex-wrap: wrap; gap: 8px; padding: 10px; }
+body .kgr-local-editor .kgr-local-row .kgr-sh-main { flex: 1 1 calc(100% - 50px); }
+body .kgr-local-editor [data-act="delete-place"] { color: var(--kgr-danger); border-color: var(--kgr-danger-strong); }
+body .kgr-ui .kgr-sh-sec > summary { color: var(--kgr-muted-2); }
+body .kgr-ui .kgr-more-menu { background: var(--kgr-well); border-color: var(--kgr-line-3); }
+body .kgr-ui .kgr-more-menu button { background: transparent; }
+
+/* Camp checks and watch cards previously had fixed brown fills. */
+body .kgr-camp-scene :is(.cs-group, .cs-roll, .cs-check .camp-check, .cs-summary, .cs-foot .cs-min) {
+  background: var(--kgr-surface); border-color: var(--kgr-line-2); border-radius: 5px;
+}
+body .kgr-camp-scene .cs-die { background: var(--kgr-surface-2); color: var(--kgr-accent); border-color: var(--kgr-line-3); }
+
+/* Place cards, trade and reading/editing windows use the same typography. */
+body .kgr-place-card .kgc-title { font-family: inherit; font-size: 25px; font-variant: normal; }
+body .kgr-place-card .kgc-sect h4 { color: var(--kgr-accent); }
+body .kgr-place-card .kgc-tabs button { border-radius: 4px; background: var(--kgr-surface-2); }
+body .kgr-place-card .kgc-tabs button.on { border-color: var(--kgr-accent); }
+body .kgr-hover-cue strong { color: var(--kgr-text); }
+body .kgr-hover-cue span { color: var(--kgr-muted-2); }
+body .kgr-hover-cue::after { background: var(--kgr-accent); }
+body .kgr-ui .kgr-scene-checklist li > label { border-color: var(--kgr-line); }
+body .kgr-ui :is(.kgr-export-problems, .kgr-config-choices) { background: var(--kgr-surface); border-radius: 5px; padding: 10px; }
+body .kgr-ui .kgr-backbar, body .kgr-backbar { border-radius: 6px; }
+body .kgr-ui.kgr-gm-only { border: 2px solid #ffbd45; box-shadow: 0 0 0 1px #e88124, 0 0 14px #ffa52347, 0 6px 24px #0008; }
+body.kgr-theme-holy .kgr-ui :is(.badge.gm-only, .kgc-vis.gm-only) { color: #663600; background: #ffcf7e; }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  body .kgr-ui:is(.kgr-panel, .kgr-travel, .application, .kgr-camp-scene, .kgr-watch-banner,
+    .kgr-backbar, .kgr-layers-rail, .kgr-hover-cue, .kgr-more-menu, .kgr-editbar, .kgr-edittip, .kgr-editnote) { background: var(--kgr-tint); }
+}
+@media (max-width: 600px) {
+  body .kgr-ui header.kgr-sh .kgr-sh-title { font-size: 17px; }
+  body .kgr-travel .tr-row { gap: 5px; }
+  body .kgr-travel .tr-row .t b { font-size: 14px; }
+  body .kgr-travel .tr-pair { grid-template-columns: minmax(0, 1fr); }
+}

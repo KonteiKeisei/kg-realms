@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import { aspect } from "./geo.mjs";
 import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
 import {openSceneChecklist} from './module-scenes.mjs';
@@ -105,7 +106,7 @@ export async function openGenerator() {
   if (!worlds.length) return ui.notifications.warn('KG Realms: enable a companion realm module to generate its maps. To make your own realm, right-click a scene with a map picture and choose Make realm world.');
   let def = worlds[0];
   if (worlds.length > 1) {
-    const id = await foundry.applications.api.DialogV2.wait({
+    const id = await RealmDialog.wait({
       window: { title: "Generate a world map", icon: "fa-solid fa-map" }, rejectClose: false,
       content: `<p>Which world?</p>`,
       buttons: worlds.map((w, i) => ({ action: w.id, label: w.mapName ?? w.title, default: i === 0, callback: () => w.id }))
@@ -117,7 +118,7 @@ export async function openGenerator() {
   try { index = await loadWorld(def.id); }
   catch (err) { return ui.notifications.error(`KG Realms: ${err.message}`); }
   const { name, bounds } = mainMapOf(def, index);
-  const result = await foundry.applications.api.DialogV2.wait({
+  const result = await RealmDialog.wait({
     window: { title: `Generate ${name}`, icon: 'fa-solid fa-map' },
     classes: ['kg-realms-generate'], content: faerunGeneratorContent(bounds, name), rejectClose: false,
     position: { width: 420 },

@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import { renderPanel } from "./panel-render.mjs";
 import { spotName, spotTitle, spotRealms } from "./map-layers.mjs";
 import {groupMembers,sceneParties,partyLabel} from './party-groups.mjs';
@@ -1050,7 +1051,7 @@ export class TravelHud {
   async #askTown(p) {
     const scene = this.scene, trip = journeyKey(this.state);
     const name = p.encounter.name;
-    const stay = await foundry.applications.api.DialogV2.confirm({
+    const stay = await RealmDialog.confirm({
       window: { title: `${name}` },
       content: `<p>The party reaches <b>${esc(name)}</b>.</p><p>Is the party stopping in ${esc(name)}?</p>`,
       yes: { label: `Stop in ${name}`, icon: "fa-solid fa-door-open" }, no: { label: "Carry on", icon: "fa-solid fa-play" },
@@ -1584,7 +1585,7 @@ export class TravelHud {
       const places=(this.getDestinations?.()??[]).filter(p=>!p.hidden&&!['territory','domain'].includes(p.kind)&&!['Road','Trail'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
       if(!places.length)return ui.notifications.info("No destinations on the linked maps yet.");
       const targetScene=this.scene,targetTrip=journeyKey(this.state);
-      const picked=await foundry.applications.api.DialogV2.wait({window:{title:"Travel destination"},rejectClose:false,content:`<div class="form-group"><label>Find a place</label><input name="filter" type="search" placeholder="Type a name"></div><div class="form-group"><label>Destination</label><select name="place" size="10">${places.map((p,i)=>`<option value="${i}">${esc(p.name)}${p.regionalTitle?` (${esc(p.regionalTitle)})`:''}</option>`).join('')}</select></div>`,render:(_e,d)=>{const el=d.element;el.querySelector('input').oninput=e=>{const options=[...el.querySelectorAll('option')];options.forEach(o=>o.hidden=!o.textContent.toLowerCase().includes(e.target.value.toLowerCase()));const first=options.find(o=>!o.hidden);if(first)el.querySelector('select').value=first.value;const add=el.querySelector('[data-action=add]');if(add)add.disabled=!first;};},buttons:[{action:'add',label:'Add destination',callback:(_e,b)=>b.form.elements.place.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
+      const picked=await RealmDialog.wait({window:{title:"Travel destination"},rejectClose:false,content:`<div class="form-group"><label>Find a place</label><input name="filter" type="search" placeholder="Type a name"></div><div class="form-group"><label>Destination</label><select name="place" size="10">${places.map((p,i)=>`<option value="${i}">${esc(p.name)}${p.regionalTitle?` (${esc(p.regionalTitle)})`:''}</option>`).join('')}</select></div>`,render:(_e,d)=>{const el=d.element;el.querySelector('input').oninput=e=>{const options=[...el.querySelectorAll('option')];options.forEach(o=>o.hidden=!o.textContent.toLowerCase().includes(e.target.value.toLowerCase()));const first=options.find(o=>!o.hidden);if(first)el.querySelector('select').value=first.value;const add=el.querySelector('[data-action=add]');if(add)add.disabled=!first;};},buttons:[{action:'add',label:'Add destination',callback:(_e,b)=>b.form.elements.place.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
       if(picked==null||picked===false||picked===''||this.scene!==targetScene||journeyKey(this.state)!==targetTrip)return;const place=places[Number(picked)];if(!place)return;
       return this.save({waypoints:[...this.state.waypoints,{lon:place.lon,lat:place.lat,name:place.name,stop:true}]},{scene:targetScene,expectedTrip:targetTrip});
     }
@@ -1615,7 +1616,7 @@ export class TravelHud {
       const nums = this.#numbers(), keep = s.waypoints.map((w, k) => k).filter((k) => nums[k] != null);
       const dropped = s.waypoints.length - keep.length, direct = (s.legModes ?? []).filter((m) => m === "direct").length;
       if (dropped || direct) {
-        const ok = await foundry.applications.api.DialogV2.confirm({
+        const ok = await RealmDialog.confirm({
           window: { title: "Recalculate route" },
           content: `<p>Work the route out afresh from the start through your ${keep.length} stop${keep.length === 1 ? "" : "s"}, along the roads?</p><p>${[dropped ? `${dropped} path shaping point${dropped === 1 ? "" : "s"}` : "", direct ? `${direct} Direct leg${direct === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} will be dropped. Stops, stays and encounters stay.</p>`,
           rejectClose: false
@@ -1639,7 +1640,7 @@ export class TravelHud {
       return this.save({ legModes });
     }
     if (act === "clear") {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Clear route" }, content: "<p>Clear this route, its encounters and its progress?</p>", rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Clear route" }, content: "<p>Clear this route, its encounters and its progress?</p>", rejectClose: false });
       if (!ok) return;
       this.#setMode(null);
       this.selected = null;
@@ -1665,7 +1666,7 @@ export class TravelHud {
     }
     if (act === "stop") return this.save({ trip: { ...s.trip, halts: [...(s.trip.halts ?? []), { from: now, to: null }] } });
     if (act === "reset") {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Back to the start" }, content: "<p>Put the party back at the start? Game time is not changed.</p>", rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Back to the start" }, content: "<p>Put the party back at the start? Game time is not changed.</p>", rejectClose: false });
       if (!ok) return;
       const start = s.start;
       await this.#log("The journey is called off; the party goes back to the start.", { close: true, at: now });
@@ -2219,7 +2220,7 @@ export class TravelHud {
           const name = (id) => members.find((m) => m.id === id)?.name ?? "?";
           const opts = [...pl.watches.map((w, i) => [String(i), `Watch ${i + 1}, ${name(w.id)}${w.with?.length ? ` and ${w.with.length} more` : ""}`]), ["random", "At random (the watch dice)"]];
           const fallback = old?.at != null ? Math.max(0, Math.min(window, old.at - lead)) : window / 2;
-          const got = await foundry.applications.api.DialogV2.prompt({
+          const got = await RealmDialog.prompt({
             window: { title: "Encounter in camp" },
             content: `<p>This encounter comes during night ${d.camp.night}'s rest. Which watch?</p>
               <label>Comes in <select name="watch">${opts.map(([v, l]) => `<option value="${v}" ${String(was ?? "random") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>

@@ -1,4 +1,6 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {registerPartyAppearance} from './party-appearance.mjs';
+import {registerWindowAppearance} from './ui-theme.mjs';
 import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
 import {localMapPicture} from './local-map-tiles.mjs';
 import {PlacedTileLods} from './placed-tile-lods.mjs';
@@ -683,7 +685,7 @@ function backgroundEncounter(worker,p){
  backgroundDialogs=backgroundDialogs.catch(()=>{}).then(async()=>{
   if(!isPrimaryGM()||!sceneParties(scene.realScene).some(t=>t.actor.id===scene.partyId)||worker.progress()?.encounter?.id!==p.encounter.id)return;
   const e=p.encounter,escape=foundry.utils.escapeHTML;
-  const result=await foundry.applications.api.DialogV2.wait({window:{title:`${partyLabel(scene)}: encounter`},position:{width:500},rejectClose:false,
+  const result=await RealmDialog.wait({window:{title:`${partyLabel(scene)}: encounter`},position:{width:500},rejectClose:false,
    content:`<p><strong>${escape(partyLabel(scene))}</strong> stopped at <strong>${escape(e.name??'an encounter')}</strong>.</p><p>The other party continues to use the shared clock. This party waits here until you resolve its encounter.</p><label>Reason for bypassing<textarea name="resolution" rows="3" placeholder="How was the encounter resolved?"></textarea></label>`,
    buttons:[{action:'run',label:'Run encounter',callback:()=>({run:true})},{action:'bypass',label:'Bypass encounter',disabled:true,callback:(_e,b)=>({reason:b.form.elements.resolution.value.trim()})},{action:'later',label:'Leave waiting',callback:()=>null}],
    render:(_e,dialog)=>{const box=dialog.element.querySelector('[name="resolution"]'),button=dialog.element.querySelector('[data-action="bypass"]');box.addEventListener('input',()=>button.disabled=!box.value.trim());}
@@ -767,7 +769,7 @@ const pins = new PinEditor({
       try {
         const data = JSON.parse(await input.files[0].text());
         if (data?.type !== "kg-realms-places" || !data.edits) throw new Error("not a KG Realms places export");
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Import places" }, content: `<p>Replace this world's place edits with the ${Object.keys(data.edits.edits ?? {}).length} edited and ${Object.keys(data.edits.added ?? {}).length} added places in the file?</p>`, rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: "Import places" }, content: `<p>Replace this world's place edits with the ${Object.keys(data.edits.edits ?? {}).length} edited and ${Object.keys(data.edits.added ?? {}).length} added places in the file?</p>`, rejectClose: false });
         if (!ok) return;
         await saveEdits(current.region.world, () => data.edits);
         if (data.customMarkers) await game.settings.set(MODULE_ID, "customMarkers", { ...(setting("customMarkers") ?? {}), ...data.customMarkers });
@@ -818,7 +820,7 @@ const water = new WaterwayEditor({
     const world = current.region.world, w = waterwaysOf(world)[id], name = String(w?.name ?? "").trim();
     if (!name) return ui.notifications.warn("KG Realms: name the shoreline first: the place takes its name.");
     const same = current.places.find((p) => !followOf(p) && String(p.name).trim().toLowerCase() === name.toLowerCase());
-    if (same && await foundry.applications.api.DialogV2.confirm({ window: { title: `${name}: link a place` }, content: `<p>A place called <b>${foundry.utils.escapeHTML(same.name)}</b> (${foundry.utils.escapeHTML(same.class ?? "")}) already exists. Link it to this shoreline? Its border will follow the shoreline. Choose No to make a new place instead.</p>`, rejectClose: false })) {
+    if (same && await RealmDialog.confirm({ window: { title: `${name}: link a place` }, content: `<p>A place called <b>${foundry.utils.escapeHTML(same.name)}</b> (${foundry.utils.escapeHTML(same.class ?? "")}) already exists. Link it to this shoreline? Its border will follow the shoreline. Choose No to make a new place instead.</p>`, rejectClose: false })) {
       await savePlaceEdit(world, same.id, { follow: `shore:${id}`, area: null, areaClosed: null, shape: null });
       return ui.notifications.info(`KG Realms: ${same.name} now follows this shoreline.`);
     }
@@ -1021,12 +1023,8 @@ Hooks.once("init", () => {
   register("mapEditorY", { scope: "client", config: false, type: Number, default: -1 });
   register("mapEditorLocked", { scope: "client", config: false, type: Boolean, default: false });
   register("mapEditorH", { scope: "client", config: false, type: Number, default: 0 });
-  // Window theme: the colours of every KG Realms window (styles/realms.css).
-  // Older choices (Parchment, Foundry) are gone: they fall back to Chocolate.
-  const THEMES = { travel: "Chocolate (dark brown and gold)", oxblood: "Oxblood (dark red and gold)", royal: "Royal Blue (blue and gold)", emerald: "Emerald (green and gold)", amethyst: "Amethyst (purple and silver)", iron: "Iron (slate and ember)", holy: "Holy White (light, ivory and old gold)" };
-  const applyTheme = (t) => { for (const k of Object.keys(THEMES)) document.body.classList.toggle(`kgr-theme-${k}`, k === t); };
-  register("windowTheme", { name: "Window theme", hint: "The colours of KG Realms windows: the travel panel, place cards, editors, search.", scope: "client", config: true, type: String, default: "travel", choices: THEMES, onChange: applyTheme });
-  applyTheme(setting("windowTheme"));  register("localPresetsDone", { scope: "world", config: false, type: Array, default: [] });
+  registerWindowAppearance(register);
+  register("localPresetsDone", { scope: "world", config: false, type: Array, default: [] });
   register("lookMigrated", { scope: "world", config: false, type: Boolean, default: false });
   register("customMarkers", { scope: "world", config: false, type: Object, default: {}, onChange: () => { pins.refresh(); drawRegion(); } });
   register("routeEdits", { scope: "world", config: false, type: Object, default: {}, onChange: () => refreshRoutes() });

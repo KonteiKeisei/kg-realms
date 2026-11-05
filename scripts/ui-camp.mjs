@@ -485,8 +485,8 @@ export class CampPanel {
         <span class="pp" title="Passive Perception">PP ${m.pp}</span>
         <label class="hrs">${edit ? `<input type="number" data-camp="hours" data-id="${m.id}" min="0" max="${pl.window}" step="0.5" value="${mine}" aria-label="Hours on watch">` : `${mine}`} h</label>
         ${edit ? `<span class="mv"><button data-camp="up" data-i="${i}" title="Earlier" ${i === 0 ? "disabled" : ""}><i class="fa-solid fa-arrow-up"></i></button><button data-camp="down" data-i="${i}" title="Later" ${i === watchers.length - 1 ? "disabled" : ""}><i class="fa-solid fa-arrow-down"></i></button></span>` : ""}
-        <label class="camp-duty"><input type="checkbox" data-camp="watch-duty" data-id="${m.id}" ${wt ? "checked" : ""} ${edit ? "" : "disabled"}> Take a watch${wt ? "" : " (off)"}</label>
-        ${wt ? this.#fatigueNote([m.id]) : ""}${join}
+        <div class="camp-row-options"><label class="camp-duty"><input type="checkbox" data-camp="watch-duty" data-id="${m.id}" ${wt ? "checked" : ""} ${edit ? "" : "disabled"}> Take a watch${wt ? "" : " (off)"}</label>
+        ${join}${wt ? this.#fatigueNote([m.id]) : ""}</div>
       </li>`;
     }).join("");
     const short = !pl.watches.length ? `<p class="warn-line"><i class="fa-solid fa-circle-exclamation"></i> No one keeps watch: an encounter tonight takes the camp by surprise${this.taskOn("alarm") ? ", unless the alarms are set" : ""}.</p>`

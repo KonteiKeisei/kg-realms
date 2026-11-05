@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // The GM's Local places panel on a local map (the Journal Notes tools), in the panel shell
 // (ui-shell.mjs), with three tabs:
 //  Places:    Place, Gate and Dock (click the map, and the card opens to be filled in); the places on
@@ -222,8 +223,8 @@ export class LocalEditor {
     if (act === "settings") return this.maps.settings(this.scene);
     if (act === "travel") { this.close(); return this.maps.travel?.(); }
     if (act === "locate") { const note = this.scene.notes.get(actEl.dataset.note); if (note) canvas.animatePan({ x: note.x, y: note.y, duration: 400 }); return; }
-    if(act==='delete-place'){const note=this.scene.notes.get(actEl.dataset.note);if(note&&await foundry.applications.api.DialogV2.confirm({window:{title:'Delete place permanently'},content:`<p>Delete ${esc(this.maps.localOf(note).name)} from this world? It will not return when the companion reloads.</p>`,rejectClose:false}))await this.maps.deletePlace(note);return;}
-    if(act==='restore-source'){if(await foundry.applications.api.DialogV2.confirm({window:{title:'Restore deleted source places'},content:'<p>Restore deleted places from the companion preset? Existing places and your edits are kept.</p>',rejectClose:false}))await this.maps.restoreSourcePlaces(this.scene);this.render();return;}
+    if(act==='delete-place'){const note=this.scene.notes.get(actEl.dataset.note);if(note&&await RealmDialog.confirm({window:{title:'Delete place permanently'},content:`<p>Delete ${esc(this.maps.localOf(note).name)} from this world? It will not return when the companion reloads.</p>`,rejectClose:false}))await this.maps.deletePlace(note);return;}
+    if(act==='restore-source'){if(await RealmDialog.confirm({window:{title:'Restore deleted source places'},content:'<p>Restore deleted places from the companion preset? Existing places and your edits are kept.</p>',rejectClose:false}))await this.maps.restoreSourcePlaces(this.scene);this.render();return;}
     if (act === "gate" || act === "dock") return this.startEntrance(act === "dock" ? "dock" : "land");
     if (act === "add") { this.placing = { name: "New place", category: "other", known: "" }; return this.render(); }
     if (act === "place") { this.placing = { ...map.unplaced[i], index: i }; return this.render(); }
@@ -269,7 +270,7 @@ export class LocalEditor {
       try {
         const data = JSON.parse(await input.files[0].text());
         if (data?.type !== "kg-realms-local-places" || !Array.isArray(data.places)) throw new Error("not a KG Realms local places export");
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Import local places" }, content: `<p>Add or update ${data.places.length} places on ${esc(this.scene.name)}? Places with the same name are updated; the rest are added.</p>`, rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: "Import local places" }, content: `<p>Add or update ${data.places.length} places on ${esc(this.scene.name)}? Places with the same name are updated; the rest are added.</p>`, rejectClose: false });
         if (!ok) return;
         const byName = new Map(this.#notes().map((n) => [this.maps.localOf(n).name.toLowerCase(), n]));
         const updates = [], creates = [];

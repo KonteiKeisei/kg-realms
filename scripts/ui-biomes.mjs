@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import { onCanvas } from "./canvas-input.mjs";
 import { nearestOnLine } from "./routes.mjs";
 import { BIOME_FIELDS, DEFAULT_BIOMES, biomeTypes, biomeZone, biomeLookup, biomePriority } from "./biomes.mjs";
@@ -101,7 +102,7 @@ export class BiomeEditor {
       return this.commit(c=>{const types={...c.types};delete types[id];return{...c,types};});
     }
     if(a==="inherit"){const id=this.selected;return this.commit(c=>({...c,zones:{...c.zones,[id]:{...c.zones[id],overrides:{}}}}));}
-    if(a==="delete"){const id=this.selected;if(!await foundry.applications.api.DialogV2.confirm({window:{title:"Delete biome zone"},content:"<p>Delete this biome zone? The map's underlying biome will apply. Undo restores it.</p>",rejectClose:false}))return;await this.commit(c=>{const zones={...c.zones};delete zones[id];return{...c,zones};});return this.select(null);}
+    if(a==="delete"){const id=this.selected;if(!await RealmDialog.confirm({window:{title:"Delete biome zone"},content:"<p>Delete this biome zone? The map's underlying biome will apply. Undo restores it.</p>",rejectClose:false}))return;await this.commit(c=>{const zones={...c.zones};delete zones[id];return{...c,zones};});return this.select(null);}
     if(a==="export")return foundry.utils.saveDataToFile(JSON.stringify({version:1,...this.all()},null,2),"application/json","biomes.json");
     if(a==="import"){
       const input=document.createElement("input");input.type="file";input.accept=".json";input.onchange=async()=>{try{const data=JSON.parse(await input.files[0].text());if(!data||typeof data.types!=="object"||typeof data.zones!=="object"||Object.values(data.zones).some(z=>!Array.isArray(z.pts)||z.pts.length<3||z.pts.length>10000||!z.pts.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite))))throw Error("Invalid biome file");await this.commit(()=>({types:data.types,zones:data.zones}));this.select(null);}catch(e){ui.notifications.warn(`KG Realms: ${e.message}`);}};input.click();

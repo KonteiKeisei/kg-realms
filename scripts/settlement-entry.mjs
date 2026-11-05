@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {groupActor} from './party-groups.mjs';
 import {matchesPartyToken} from './party-token.mjs';
 import {isPrimaryGM} from './authority.mjs';
@@ -44,7 +45,7 @@ export async function chooseSettlementGate(scene, {arrival = 'land'} = {}) {
   }
   // One dock needs no picker. Private access is still confirmed immediately before placement.
   if (sea && gates.length === 1) return gates[0].id;
-  const result = await foundry.applications.api.DialogV2.wait({
+  const result = await RealmDialog.wait({
     window: {title: `Enter ${scene.name}${sea ? ' by water' : ''}`}, position: {width: 460}, rejectClose: false,
     content: `<p>Choose where the party ${sea ? 'docks in' : 'enters'} <strong>${esc(scene.name)}</strong>.</p><div class="form-group"><label for="kgr-entry-gate">${sea ? 'Dock' : 'Gate or entrance'}</label><div class="form-fields"><select id="kgr-entry-gate" name="gate" required><option value="">Choose an entrance</option>${gates.map(g => `<option value="${esc(g.id)}">${esc(g.name)}${g.private ? ' (Private)' : ''}</option>`).join('')}</select></div></div><p class="kgr-entry-warning" data-private-entry hidden role="status">This entrance is private. Entry may be prohibited without permission.</p><p class="hint">Activate places the party token at this entrance and opens the scene for everyone. Travel stays paused until you resume it on the main map.</p>`,
     buttons: [
@@ -127,7 +128,7 @@ export async function enterSettlement(scene, gateId, {sourceScene, globalActor =
         const entry = settlementEntrances(scene, {arrival}).find(g => g.id === gateId);
         if (!entry) { ui.notifications.warn('KG Realms: that entrance was removed or changed. Choose another entrance.'); return null; }
         if (!entry.private || privateApproved) return entry;
-        const ok = await foundry.applications.api.DialogV2.confirm({window:{title:'Private entrance'},content:`<p><strong>${esc(entry.name)}</strong> is private. Entry may be prohibited without permission.</p><p>Place the party here anyway?</p>`,yes:{label:'Use private entrance'},no:{label:'Choose another entrance'},rejectClose:false});
+        const ok = await RealmDialog.confirm({window:{title:'Private entrance'},content:`<p><strong>${esc(entry.name)}</strong> is private. Entry may be prohibited without permission.</p><p>Place the party here anyway?</p>`,yes:{label:'Use private entrance'},no:{label:'Choose another entrance'},rejectClose:false});
         if (ok !== true) return null;
         privateApproved = true;
       }

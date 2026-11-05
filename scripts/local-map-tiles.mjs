@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {isPrimaryGM} from './authority.mjs';
 import {backgroundOf} from './local-maps.mjs';
 import {runMapBuild} from './homebrew/map-build.mjs';
@@ -162,7 +163,7 @@ export function updateLocalBuildWindow(win,state){
 export async function regenerateLocalMapTiles(scene,src) {
   if(!isPrimaryGM())return ui.notifications.warn('KG Realms: the primary GM must regenerate local-map tiles.');
   if(!src)return ui.notifications.warn('KG Realms: choose a picture in Background Image first.');
-  const yes=await foundry.applications.api.DialogV2.confirm({window:{title:`Regenerate tiles: ${scene.name}`},content:`<p>Build new background tiles and optimize placed image tiles for ${esc(scene.name)}. Pins, roads, grid scale and scene contents stay in place. Each placed tile retains its position, elevation and occlusion settings. Videos stay native.</p><p>The current tiles stay in use until every new file has been saved and verified.</p>`,rejectClose:false});
+  const yes=await RealmDialog.confirm({window:{title:`Regenerate tiles: ${scene.name}`},content:`<p>Build new background tiles and optimize placed image tiles for ${esc(scene.name)}. Pins, roads, grid scale and scene contents stay in place. Each placed tile retains its position, elevation and occlusion settings. Videos stay native.</p><p>The current tiles stay in use until every new file has been saved and verified.</p>`,rejectClose:false});
   if(!yes)return;
   let cancelled=false;
   const win=new BuildWindow(scene.name,()=>{cancelled=true;win.message='Stopping...';win.render();},{id:`kgr-local-build-${scene.id}`,title:`Local map tiles: ${scene.name}`,steps:[['background','Build background'],['placed','Build placed tiles'],['save','Switch the scene']]});win.render({force:true});

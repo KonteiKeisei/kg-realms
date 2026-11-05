@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import { TRADE_GROUPS, AVAILABILITY, tradePrice, tradeCoin, economyScale, tradeBasePrice, unscaleTradeBase, visibleTradeRows } from "./trade.mjs";
 const esc = s => foundry.utils.escapeHTML(String(s ?? ""));
 const icon = r => r.group === "specialties" ? "fa-wand-magic-sparkles" : ({ Food: "fa-wheat-awn", Drink: "fa-wine-bottle", "Raw material": "fa-tree", Luxury: "fa-gem" })[r.cat] ?? "fa-box-open";
@@ -111,14 +112,14 @@ export async function openTradeEditor({ service, world, place, changed }) {
           this.draft = this.service.defaults(this.market.data, this.service.profile(this.market.data, this.place, id)); this.dirty = true; return this.render();
         }
         if (act !== "save" && act !== "reset") return;
-        if (act === "reset" && !await foundry.applications.api.DialogV2.confirm({ window: { title: "Restore trade defaults" }, content: "<p>Remove this place's trade overrides and restore its original profile?</p>", rejectClose: false })) return;
+        if (act === "reset" && !await RealmDialog.confirm({ window: { title: "Restore trade defaults" }, content: "<p>Remove this place's trade overrides and restore its original profile?</p>", rejectClose: false })) return;
         if (act === "save") for (const input of root.querySelectorAll("input,select,textarea")) if (!input.reportValidity()) return;
         this.working = true; button.disabled = true;
         try { await this.service.save(this.world, this.place.id, act === "reset" ? null : this.draft, this.market.revision); this.dirty = false; await this.changed?.(); this.working = false; await this.close(); }
         catch (error) { root.querySelector(".kgt-error").textContent = error.message; }
         finally { this.working = false; button.disabled = false; }
       }
-      confirmDiscard() { return foundry.applications.api.DialogV2.confirm({ window: { title: "Unsaved trade changes" }, content: "<p>Discard these trade changes?</p>", rejectClose: false }); }
+      confirmDiscard() { return RealmDialog.confirm({ window: { title: "Unsaved trade changes" }, content: "<p>Discard these trade changes?</p>", rejectClose: false }); }
       async close(options) { if (this.working) return this; if (this.dirty && !await this.confirmDiscard()) return this; return super.close(options); }
       _onClose(options) { super._onClose?.(options); windows.delete(this.key); }
     };

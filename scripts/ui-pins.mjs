@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // The GM's pin editor. Drag a place's marker to move it; click a marker to select it (its kind
 // and map marker are set here) and open its place card, where everything else about it is edited.
 // Edits are saved with the other place edits, so the hover card, search and journeys follow them.
@@ -321,7 +322,7 @@ export class PinEditor {
   drawRegionalCoverage(){return this.drawAreaBorder();}
   async drawAreaBorder() {
     const choices=this.getPlaces().filter(p=>['territory','domain'].includes(p.kind)||['Area','Region','Macroregion'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
-    const result=await foundry.applications.api.DialogV2.wait({window:{title:"Draw area border"},position:{width:480},rejectClose:false,
+    const result=await RealmDialog.wait({window:{title:"Draw area border"},position:{width:480},rejectClose:false,
       content:`<p>Use an existing area to keep its POI, or create a named territory. You will draw its outline directly on this realm map, independently of the regional scene rectangle.</p><div class="form-group"><label>Area</label><select name="existing"><option value="">Create a new area</option>${choices.map(p=>`<option value="${esc(p.id)}" ${p.id===this.selected?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="form-group"><label>New area name</label><input name="name" type="text" placeholder="Icewind Dale"></div><p>Click at least three corners on the map, then click the first corner or Finish closed border. Escape cancels the outline.</p>`,
       buttons:[{action:'draw',label:'Draw border on the map',callback:(_e,b)=>({existing:b.form.elements.existing.value,name:b.form.elements.name.value.trim()})},{action:'cancel',label:'Cancel',callback:()=>null}]});
     if(!result||!this.active)return;
@@ -511,7 +512,7 @@ export class PinEditor {
     if (act === "remove-place") {
       const p = this.getPlace(id);
       if (!p) return;
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: p.added ? "Delete place" : "Remove from the map" }, content: p.added ? `<p>Delete <b>${esc(p.name)}</b>, a place you added?${p.biomeZone ? " Its biome zone is removed too." : ""}</p>` : `<p>Remove <b>${esc(p.name)}</b> from this world? It goes from the map, search and journeys.</p><p class="hint">Restore it any time from the Places tab (Removed from this world), with its edits.</p>${p.biomeZone ? "<p>Its biome zone is removed too.</p>" : ""}`, rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: p.added ? "Delete place" : "Remove from the map" }, content: p.added ? `<p>Delete <b>${esc(p.name)}</b>, a place you added?${p.biomeZone ? " Its biome zone is removed too." : ""}</p>` : `<p>Remove <b>${esc(p.name)}</b> from this world? It goes from the map, search and journeys.</p><p class="hint">Restore it any time from the Places tab (Removed from this world), with its edits.</p>${p.biomeZone ? "<p>Its biome zone is removed too.</p>" : ""}`, rejectClose: false });
       if (!ok) return;
       this.selected = null;
       // A place gone from the map stops being a biome. Make it again after restoring the place.
@@ -534,7 +535,7 @@ export class PinEditor {
     if (act === "markers") { this.picking = !this.picking; return this.#render(); }
     if (act === "delete-marker") {
       const key = e.target.closest("[data-marker]").dataset.marker;
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Delete marker" }, content: `<p>Delete the marker <b>${esc(this.getMarkers()[key]?.name)}</b>? Places using it go back to their default marker.</p>`, rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Delete marker" }, content: `<p>Delete the marker <b>${esc(this.getMarkers()[key]?.name)}</b>? Places using it go back to their default marker.</p>`, rejectClose: false });
       if (!ok) return;
       await this.saveMarkers((m) => { const c = { ...m }; delete c[key]; return c; });
       return this.#render();
@@ -561,7 +562,7 @@ export class PinEditor {
     if (act === "import") return this.importPlaces?.();
     if (act === "reset-pos") { await this.#save(id, { lon: null, lat: null }); return this.#render(); }
     if (act === "reset") {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Reset place" }, content: "<p>Remove every edit to this place (name, position, description, image, links)?</p>", rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Reset place" }, content: "<p>Remove every edit to this place (name, position, description, image, links)?</p>", rejectClose: false });
       if (!ok) return;
       this.#remember();
       await this.saveEdits((w) => { delete w.edits?.[id]; return w; });
@@ -579,7 +580,7 @@ export class PinEditor {
       const p = this.getPlace(id);
       if (!p) return;
       if (t.value && p.area && !p.shoreLine) {
-        const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Share a border" }, content: `<p>Replace the border of <b>${esc(p.name)}</b> with the one chosen? Ctrl+Z undoes this.</p>`, rejectClose: false });
+        const ok = await RealmDialog.confirm({ window: { title: "Share a border" }, content: `<p>Replace the border of <b>${esc(p.name)}</b> with the one chosen? Ctrl+Z undoes this.</p>`, rejectClose: false });
         if (!ok) { t.value = ""; return; }
       }
       // Leaving a shoreline keeps a copy of its outline as the place's own.

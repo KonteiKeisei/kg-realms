@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {allWorlds,worldUrl} from './worlds.mjs';
 const ID='kg-realms',STATE='companionConfiguration',RECOMMENDATIONS='calendariaRecommendations';
 const ENGINE_KEYS=['cityCarriageSound','cityWalkMph','cityCarriageMph','cityTransitRate','priceScale','seasonalSnow','dayStart','nightStart'];
@@ -86,7 +87,7 @@ export async function promptCalendariaRecommendations(){
   const changes=calendariaRecommendationChanges();
   if(!changes.length){await game.settings.set(ID,RECOMMENDATIONS,'satisfied');return;}
   const display=value=>typeof value==='string'?value:JSON.stringify(value);
-  const result=await foundry.applications.api.DialogV2.wait({window:{title:'KG Realms: Calendaria settings'},position:{width:650},rejectClose:false,
+  const result=await RealmDialog.wait({window:{title:'KG Realms: Calendaria settings'},position:{width:650},rejectClose:false,
     content:`<p>We recommend these Calendaria settings for connected maps, travel and watches. Choose the changes to allow. Your other settings stay as they are.</p><div class="kgr-config-choices">${changes.map(c=>`<label class="kgr-config-choice"><input type="checkbox" name="calendaria-change" value="${esc(c.key)}" checked><span><strong>${esc(c.label)}</strong>: ${esc(display(c.before))} to ${esc(display(c.value))}<br><small>${esc(c.reason)}</small></span></label>`).join('')}</div>`,
     buttons:[{action:'apply',label:'Apply selected',default:true,callback:(_e,b)=>[...b.form.querySelectorAll('[name="calendaria-change"]:checked')].map(input=>input.value)},
       {action:'later',label:'Maybe later',callback:()=>null},{action:'keep',label:'Keep my settings',callback:()=>false}]});
@@ -118,7 +119,7 @@ async function importConfiguration(world){
   }
   const labels=changed.map(e=>{const config=game.settings.settings.get(`${e.namespace}.${e.key}`);return game.i18n?.localize?.(config?.name??e.key)??e.key;});
   if(switchCalendar)labels.push('Active calendar');
-  const result=await foundry.applications.api.DialogV2.wait({window:{title:`${world.title}: world settings`},position:{width:620},rejectClose:false,
+  const result=await RealmDialog.wait({window:{title:`${world.title}: world settings`},position:{width:620},rejectClose:false,
     content:`<p>This companion includes ${changed.length+(switchCalendar?1:0)} settings that differ from this world. Apply its carriage audio, travel configuration and available Calendaria settings?${switchCalendar?' This also selects the companion calendar.':''}</p><p>Calendaria settings come from its native Export Settings file. This is a one-time import. Later changes you make are kept.</p><details><summary>Settings to change</summary><ul>${labels.map(label=>`<li>${esc(label)}</li>`).join('')}</ul></details>${profile.calendaria&&!calendarReady?'<p>Enable Calendaria to import its settings later.</p>':''}`,
     buttons:[{action:'apply',label:'Apply companion settings',default:true,callback:()=>true},{action:'later',label:'Maybe later',callback:()=>null},{action:'keep',label:'Keep my settings',callback:()=>false}]});
   if(result===null||result===undefined){laterProfiles.add(world.module);recommendationLater=true;return;}

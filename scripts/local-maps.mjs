@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // Local maps in Foundry: a scene that is the map of one realm place, with its places as map Notes
 // flagged kg-realms.local (so a city scene carries its places when exported). This file draws
 // them (a badge for the category, the place's name), shows a hover card, opens a place's card on a
@@ -390,7 +391,7 @@ export class LocalMaps {
       const prompted=this.entrancePrompts??=new Set();
       if(!land){
         const key=`${scene.id}:land`;if(prompted.has(key))return;prompted.add(key);
-        const place=await foundry.applications.api.DialogV2.confirm({
+        const place=await RealmDialog.confirm({
           window:{title:`${map.name}: add an entrance`},
           content:'<p>This settlement needs at least one gate or road in, so the GM can choose where the party enters.</p><p>Click the map to place its first land entrance. Give it a name on its card.</p>',
           yes:{label:'Place gate or road in',icon:'fa-solid fa-door-open'},no:{label:'Later',icon:'fa-solid fa-xmark'},rejectClose:false
@@ -402,7 +403,7 @@ export class LocalMaps {
       const needsDock=await this.needsDock?.(scene);
       if(!needsDock||!valid()||this.editor.active===false||this.editor.placing||!settlementEntrances(scene,{arrival:'land'}).length||settlementEntrances(scene,{arrival:'sea'}).length)return;
       const key=`${scene.id}:dock`;if(prompted.has(key))return;prompted.add(key);
-      const place=await foundry.applications.api.DialogV2.confirm({
+      const place=await RealmDialog.confirm({
         window:{title:`${map.name}: add a dock entrance`},
         content:'<p>Boat travel is available at this settlement, but it has no dock entrance.</p><p>Place a dock where arriving passengers should disembark. Mark additional harbours as <strong>A way in</strong> on their cards to offer more than one dock.</p>',
         yes:{label:'Place dock entrance',icon:'fa-solid fa-anchor'},no:{label:'Later',icon:'fa-solid fa-xmark'},rejectClose:false
@@ -454,7 +455,7 @@ export class LocalMaps {
     // A place's own scene (linked from a local place): it becomes that place's local map.
     const back = returnOf(scene), from = back ? game.scenes.get(back.scene) : null;
     if (from && localMapOf(from)) {
-      const ok = await foundry.applications.api.DialogV2.confirm({
+      const ok = await RealmDialog.confirm({
         window: { title: `Make ${scene.name} a local map` },
         content: `<p>Make <b>${esc(scene.name)}</b> the local map of <b>${esc(back.name)}</b>, in ${esc(localMapOf(from).name)}? Its journal pins become its places.</p>`,
         rejectClose: false
@@ -473,7 +474,7 @@ export class LocalMaps {
     if (!places.length) return ui.notifications.warn(allWorlds().length?"KG Realms: no named settlements or sites were found on the available maps. Create or name a place first.":'KG Realms: create a realm map or enable a companion realm module before linking a local map.');
     const sorted = [...places].sort((a, b) => a.name.localeCompare(b.name));
     const pins = scene.notes.filter((n) => !localOf(n) && (n.entryId || n.pageId)).length;
-    const id = await foundry.applications.api.DialogV2.prompt({
+    const id = await RealmDialog.prompt({
       window: { title: `Make ${scene.name} a local map` },
       content: `<p>Which place on the realm map is this the map of?</p>
         <div class="form-group"><label>Place</label><input type="text" name="place" list="kgr-local-places" value="${esc(guess?.name ?? "")}" placeholder="Start typing a name" autofocus>
@@ -549,7 +550,7 @@ export class LocalMaps {
     const suggest = check.suggest ? `<p class="hint"><i class="fa-solid fa-triangle-exclamation"></i> A ${esc((place?.class ?? "place").toLowerCase())} is usually about ${across(check.expectFt)} across. Suggested: ${grid.size} px = ${check.suggest.distance} ${check.suggest.units}.</p>
       <label class="checkbox"><input type="checkbox" name="applyScale"> Use the suggested scale</label>` : "";
     const unplaced = map.unplaced ?? [];
-    const result = await foundry.applications.api.DialogV2.wait({
+    const result = await RealmDialog.wait({
       window: { title: `Local map: ${scene.name}` },
       content: `<p><b>${esc(scene.name)}</b> is the local map of <b>${esc(map.name)}</b>${place ? ` (${esc(place.class ?? "")})` : ""}.</p>
         <div class="form-group"><label>Scale</label><p>${scaleLine}</p></div>${suggest}
@@ -564,7 +565,7 @@ export class LocalMaps {
     }).catch(() => null);
     if (!result) return;
     if (result.unlink) {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Unlink local map" }, content: `<p>Stop ${esc(scene.name)} being the local map of ${esc(map.name)}? Its pins stay as they are.</p>`, rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Unlink local map" }, content: `<p>Stop ${esc(scene.name)} being the local map of ${esc(map.name)}? Its pins stay as they are.</p>`, rejectClose: false });
       if (!ok) return;
       await scene.unsetFlag(MODULE_ID, "localMap");
       if (map.placeId && place?.scene === scene.id) await this.savePlaceEdit(map.world, map.placeId, { scene: null });

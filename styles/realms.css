@@ -1328,9 +1328,14 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 :is(.kgr-travel, .kgr-camp-box) .camp-task-sum { margin: 0; font-size: 12px; color: var(--kgr-text-2); font-variant-numeric: tabular-nums; }
 :is(.kgr-travel, .kgr-camp-box) .camp-row .camp-join { display: flex; flex-direction: row; align-items: center; gap: 4px; font-size: 11px; color: var(--kgr-muted-2); white-space: nowrap; }
 :is(.kgr-travel, .kgr-camp-box) .camp-row.joined { margin-left: 18px; border-style: dashed; }
-/* Watch with (the one above): its own line under the row, so the name and times keep their room. */
+/* Watch options share one compact row below the character's name, time and ordering controls. */
 :is(.kgr-travel, .kgr-camp-box) .camp-row { flex-wrap: wrap; }
-:is(.kgr-travel, .kgr-camp-box) .camp-row-join { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; padding-left: 52px; }
+:is(.kgr-travel, .kgr-camp-box) .camp-row-options { flex: 1 0 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+:is(.kgr-travel, .kgr-camp-box) .camp-row-options .camp-duty { flex: 0 1 auto; min-height: 22px; margin: 0; }
+:is(.kgr-travel, .kgr-camp-box) .camp-row-options .camp-row-join { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 0; }
+:is(.kgr-travel, .kgr-camp-box) .camp-row-options .camp-join { min-height: 22px; }
+:is(.kgr-travel, .kgr-camp-box) .camp-row-options :is(.camp-duty, .camp-join) input { flex: 0 0 18px; width: 18px; height: 18px; min-height: 18px; margin: 0; padding: 0; }
+@media (pointer: coarse) { :is(.kgr-travel, .kgr-camp-box) .camp-row-options :is(.camp-duty, .camp-join) { min-height: 44px; } }
 :is(.kgr-travel, .kgr-camp-box) .camp-randq { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px dashed var(--kgr-line-2); border-radius: 6px; font-size: 13px; }
 :is(.kgr-travel, .kgr-camp-box) .camp-randq button { flex: 0 0 auto; width: auto; padding: 0 12px; }
 :is(.kgr-travel, .kgr-camp-box) .camp-enc button { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; }

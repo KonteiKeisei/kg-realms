@@ -1,3 +1,4 @@
+import {RealmDialog} from "../ui-theme.mjs";
 // Homebrew realm worlds (0.74): the GM right-clicks a scene with a map picture and chooses "Make
 // realm world". The scene is backed up, the picture is cut into KTX2 tiles in the browser (Basis
 // Universal, lib/basis), and a world with nothing on it yet is saved in Foundry's Data folder
@@ -233,7 +234,7 @@ async function checkUploads(dir) {
 let BuildWindowClass = null;
 export const BuildWindow = function (...args) { BuildWindowClass ??= buildWindowClass(); return new BuildWindowClass(...args); };
 const buildWindowClass = () => class extends foundry.applications.api.ApplicationV2 {
-  static DEFAULT_OPTIONS = { id: "kgr-realm-build", classes: ["kg-realms-build"], window: { title: "Making realm world", icon: "fa-solid fa-earth-europe" }, position: { width: 420 } };
+  static DEFAULT_OPTIONS = { id: "kgr-realm-build", classes: ["kgr-ui", "kg-realms-build"], window: { title: "Making realm world", icon: "fa-solid fa-earth-europe" }, position: { width: 420 } };
   constructor(name, onStop, { title = `Making ${name}`, id, steps = [["backup", "Back up the scene"], ["read", "Read the picture"], ["tiles", "Make map tiles"], ["save", "Save the world"], ["scene", "Turn the scene into a realm map"]] } = {}) {
     super({ window: { title }, ...(id?{id}:{}) });
     this.onStop = onStop;
@@ -262,7 +263,7 @@ const buildWindowClass = () => class extends foundry.applications.api.Applicatio
 async function makeRealmWorld(scene,{regional=false}={}) {
   if (!scene) return;
   const all = saved(), again = Object.values(all).find((d) => d.scene === scene.id && worldDef(d.id));
-  const values = await foundry.applications.api.DialogV2.wait({
+  const values = await RealmDialog.wait({
     window: { title: regional?"Make regional map":"Make realm world", icon: regional?"fa-solid fa-map-location-dot":"fa-solid fa-earth-europe" }, position: { width: 440 }, rejectClose: false,
     content: `<div class="kgr-make-world">
       <div class="form-group"><label>${regional?"Regional map name":"World name"}</label><input name="name" type="text" value="${esc(again?.title ?? scene.name)}" required></div>
@@ -436,7 +437,7 @@ async function rebuildMap(scene, src) {
   const sheet = index.sourceMap, detail = detailLevels(sheet, bitmap.width, bitmap.height), f = 2 ** detail;
   bitmap.close();
   const size = (w, h) => `${w.toLocaleString()} x ${h.toLocaleString()}`;
-  const go = await foundry.applications.api.DialogV2.confirm({
+  const go = await RealmDialog.confirm({
     window: { title: "Regenerate map tiles", icon: "fa-solid fa-arrows-rotate" }, position: { width: 460 }, rejectClose: false,
     content: `<p>Replace the tiles of <b>${esc(def.title)}</b> with this picture, fitted to the map's shape and kept at ${size(sheet.width * f, sheet.height * f)}.</p>
       <p>Places, roads, rivers and everything else stay exactly where they are. When it finishes, everyone's game reloads.</p>`
@@ -491,7 +492,7 @@ async function rebuildMap(scene, src) {
 
 async function revert(scene) {
   const original = scene.getFlag(ID, "homebrewOriginal"), def = homebrewOf(scene);
-  const yes = await foundry.applications.api.DialogV2.confirm({
+  const yes = await RealmDialog.confirm({
     window: { title: "Revert to backup" }, rejectClose: false,
     content: `<p>Put ${esc(scene.name)} back as it was before it became a realm map: its picture and grid.</p><p>${esc(def?.title ?? "The world")} and its map tiles stay saved, so making it a realm world again skips making tiles. Journeys on this scene are cleared.</p>`
   });
@@ -503,7 +504,7 @@ async function revert(scene) {
 async function worldSettings(scene) {
   const def = homebrewOf(scene); if (!def) return;
   const regional=!!(scene.getFlag(ID,"regionalMap")||game.settings.get(ID,"regionalMaps")?.[def.id]);
-  const values = await foundry.applications.api.DialogV2.wait({
+  const values = await RealmDialog.wait({
     window: { title: `${def.title}: settings`, icon: "fa-solid fa-gear" }, position: { width: 420 }, rejectClose: false,
     content: `<div class="form-group"><label>${regional?"Regional map name":"World name"}</label><input name="name" type="text" value="${esc(def.title)}"></div>
       <div class="form-group"><label>Map width in miles ${q("How far it is from the left edge of the picture to the right. Travel times and the day's distance on the route sheet use it.")}</label><input name="miles" type="number" min="1" step="any" value="${def.miles}"></div>`,

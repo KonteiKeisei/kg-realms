@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 // The GM's road editor. Click a road or trail to select it and show its nodes; drag a node
 // to move it, click the line to add a node, right-click a node to remove it. "New road" and
 // "New trail" draw a route click by click, snapping to places and to other routes' nodes;
@@ -388,7 +389,7 @@ export class RoadEditor {
   }
 
   async #simplifyAll() {
-    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Simplify every road" }, content: "<p>Take out the excess nodes on every road and trail? Junctions and places stay put, and the roads draw as curves through what is left. Ctrl+Z undoes it.</p>", rejectClose: false });
+    const ok = await RealmDialog.confirm({ window: { title: "Simplify every road" }, content: "<p>Take out the excess nodes on every road and trail? Junctions and places stay put, and the roads draw as curves through what is left. Ctrl+Z undoes it.</p>", rejectClose: false });
     if (!ok) return;
     const routes = this.getRoutes().features, index = this.#junctions();
     let before = 0, after = 0;
@@ -418,7 +419,7 @@ export class RoadEditor {
     const j = joinLines(this.coords, other.geometry.coordinates, lonLatToSource);
     const miles = j.gap * SOURCE_MAP.milesPerPixel;
     if (miles > 3) {
-      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Join roads" }, content: `<p>The nearest ends are ${miles.toFixed(1)} miles apart. Join them with a straight piece of road?</p>`, rejectClose: false });
+      const ok = await RealmDialog.confirm({ window: { title: "Join roads" }, content: `<p>The nearest ends are ${miles.toFixed(1)} miles apart. Join them with a straight piece of road?</p>`, rejectClose: false });
       if (!ok) return;
     }
     this.joining = false;
@@ -439,7 +440,7 @@ export class RoadEditor {
     const id = this.selected;
     if (!id) return;
     const f = this.getRoutes().features.find((x) => x.properties.id === id);
-    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Delete route" }, content: `<p>Delete the whole ${esc(f?.properties.kind ?? "route")}${f?.properties.name ? ` <b>${esc(f.properties.name)}</b>` : ""}? It can be restored from the editor's Restore list.</p>`, rejectClose: false });
+    const ok = await RealmDialog.confirm({ window: { title: "Delete route" }, content: `<p>Delete the whole ${esc(f?.properties.kind ?? "route")}${f?.properties.name ? ` <b>${esc(f.properties.name)}</b>` : ""}? It can be restored from the editor's Restore list.</p>`, rejectClose: false });
     if (!ok) return;
     this.select(null);
     await this.#commit((w) => {
@@ -515,7 +516,7 @@ export class RoadEditor {
 
   async #deleteEncounter() {
     const id = this.encounter, e = this.getEncounters()[id];
-    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Delete encounter" }, content: `<p>Delete the encounter <b>${esc(e?.name)}</b>?</p>`, rejectClose: false });
+    const ok = await RealmDialog.confirm({ window: { title: "Delete encounter" }, content: `<p>Delete the encounter <b>${esc(e?.name)}</b>?</p>`, rejectClose: false });
     if (!ok) return;
     this.encounter = null;
     await this.#commitEnc((w) => { const c = { ...w }; delete c[id]; return c; });
@@ -571,7 +572,7 @@ export class RoadEditor {
   }
   exportEncounters(){foundry.utils.saveDataToFile(JSON.stringify(encounterFile(this.getEncounters?.()??{},this.getWorld?.()),null,2),"application/json","encounters.json");}
   async importEncounterData(data){const entries=readEncounterFile(data);await this.#commitEnc(old=>({...old,...entries}));this.#render();return Object.keys(entries).length;}
-  importEncounters(){const input=document.createElement("input");input.type="file";input.accept=".json,application/json";input.onchange=async()=>{try{const data=JSON.parse(await input.files[0].text()),entries=readEncounterFile(data);if(!await foundry.applications.api.DialogV2.confirm({window:{title:"Import encounters"},content:`<p>Import ${Object.keys(entries).length} encounters? Matching IDs are updated; other encounters remain.</p>`,rejectClose:false}))return;await this.importEncounterData(data);}catch(error){ui.notifications.warn(`KG Realms: ${error.message}`);}};input.click();}
+  importEncounters(){const input=document.createElement("input");input.type="file";input.accept=".json,application/json";input.onchange=async()=>{try{const data=JSON.parse(await input.files[0].text()),entries=readEncounterFile(data);if(!await RealmDialog.confirm({window:{title:"Import encounters"},content:`<p>Import ${Object.keys(entries).length} encounters? Matching IDs are updated; other encounters remain.</p>`,rejectClose:false}))return;await this.importEncounterData(data);}catch(error){ui.notifications.warn(`KG Realms: ${error.message}`);}};input.click();}
 
   export() {
     const features = this.getRoutes().features.map((f) => {
@@ -684,7 +685,7 @@ export class RoadEditor {
     if(act==="road-pick"){this.select(button.dataset.id);return this.#locateRoad(button.dataset.id);}
     if(act==="road-locate")return this.#locateRoad(button.dataset.id);
     if(act==="enc-locate"){const x=this.getEncounters()[button.dataset.id],layer=this.getLayer();if(x&&layer.frame){const p=latLonToScene(layer.frame,x.lat,x.lon);canvas.animatePan?.({...p,duration:400});}return;}
-    if(act==="enc-group-rename"){e.preventDefault();e.stopPropagation();const group=button.dataset.group;return foundry.applications.api.DialogV2.prompt({window:{title:"Rename encounter group"},content:`<label>Group name<input name="group" value="${esc(group)}"></label>`,ok:{label:"Rename",callback:(_e,b)=>b.form.elements.group.value.trim()},rejectClose:false}).then(name=>{if(name==null)return;return this.#commitEnc(all=>Object.fromEntries(Object.entries(all).map(([id,x])=>[id,x.group===group?{...x,group:name}:x]))).then(()=>this.#render());});}
+    if(act==="enc-group-rename"){e.preventDefault();e.stopPropagation();const group=button.dataset.group;return RealmDialog.prompt({window:{title:"Rename encounter group"},content:`<label>Group name<input name="group" value="${esc(group)}"></label>`,ok:{label:"Rename",callback:(_e,b)=>b.form.elements.group.value.trim()},rejectClose:false}).then(name=>{if(name==null)return;return this.#commitEnc(all=>Object.fromEntries(Object.entries(all).map(([id,x])=>[id,x.group===group?{...x,group:name}:x]))).then(()=>this.#render());});}
     if(act==="enc-export")return this.exportEncounters();if(act==="enc-import")return this.importEncounters();
     if (["simplify-all", "export", "import"].includes(act)) this.moreOpen = false;
     ({

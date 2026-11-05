@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {partyOutlineValue,drawPartyOutline} from './party-appearance.mjs';
 import {groupMembers,groupActor,tokenDoc,familyActors,rosterStamp,partyMeta} from './party-groups.mjs';
 import {isPrimaryGM} from './authority.mjs';
@@ -98,7 +99,7 @@ export class PartyInterface {
   if(!isPrimaryGM())return ui.notifications.warn('The primary GM manages party membership.');
   const scene=left.parent,actors=familyActors(left.actor),stamp=rosterStamp(actors),members=[...groupMembers(left.actor),...(right?groupMembers(right.actor):[]),...extra.flatMap(t=>groupMembers(t.actor))];
   const all=new Map(members.map(a=>[a.id,a])),rightIds=new Set(right?[...groupMembers(right.actor),...extra.flatMap(t=>groupMembers(t.actor))].map(a=>a.id):[]),checked=new Set();
-  const result=await foundry.applications.api.DialogV2.wait({window:{title:right?'Merge party':'Split party'},position:{width:760},rejectClose:false,
+  const result=await RealmDialog.wait({window:{title:right?'Merge party':'Split party'},position:{width:760},rejectClose:false,
    content:`<div class="kgr-ui kgr-party-transfer"><p>Drag members between the two sides. Shift-click cards to select several, then drag one of them to move them together. Character sheets and their items stay unchanged. Pooled group inventory stays with the original group.</p><div class="kgr-party-sides"><section data-party-side="left"><h3>${esc(left.name)}</h3><div class="kgr-party-members"></div></section><section data-party-side="right"><h3>${esc(right?.name??'New party')}</h3><div class="kgr-party-members"></div></section></div><p class="hint" data-party-summary></p></div>`,
    buttons:[{action:'confirm',label:'Confirm',default:true,callback:()=>[...all.keys()].filter(id=>rightIds.has(id))},{action:'cancel',label:'Cancel',callback:()=>null}],
    render:(_e,dialog)=>{

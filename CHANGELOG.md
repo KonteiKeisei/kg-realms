@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.95.1: frosted glass interface and compact watch cards
+
+- Apply the approved glass style to Travel, Camp, settlement travel, map and local editors, place and encounter cards, trade, navigation, setup, generation, export/import and progress windows. Use translucent frames, darker inset controls, thin borders, Signika titles and consistent selected states. Keep existing actions, permissions, scene content and travel behavior.
+- Add Blue Slate as the default window theme and adapt Chocolate, Oxblood, Royal Blue, Emerald, Amethyst, Iron and Holy White to the same surfaces. Preserve saved theme choices. Start at 75% panel opacity with 8 px backdrop blur. Add client-only opacity and blur controls in module settings, with opaque fallbacks when blur is unsupported.
+- Theme KG Realms-owned native dialogs without changing their callbacks or results. Keep GM-only encounter borders orange-yellow. Retain the scrolling travel plan, pinned progress controls, collapsed HUD and compact layers rail.
+- Compact practice and live watch-order cards. Put Take a watch and Watch with on one row below the character details. Preserve watch hours, ordering, joining, permissions and fatigue notes; retain larger checkbox targets on touch devices.
+
 ## 0.94.9: editable companion worlds and portable settings
 
 - Change a local marker between Place, Gate and Dock directly in the Local Places list or on its card. Keep its position, text, artwork and linked scene; update its travel entrance behavior with its type.

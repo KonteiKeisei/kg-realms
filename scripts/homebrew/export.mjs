@@ -1,3 +1,4 @@
+import {RealmDialog} from "../ui-theme.mjs";
 // Export a made world as a module (0.80): everything the world is, so it works in any game world.
 // The map and its tiles; places, roads, rivers, biomes, encounters, trade and snow with every edit
 // applied; each scene the world reaches, with its pins, lights, walls and tokens; every actor, journal,
@@ -389,7 +390,7 @@ export function restoreModuleRegionalMaps(){
 export async function exportModule(def, rootScene) {
   if (!def) return;
   const here = currentCalendar();
-  const values = await foundry.applications.api.DialogV2.wait({
+  const values = await RealmDialog.wait({
     window: { title: "Export as module", icon: "fa-solid fa-file-export" }, position: { width: 460 }, rejectClose: false,
     content: `<div class="form-group"><label>Module title</label><input name="title" type="text" value="KG Realms: ${esc(def.title)}"></div>
       <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
@@ -414,14 +415,14 @@ export async function exportModule(def, rootScene) {
     }
     const built = await buildExport(def, options, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
     if(built.problems){
-      await foundry.applications.api.DialogV2.wait({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Download the repair report to share the broken paths, owning scenes, document IDs and exact fields for cleanup.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,buttons:[{action:'download',label:'Download repair report',icon:'fa-solid fa-download',callback:()=>{
+      await RealmDialog.wait({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Download the repair report to share the broken paths, owning scenes, document IDs and exact fields for cleanup.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,buttons:[{action:'download',label:'Download repair report',icon:'fa-solid fa-download',callback:()=>{
         const data=exportRepairReport(built,options,game.modules.get(ID)?.version??null);
         foundry.utils.saveDataToFile(JSON.stringify(data,null,2),'application/json',`${moduleId}-export-repair.json`);
       }},{action:'close',label:'Close',default:true}],rejectClose:false});
       return;
     }
     foundry.utils.saveDataToFile(new Blob(built.parts, { type: "application/zip" }), "application/zip", built.name);
-    await foundry.applications.api.DialogV2.prompt({
+    await RealmDialog.prompt({
       window: { title: `${title}: exported` }, position: { width: 560 },
       content: `<p>${built.problems ? `<strong>Downloading, with ${built.problems} problem${built.problems === 1 ? "" : "s"} listed below.</strong>` : "Downloading."} Extract it into Data/modules and enable it.</p><pre style="max-height:320px;overflow:auto;white-space:pre-wrap;font-size:12px">${esc(built.report)}</pre>`,
       ok: { label: "Close" }, rejectClose: false

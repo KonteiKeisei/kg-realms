@@ -1,3 +1,4 @@
+import {RealmDialog} from "./ui-theme.mjs";
 import {allWorlds,worldDef,worldUrl,registerWorld} from './worlds.mjs';
 import {mergedSceneTemplates,selectedScenePlan,sceneTemplateCatalog} from './scene-template-plan.mjs';
 import {restoreModuleRegionalMaps} from './homebrew/export.mjs';
@@ -152,7 +153,7 @@ export async function openSceneChecklist(def,{automatic=false}={}) {
   const work=(async()=>{
     const nodes=sceneTemplates(def);if(!nodes.length)return null;
     if(automatic&&!nodes.some(n=>!generatedScene(n)))return null;
-    const result=await foundry.applications.api.DialogV2.wait({window:{title:`${def.title}: generate maps`,icon:'fa-solid fa-map'},classes:['kgr-ui'],position:{width:640},content:sceneChecklistContent(def,nodes),rejectClose:false,
+    const result=await RealmDialog.wait({window:{title:`${def.title}: generate maps`,icon:'fa-solid fa-map'},classes:['kgr-ui'],position:{width:640},content:sceneChecklistContent(def,nodes),rejectClose:false,
       render:(_event,dialog)=>bindSceneChecklist(dialog.element,nodes,def),buttons:[
         {action:'generate',label:'Generate selected',icon:'fa-solid fa-map',default:true,callback:(_event,button)=>({ids:[...button.form.querySelectorAll('[name="scene-template"]:checked:not(:disabled)')].map(b=>b.value),includeTokens:!!button.form.querySelector('[name="include-scene-tokens"]')?.checked})},
         {action:'later',label:'Later',callback:()=>null},
@@ -210,7 +211,7 @@ export function registerSceneSetup() {
 /** Regenerate a local map as a new linked copy, retaining the current scene as a backup. */
 export async function regenerateSceneCopy(def,node) {
   requireGM();if(!['local','scene'].includes(node?.kind)||node.preset)throw Error('Choose a packaged local map or scene.');
-  const choice=await foundry.applications.api.DialogV2.wait({window:{title:`Regenerate ${node.name}`},rejectClose:false,content:`<p>Create a fresh copy of ${esc(node.name)} from the module. The current scene stays available.</p><label><input type="checkbox" name="tokens"> Include scene tokens</label>`,buttons:[{action:'copy',label:'Generate and link new copy',callback:(_e,b)=>({includeTokens:!!b.form.querySelector('[name="tokens"]')?.checked})},{action:'cancel',label:'Cancel'}]});
+  const choice=await RealmDialog.wait({window:{title:`Regenerate ${node.name}`},rejectClose:false,content:`<p>Create a fresh copy of ${esc(node.name)} from the module. The current scene stays available.</p><label><input type="checkbox" name="tokens"> Include scene tokens</label>`,buttons:[{action:'copy',label:'Generate and link new copy',callback:(_e,b)=>({includeTokens:!!b.form.querySelector('[name="tokens"]')?.checked})},{action:'cancel',label:'Cancel'}]});
   if(!choice||typeof choice!=='object')return null;
   requireGM();
   const maps=game.modules.get(ID)?.api?.localMaps;
