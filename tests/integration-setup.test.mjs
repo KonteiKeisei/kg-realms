@@ -103,6 +103,24 @@ test('unsupported systems and required version ranges cannot be enabled',()=>{
   assert.throws(()=>integrationPlan(['fxmaster-plus'],game),/different version/);
 });
 
+test('Foundry generation ceilings accept every build within V14, including FXMaster dependencies',()=>{
+  const {game}=fixture();game.version='14.367';
+  game.modules.get('fxmaster').compatibility={minimum:'13',verified:'14',maximum:'14'};
+  game.modules.get('fxmaster-plus').compatibility={minimum:'13',verified:'14',maximum:'14'};
+  assert.deepEqual(integrationPlan(['fxmaster-plus'],game).enable,['fxmaster','fxmaster-plus']);
+  assert.equal(installedIntegrations(game).find(m=>m.id==='fxmaster-plus').issue,'');
+  game.version='15.1';assert.throws(()=>integrationPlan(['fxmaster-plus'],game),/incompatible/);
+  game.version='13.351';assert.doesNotThrow(()=>integrationPlan(['fxmaster-plus'],game));
+});
+
+test('core build ceilings and Foundry-reported incompatibility still block incompatible installations',()=>{
+  const {game}=fixture();game.version='14.367';
+  game.modules.get('fxmaster').compatibility={minimum:'14',maximum:'14.366'};
+  assert.throws(()=>integrationPlan(['fxmaster'],game),/compatible module update/);
+  game.modules.get('fxmaster').compatibility={minimum:'14',maximum:'14'};game.modules.get('fxmaster').incompatible=true;
+  assert.throws(()=>integrationPlan(['fxmaster'],game),/incompatible/);
+});
+
 test('Never dismisses for the world without changing modules or reloading; manual review stays registered',async()=>{
   const {game,settings,events,writes,menus}=fixture();registerIntegrationSetup();
   assert.equal(menus[0][2].restricted,true);assert.equal(menus[0][2].label,'Review integrations');

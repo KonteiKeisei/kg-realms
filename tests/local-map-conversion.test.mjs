@@ -8,6 +8,7 @@ import {homebrewSheet} from '../scripts/homebrew/plan.mjs';
 import {applyEdits} from '../scripts/places.mjs';
 
 function fixture(places,selected='Stonebridge') {
+  registerWorld({id:'trorune',title:'Trorune',module:'example-trorune'});
   const warnings=[],messages=[],edits=[],prompts=[],flags={},note={id:'note',text:'Old Mill',texture:{src:''},getFlag:()=>null};
   const scene={id:'town-map',name:'STONEBRIDGE',notes:[note],getFlag:(_m,k)=>flags[k],setFlag:async(_m,k,value)=>{flags[k]=value;},updateEmbeddedDocuments:async(type,updates)=>{assert.equal(type,'Note');Object.assign(note,updates[0]);}};
   globalThis.game={user:{isGM:true},scenes:{get:()=>null},journal:[]};

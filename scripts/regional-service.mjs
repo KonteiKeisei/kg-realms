@@ -10,6 +10,7 @@ import { onCanvas } from './canvas-input.mjs';
 import { isPrimaryGM } from './authority.mjs';
 import { regionalPlace } from './regional-place.mjs';
 import { placeLayer } from './map-layers.mjs';
+import {sceneContextEntry} from './foundry-compat.mjs';
 const ID='kg-realms', KEY='regionalMaps';
 const clone=x=>structuredClone(x), esc=x=>foundry.utils.escapeHTML(String(x??''));
 export class RegionalMaps {
@@ -18,7 +19,7 @@ export class RegionalMaps {
   init(){
     game.settings.register(ID,KEY,{scope:'world',config:false,type:Object,default:{},onChange:()=>{this.networks.clear();this.onChange?.();}});
     for(const hook of ['getSceneContextOptions','getSceneDirectoryEntryContext'])Hooks.on(hook,(_app,options)=>{
-      options.push({name:'Regional map settings',icon:'<i class="fa-solid fa-map-location-dot"></i>',condition:li=>{const scene=this.sceneFrom(li),world=scene?.getFlag(ID,'world');return !!(game.user.isGM&&world&&(this.links[world]||scene.getFlag(ID,'regionalMap')));},callback:li=>this.configure(this.sceneFrom(li)).catch(e=>ui.notifications.error(`KG Realms: ${e.message}`))});
+      options.push(sceneContextEntry({name:'Regional map settings',icon:'<i class="fa-solid fa-map-location-dot"></i>',condition:li=>{const scene=this.sceneFrom(li),world=scene?.getFlag(ID,'world');return !!(game.user.isGM&&world&&(this.links[world]||scene.getFlag(ID,'regionalMap')));},callback:li=>this.configure(this.sceneFrom(li)).catch(e=>ui.notifications.error(`KG Realms: ${e.message}`))}));
     });
   }
   sceneFrom(li){const el=li?.[0]??li;return game.scenes.get(el?.dataset?.entryId??el?.dataset?.documentId);}

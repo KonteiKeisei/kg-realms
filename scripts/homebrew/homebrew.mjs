@@ -5,7 +5,8 @@
 // The scene then draws as a realm map. Afterwards: settings, revert to the backup, export as module.
 import { isPrimaryGM } from "../authority.mjs";
 import { runMapBuild } from "./map-build.mjs";
-import { backgroundOf, setBackground } from "../local-maps.mjs";
+import {sceneContextEntry} from '../foundry-compat.mjs';
+import { backgroundOf, setBackground,sceneBackgroundPatch } from "../local-maps.mjs";
 import { registerWorld, worldDef, allWorlds, worldUrl } from "../worlds.mjs";
 import { forgetWorld, DATA_VERSION } from "../generator.mjs";
 import { REALM_DARK_AMBIENCE, REALM_AMBIENCE_REVISION } from "../scene-ambience.mjs";
@@ -167,13 +168,13 @@ async function resheetWorlds() {
 function contextOptions(options) {
   if (!Array.isArray(options)) return;
   const gm = () => game.user.isGM;
-  options.push(
-    { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li); return gm() && !!s?.background?.src && !isVideo(s.background.src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
-    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li);return gm()&&!!s?.background?.src&&!isVideo(s.background.src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world")){await scene.setFlag(ID,"regionalMap",true);await game.modules.get(ID).api.regionalMaps.configure(scene);}} },
+  options.push(...[
+    { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li),src=backgroundOf(s); return gm() && !!src && !isVideo(src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
+    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li),src=backgroundOf(s);return gm()&&!!src&&!isVideo(src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world")){await scene.setFlag(ID,"regionalMap",true);await game.modules.get(ID).api.regionalMaps.configure(scene);}} },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
     { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!exportWorldOf(sceneOf(li)), callback: (li) => exportModule(exportWorldOf(sceneOf(li)),sceneOf(li)?.id) }
-  );
+  ].map(sceneContextEntry));
 }
 
 /** Companion realms and made maps can both export this world's edited content. */
@@ -286,7 +287,7 @@ async function build(scene, name, miles) {
     backup = await backupScene(scene);
     win.set("backup", "done", BACKUPS);
     step = "read"; win.set("read", "now"); halt();
-    const blob = await (await fetch(foundry.utils.getRoute(scene.background.src))).blob();
+    const blob = await (await fetch(foundry.utils.getRoute(backgroundOf(scene)))).blob();
     let bitmap = await createImageBitmap(blob);
     if (Math.max(bitmap.width, bitmap.height) > MAX_PICTURE) {
       const k = MAX_PICTURE / Math.max(bitmap.width, bitmap.height), w = Math.round(bitmap.width * k), h = Math.round(bitmap.height * k);
@@ -371,9 +372,10 @@ async function convertScene(scene, id, { miles, backup = null }) {
   const def = worldDef(id) ?? saved()[id];
   const index = await (await fetch(worldUrl(id, "index.json"), { cache: "no-store" })).json();
   const milesPer100 = (miles / scene.width) * 100;
-  const original = scene.getFlag(ID, "homebrewOriginal") ?? { background: scene._source.background?.src ?? null, grid: foundry.utils.deepClone(scene._source.grid), backgroundColor: scene._source.backgroundColor, backup: backup?.id ?? def?.backup ?? null };
+  const level=scene.initialLevel??scene.firstLevel??scene.levels?.contents?.[0];
+  const original = scene.getFlag(ID, "homebrewOriginal") ?? { background: backgroundOf(scene), grid: foundry.utils.deepClone(scene._source.grid), backgroundColor:level?.background?.color??scene._source.backgroundColor, backup: backup?.id ?? def?.backup ?? null };
   await scene.update({
-    "background.src": null, backgroundColor: "#000000",
+    ...sceneBackgroundPatch(scene,null,'#000000'),
     grid: { type: CONST.GRID_TYPES.GRIDLESS, size: 100, distance: Number(milesPer100.toFixed(4)), units: "mi" },
     "environment.dark": REALM_DARK_AMBIENCE,
     [`flags.${ID}`]: { world: id, level: "surface", bounds: index.sourceMap.bounds, milesPer100, version: DATA_VERSION, darkAmbience: REALM_AMBIENCE_REVISION, homebrewOriginal: original }
@@ -490,7 +492,7 @@ async function revert(scene) {
     content: `<p>Put ${esc(scene.name)} back as it was before it became a realm map: its picture and grid.</p><p>${esc(def?.title ?? "The world")} and its map tiles stay saved, so making it a realm world again skips making tiles. Journeys on this scene are cleared.</p>`
   });
   if (!yes) return;
-  await scene.update({ "background.src": original.background, grid: original.grid, backgroundColor: original.backgroundColor ?? "#999999", [`flags.-=${ID}`]: null });
+  await scene.update({ ...sceneBackgroundPatch(scene,original.background,original.backgroundColor??'#999999'), grid: original.grid, [`flags.-=${ID}`]: null });
   ui.notifications.info(`KG Realms: ${scene.name} is back as it was.${original.backup ? ` Its backup is still in "${BACKUPS}".` : ""}`);
 }
 

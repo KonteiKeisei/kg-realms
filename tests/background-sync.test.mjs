@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TravelHud } from "../scripts/ui-hud.mjs";
 import { gmGame, testScene } from "./helpers/journey.mjs";
+import {registerWorld} from '../scripts/worlds.mjs';
 
 test("off-map sync is idle without viewers, caches its planner, and accepts an explicit player request", async () => {
+  registerWorld({id:'test-world',module:'test-companion'});
   const hooks={},once={},seen=[];
   globalThis.Hooks={on:(name,fn)=>(hooks[name]??=[]).push(fn),once:(name,fn)=>(once[name]??=[]).push(fn)};
   globalThis.foundry={utils:{debounce:fn=>fn,getRoute:s=>s,mergeObject:Object.assign,hasProperty:(o,p)=>p.split(".").every(k=>(o=o?.[k])!==undefined)}};

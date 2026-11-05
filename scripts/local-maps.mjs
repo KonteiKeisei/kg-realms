@@ -8,6 +8,7 @@ import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
 import { asHtml, asSecret, excerptHtml } from "./place-card.mjs";
 import { LocalEditor } from "./ui-local.mjs";
 import { isPrimaryGM } from "./authority.mjs";
+import {sceneContextEntry} from './foundry-compat.mjs';
 import { settlementAmbience } from "./scene-ambience.mjs";
 import {settlementEntrances} from './settlement-entry.mjs';
 import { mapAsset } from "./local-map-renderer.mjs";
@@ -45,6 +46,13 @@ const startLevel = (scene) => scene.initialLevel ?? scene.firstLevel ?? scene.le
 export function backgroundOf(scene) {
   if (onLevels(scene)) return startLevel(scene)?.background?.src ?? null;
   return scene?.background?.src ?? null;
+}
+export function sceneBackgroundPatch(scene,src,color){
+  if(onLevels(scene)){
+    const level=startLevel(scene);if(!level)throw Error('The scene has no starting level.');
+    return {levels:[{_id:level.id??level._id,background:{src,...(color?{color}:{})}}]};
+  }
+  return {'background.src':src,...(color?{backgroundColor:color}:{})};
 }
 export async function setBackground(scene, src, color = null) {
   if (onLevels(scene)) {
@@ -325,10 +333,10 @@ export class LocalMaps {
   #contextOptions(options) {
     if (!Array.isArray(options)) return;
     const scene = (li) => { const el = li instanceof HTMLElement ? li : li?.[0]; return game.scenes.get(el?.dataset?.entryId ?? el?.dataset?.documentId); };
-    options.push(
+    options.push(...[
       { name: "Make local map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: (li) => game.user.isGM && !localMapOf(scene(li)) && !scene(li)?.getFlag(MODULE_ID, "world"), callback: (li) => this.make(scene(li)) },
       { name: "Local map settings", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: (li) => game.user.isGM && !!localMapOf(scene(li)), callback: (li) => this.settings(scene(li)) }
-    );
+    ].map(sceneContextEntry));
   }
 
   /* ---------------------------------------------------------------- making a local map */
@@ -382,6 +390,7 @@ export class LocalMaps {
 
   /** Prefer this scene's saved pin link, including inherited Regional places, over a name guess. */
   async #conversionPlaces(scene, requestedWorld) {
+    if(!allWorlds().length)return {world:null,places:[]};
     const viewed = globalThis.canvas?.scene;
     const preferred = requestedWorld ?? viewed?.getFlag?.(MODULE_ID, "world") ?? localMapOf(viewed)?.world ?? defaultWorldId();
     const worlds = requestedWorld ? [requestedWorld] : [...new Set([preferred, ...allWorlds().map(w => w.id)].filter(Boolean))];
@@ -424,7 +433,7 @@ export class LocalMaps {
     catch (error) { return ui.notifications.error(`KG Realms: could not load places for local-map setup: ${error.message}`); }
     const { places, guess } = choices;
     world = choices.world;
-    if (!places.length) return ui.notifications.warn("KG Realms: no named settlements or sites were found on the available maps. Create or name a place first.");
+    if (!places.length) return ui.notifications.warn(allWorlds().length?"KG Realms: no named settlements or sites were found on the available maps. Create or name a place first.":'KG Realms: create a realm map or enable a companion realm module before linking a local map.');
     const sorted = [...places].sort((a, b) => a.name.localeCompare(b.name));
     const pins = scene.notes.filter((n) => !localOf(n) && (n.entryId || n.pageId)).length;
     const id = await foundry.applications.api.DialogV2.prompt({

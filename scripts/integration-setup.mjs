@@ -14,6 +14,11 @@ const enabled = (module, config) => Object.hasOwn(config,module.id) ? config[mod
 const configuration = game => ({...(game.settings.get('core','moduleConfiguration') ?? {})});
 const newer = (a,b) => !!globalThis.foundry?.utils?.isNewerVersion?.(a,b);
 const outside = (version, range) => !!(range?.minimum && newer(range.minimum,version) || range?.maximum && newer(version,range.maximum));
+// A core maximum of "14" covers the entire V14 generation, including build-qualified versions.
+const outsideFoundry = (version,range) => {
+  const max=String(range?.maximum??'');
+  return !!(range?.minimum&&newer(range.minimum,version)||max&&(/^\d+$/.test(max)?Number(String(version).split('.')[0])>Number(max):newer(version,max)));
+};
 
 /** Resolve only selected integrations and their required modules. Never change unrelated choices. */
 export function integrationPlan(selected, game = globalThis.game) {
@@ -23,7 +28,7 @@ export function integrationPlan(selected, game = globalThis.game) {
     if (!module) throw Error(`Required module is not installed: ${id}.`);
     if (enabled(module,config) || enable.has(id)) return;
     if (visiting.has(id)) throw Error(`Module dependency cycle: ${module.title ?? id}.`);
-    if (module.incompatible || outside(game.version ?? game.release?.version, module.compatibility)) throw Error(`${module.title ?? id} is incompatible with this Foundry version.`);
+    if (module.incompatible || outsideFoundry(game.version ?? game.release?.version, module.compatibility)) throw Error(`${module.title ?? id} ${module.version??''} is incompatible with Foundry ${game.version??game.release?.version}. Check for a compatible module update.`);
     const systems = rows(module.relationships?.systems), system = systems.find(s => s.id === game.system.id);
     if (systems.length && !system || system && outside(game.system.version,system.compatibility)) throw Error(`${module.title ?? id} is incompatible with this game system.`);
     visiting.add(id);

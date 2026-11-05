@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.94.6: fresh-install setup and V14 rendering
+
+- Show Generate in the Scenes sidebar only when an enabled companion module provides a root realm. Hide it on a clean install, with only manually created realms, or with only Regional definitions. Apply the same check to the generator action. Stop local-map setup from trying an implicit Toril load without any registered realm, and replace private companion examples and developer-only setup errors with generic setup instructions.
+- Decode KTX2 artwork with Foundry V14's native Khronos parser while retaining the V13 Basis parser. Preserve shared source buffers and decoded alpha handling. The decoder serves realm terrain, local backgrounds and optimized placed tiles.
+- Use native V14 scene-menu labels, visibility checks and click handlers, including the selected row argument. Read and update the starting Level's background when making or reverting realm maps. Retain V13 scene fields and menu contracts.
+- Treat a Foundry compatibility maximum of 14 as the whole V14 generation. Keep explicit build ceilings and Foundry-reported incompatibility checks, and identify installed module versions when an update is required.
+
 ## 0.94.5: downloadable export repair reports
 
 - Add Download repair report to Export needs repair. Save a JSON file with the readable report, selected export options and failed references for every included realm and Regional map.

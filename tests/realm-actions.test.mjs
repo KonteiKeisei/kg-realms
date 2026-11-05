@@ -4,7 +4,7 @@ import {registerWorld} from '../scripts/worlds.mjs';
 import {registerHomebrew} from '../scripts/homebrew/homebrew.mjs';
 import {RegionalMaps} from '../scripts/regional-service.mjs';
 
-function fixture(){
+function fixture(generation=13){
   const handlers=new Map(),dialogs=[],settings={homebrewWorlds:{detail:{id:'detail',title:'Detailed map'}},regionalMaps:{detail:{parent:'companion-realm'}}};
   globalThis.Hooks={on:(name,fn)=>{const list=handlers.get(name)??[];list.push(fn);handlers.set(name,list);},once:()=>{}};
   globalThis.HTMLElement=class {};
@@ -16,7 +16,8 @@ function fixture(){
     ['unlinked',scene('unlinked',{world:'unlinked-detail',regionalMap:true})],
     ['plain',scene('plain',{})]
   ]);
-  globalThis.game={user:{isGM:true},modules:{get:()=>null},settings:{register:()=>{},get:(_m,k)=>settings[k]??{}},scenes};
+  globalThis.game={release:{generation},user:{isGM:true},modules:{get:()=>null},settings:{register:()=>{},get:(_m,k)=>settings[k]??{}},scenes};
+  if(generation===14){const plain=scenes.get('plain');plain.initialLevel={id:'base',background:{src:'map.webp'}};plain.levels={size:1};Object.defineProperty(plain,'background',{get(){throw Error('Deprecated Scene background accessed');}});}
   registerWorld({id:'companion-realm',title:'Example Realm',module:'example-companion'});
   registerWorld({id:'unlinked-detail',title:'Unlinked detail',module:'kg-realms'});
   registerHomebrew();new RegionalMaps({}).init();
@@ -35,6 +36,12 @@ test('a companion realm exports through its scene menu without becoming a homebr
   await exp.callback(entry('realm'));
   assert.match(dialogs[0].content,/KG Realms: Example Realm/);
   assert.deepEqual(Object.keys(settings.homebrewWorlds),['detail']);
+});
+
+test('the V14 scene menu reads Level pictures and passes the selected scene through its native click handler',async()=>{
+  const {actions,entry,dialogs}=fixture(14),make=actions.find(a=>a.label==='Make realm world');
+  assert.equal(make.visible(entry('plain')),true);await make.onClick({type:'click'},entry('plain'));assert.equal(dialogs[0].window.title,'Make realm world');
+  for(const action of actions)for(const key of ['condition','callback','name'])assert.equal(key in action,false);
 });
 
 test('Regional settings are available on linked or explicitly created detailed scenes, never the realm',()=>{

@@ -40,10 +40,11 @@ export function forgetWorld(id) { indexes.delete(id); }
 
 /** A world's index: { regions, places, notice, source }. */
 export async function loadWorld(id = defaultWorldId()) {
+  if(!allWorlds().length)throw Error('No realm map is available. Create a realm map from a scene picture or enable a companion realm module.');
   if (!indexes.has(id)) {
     // Revalidated: a homebrew world's index is rewritten in place (its settings, 0.74.2's move).
     indexes.set(id, fetch(worldUrl(id, "index.json"), { cache: "no-cache" }).then((r) => {
-      if (!r.ok) throw new Error(`the ${id} map is not installed (run tools/fetch-world.mjs)`);
+      if (!r.ok) throw new Error('The realm map data could not be loaded. Enable its companion module or recreate the realm map.');
       return r.json();
     }));
   }
@@ -85,11 +86,23 @@ export function mainMapOf(def, index) {
   return { name: def?.mapName ?? def?.title ?? "World", bounds: index?.mainMap?.bounds ?? index?.faerun?.bounds ?? index?.sourceMap?.bounds ?? CONTINENTS.faerun.bounds };
 }
 
+export const generatorWorlds = () => allWorlds().filter(w=>w.module!==MODULE_ID&&!w.homebrew&&w.sceneTemplates?.role!=='regional'&&globalThis.game?.modules?.get(w.module)?.active);
+
+export function renderGeneratorButton(root){
+  if(!root)return;
+  const available=generatorWorlds(),existing=root.querySelector('.kg-realms-generate-button');
+  if(!game.user.isGM||!available.length){existing?.remove();return;}
+  const button=existing??document.createElement('button');button.type='button';button.className='kg-realms-generate-button';
+  const one=available.length===1?available[0]:null;
+  button.innerHTML=`<i class="fa-solid fa-map"></i> Generate ${foundry.utils.escapeHTML(one?(one.mapName??one.title):'world map')}`;
+  if(!existing){button.addEventListener('click',()=>openGenerator());(root.querySelector('.header-actions')??root.querySelector('.directory-header')??root).append(button);}
+}
+
 export async function openGenerator() {
   if (!game.user.isGM) return;
   // With several worlds registered, the GM picks one; else the one there is (worlds.mjs).
-  const worlds = allWorlds().filter(w=>w.sceneTemplates?.role!=='regional');
-  if (!worlds.length) return ui.notifications.warn("KG Realms: no world is installed. Install a world module (such as KG Realms: Faerûn).");
+  const worlds = generatorWorlds();
+  if (!worlds.length) return ui.notifications.warn('KG Realms: enable a companion realm module to generate its maps. To make your own realm, right-click a scene with a map picture and choose Make realm world.');
   let def = worlds[0];
   if (worlds.length > 1) {
     const id = await foundry.applications.api.DialogV2.wait({

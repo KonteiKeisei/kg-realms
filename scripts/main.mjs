@@ -41,7 +41,7 @@ import {LocalMapEffects, enableLocalMapFx, waterRegionSettingUI} from './local-m
 import {SettlementTravelUI} from './city/ui.mjs';
 import { RealmLayer } from "./realm-layer.mjs";
 import { MapAssets } from './terrain/map-assets.mjs';
-import { MAX_SIDE, SCALE, REGION_SCENE_FLAGS, fittingScale, generateRegion, loadWorld, maxSide, openGenerator, sceneSizeAt } from "./generator.mjs";
+import { MAX_SIDE, SCALE, REGION_SCENE_FLAGS, fittingScale, generateRegion, loadWorld, maxSide, openGenerator, sceneSizeAt,renderGeneratorButton } from "./generator.mjs";
 import { applyEdits, placesGeoJSON, moduleMarkers, dropWaterDuplicates } from "./places.mjs";
 import { PlaceCard } from "./ui-card.mjs";
 import { RealmSearch } from "./ui-search.mjs";
@@ -1227,7 +1227,7 @@ Hooks.once("init", () => {
 });
 // KG Realms is the engine: with no world module installed there is nothing to draw.
 Hooks.once("ready", () => {
-  if (game.user.isGM && !allWorlds().length) ui.notifications.warn("KG Realms has no world to draw. Install and enable a world module, such as KG Realms: Faerûn, or right-click a scene with a map picture and choose Make realm world.", { permanent: true });
+  if (game.user.isGM && !allWorlds().length) ui.notifications.warn('KG Realms has no realm map yet. Create one by right-clicking a scene with a map picture and choosing Make realm world, or install and enable a companion realm module.', { permanent: true });
 });
 Hooks.once("ready", () => {
   applySceneAmbience((s) => !!regionOf(s), (s) => !!s.getFlag(MODULE_ID, "localMap"))
@@ -1529,16 +1529,6 @@ Hooks.on("getSceneControlButtons", (controls) => {
 });
 
 Hooks.on("renderSceneDirectory", (app, html) => {
-  if (!game.user.isGM) return;
   const root = html instanceof HTMLElement ? html : html[0];
-  if (!root || root.querySelector(".kg-realms-generate-button")) return;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "kg-realms-generate-button";
-  const available=allWorlds().filter(w=>w.sceneTemplates?.role!=='regional');
-  const one = available.length === 1 ? available[0] : null;
-  button.innerHTML = `<i class="fa-solid fa-map"></i> Generate ${one ? (one.mapName ?? one.title) : "world map"}`;
-  button.addEventListener("click", () => openGenerator());
-  const actions = root.querySelector(".header-actions") ?? root.querySelector(".directory-header") ?? root;
-  actions.append(button);
+  renderGeneratorButton(root);
 });
