@@ -2,6 +2,8 @@
 // files its JSON and card text name, and their new paths in the module. Files a world's data names are
 // found by walking every value, so a new field that holds a picture is carried without a change here.
 
+import {cardForExport,journeyForExport} from './export-policy.mjs';
+
 const IMAGE = "webp|png|jpe?g|gif|svg|avif|apng|bmp|tiff?|ktx2(?:\\.fbx)?";
 const VIDEO = "webm|mp4|m4v|ogv";
 const AUDIO = "mp3|ogg|oga|wav|flac|m4a|opus";
@@ -43,8 +45,8 @@ function walk(value, visit, path = []) {
 }
 
 /** Each file a value names, as raw text as it appears: raw -> folder (folderFor(path, raw) from the key path). */
-export function scanFiles(value, folderFor, found = new Map()) {
-  const add = (raw, path) => { if (raw && !found.has(raw)) found.set(raw, folderFor(path, raw)); };
+export function scanFiles(value, folderFor, found = new Map(), onFile = null) {
+  const add = (raw, path) => { if (!raw) return; if (!found.has(raw)) found.set(raw, folderFor(path, raw)); onFile?.(raw, path); };
   walk(value, (s, path) => {
     if (s.includes("<") || s.includes("url(")) { for (const m of s.matchAll(IN_HTML)) { const raw = m[2] ?? m[4]; if (raw && HAS_EXT.test(raw)) add(raw, path); } }
     else if (looksLikeFile(s)) add(s, path);
@@ -117,13 +119,22 @@ const PLAY_FLAGS = ["journey", "partyJourneys", "partyFocus", "partyToken", "cit
  * A scene as a module ships it, marked with the id it must keep so places and pins still find it.
  * keepToken(token) says which tokens go: the players' party stays at this table.
  */
-export function sceneForExport(doc, world, keepToken = () => true) {
+export function sceneForExport(doc, world, keepToken = () => true, options = {}) {
   const { _stats, folder, thumb, active, ownership, ...rest } = doc;
   const own = { ...(doc.flags?.[REALM_FLAG] ?? {}), moduleScene: { world, id: doc._id } };
-  for (const k of PLAY_FLAGS) delete own[k];
+  for (const k of PLAY_FLAGS) if(!options.includeTravel||!['journey','partyJourneys','partyFocus'].includes(k))delete own[k];
+  if(options.includeTravel){
+    if(own.journey)own.journey=journeyForExport(own.journey,options);
+    if(own.partyJourneys){
+      own.partyJourneys=Object.fromEntries(Object.entries(own.partyJourneys).map(([id,state])=>[id,journeyForExport(state,options)]));
+      // A generated scene has no source party tokens. Keep its focused route usable as the default.
+      const focused=own.partyJourneys[own.partyFocus]??Object.values(own.partyJourneys)[0];
+      if(focused)own.journey=structuredClone(focused);
+    }
+  }
   return {
     ...rest, tokens: (doc.tokens ?? []).filter(keepToken), active: false, playlistSound: null,
-    notes: (doc.notes ?? []).map((n) => n.flags?.[REALM_FLAG]?.local ? ({ ...n, entryId: null, pageId: null }) : ({...n})),
+    notes: (doc.notes ?? []).map((n) => n.flags?.[REALM_FLAG]?.local ? ({ ...n, entryId: null, pageId: null,flags:{...n.flags,[REALM_FLAG]:{...n.flags[REALM_FLAG],local:cardForExport(n.flags[REALM_FLAG].local,options)}} }) : ({...n})),
     flags: { ...doc.flags, [REALM_FLAG]: own }
   };
 }
@@ -235,8 +246,9 @@ export function calendarAction(calendar, { known, custom, override }) {
 }
 
 /** The export's report: what went in, and everything that did not, in plain words. */
-export function exportReport({ title, version, moduleId, counts, calendar, missing, external, scenesMissing, gone, skippedTokens }) {
+export function exportReport({ title, version, moduleId, counts, calendar, missing, external, scenesMissing, gone, skippedTokens, options }) {
   const lines = [`${title} ${version} (${moduleId})`, "", "In the module:"];
+  if(options)lines.splice(1,0,`Current Travel (including encounters): ${options.includeTravel?'included':'excluded'}`,`Linked Card actors: ${options.includeCardActors?'included':'excluded'}`);
   for (const [what, n] of Object.entries(counts)) if (n) lines.push(`  ${n} ${what}`);
   lines.push(calendar ? `  Calendar: ${calendarLabel(calendar)}` : "  No calendar: Calendaria is not active in this game world.");
   const list = (head, items) => { if (items?.length) lines.push("", `${head} (${items.length}):`, ...items.map((i) => `  ${i}`)); };

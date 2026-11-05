@@ -81,7 +81,7 @@ test('a companion realm exports its terrain grid and compressed local maps witho
   served.set(single.tiles[0].src,'SINGLE CHUNK');
   served.set(single.source,'RETAINED ORIGINAL');
   game.scenes.push(plain({_id:'yard000000000000',tokens:[],notes:[],background:{src:single.source},flags:{'kg-realms':{localMap:{world:def.id,placeId:'p2'}}}}));
-  const built=await buildExport({id:def.id},{moduleId:'exported-realm',title:'Edited Realm',version:'1.0.0'});
+  const built=await buildExport({id:def.id},{moduleId:'exported-realm',title:'Edited Realm',version:'1.0.0',includeCardActors:true});
   const files=await readZip(built.parts),base='exported-realm/data/worlds/companion-export';
   assert.equal(files.get(`${base}/terrain.png`),'BIOME GRID');
   assert.equal(JSON.parse(files.get(`${base}/index.json`)).terrain.file,'terrain.png');
@@ -120,7 +120,7 @@ async function readZip(parts) {
 test("a world's export holds everything, linked up to its new paths and compendiums", async () => {
   install();
   registerWorld({ id: "t", title: "T", root: ROOT, assetBase: ROOT });
-  const built = await buildExport({ id: "t", title: "T", root: ROOT, assetBase: ROOT, rules: { seasons: [] } }, { moduleId: "kg-realms-t", title: "KG Realms: T", version: "1.0.0" });
+  const built = await buildExport({ id: "t", title: "T", root: ROOT, assetBase: ROOT, rules: { seasons: [] } }, { moduleId: "kg-realms-t", title: "KG Realms: T", version: "1.0.0",includeCardActors:true,includeTravel:true });
   const files = await readZip(built.parts), M = "kg-realms-t", D = `${M}/data/worlds/t`;
   const pack = (name) => JSON.parse(files.get(`${D}/packs/${name}.json`));
 
@@ -155,14 +155,14 @@ test("a world's export holds everything, linked up to its new paths and compendi
   assert.equal(files.get(`${D}/local/index.json`), "[]");
   assert.equal(JSON.parse(files.get(`${D}/terrain-pack.json`)).lods[0].tiles[0].path, "assets/terrain/z0.ktx2");
 
-  // The scene: this world's only, linked up, keeping its NPC but not the players or their journey.
+  // This scene keeps its NPC and the explicitly selected journey, excluding player tokens.
   assert.deepEqual(pack("scenes").map((s) => s._id), [TOWN]);
   const scene = pack("scenes")[0];
   assert.equal(scene.background.src, `modules/${M}/assets/maps/town.webp`);
   assert.equal(scene.notes[0].flags["kg-realms"].local.img, `modules/${M}/assets/poi-img/shop.webp`);
   assert.equal(scene.notes[0].flags["kg-realms"].local.actor, `Compendium.${M}.actors.Actor.${NPC}`);
   assert.equal(scene.notes[0].texture.src, "icons/svg/book.svg");
-  assert.deepEqual(scene.tokens, [{ actorId: NPC }]); assert.equal(scene.lights.length, 1); assert.equal(scene.flags["kg-realms"].journey, undefined);
+  assert.deepEqual(scene.tokens, [{ actorId: NPC }]); assert.equal(scene.lights.length, 1); assert.deepEqual(scene.flags["kg-realms"].journey,{a:1});
   assert.deepEqual(scene.flags["kg-realms"].moduleScene, { world: "t", id: TOWN });
 
   // The documents, and what they link to in turn; the game system's own stay.

@@ -12,7 +12,9 @@ import { applyRouteEdits } from "../routes.mjs";
 import { sceneTemplateCatalog } from '../scene-template-plan.mjs';
 import {regionalPlace} from '../regional-place.mjs';
 import { TILE_SUFFIX, moduleIdFrom, moduleScript, exportWorldDefinition, ROUTES_FILE, zipEntry, zipParts, crc32, zipCanBuild } from "./plan.mjs";
-import { fileRef, scanFiles, rewriteFiles, cardFolder, sceneFolder, packFolder, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
+import { fileRef, rewriteFiles, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
+import {collectExportFiles,exportFileProblem} from './export-sources.mjs';
+import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -45,18 +47,18 @@ function currentCalendar() {
  * own compendiums stay as they are.
  */
 async function gatherDocuments(seeds, systemId, known = new Map(), scene = null) {
-  const docs = new Map(known), aliases = new Map(), gone = [], queue = [...seeds];
+  const docs = new Map(), aliases = new Map(), gone = [], queue = [...seeds];
   while (queue.length) {
     const uuid = queue.pop();
     if (aliases.has(uuid)) continue;
     const { type, id } = uuidParts(uuid), key = `${type}.${id}`;
     aliases.set(uuid, key);
     if (docs.has(key)) continue;
-    const doc = await fromUuid(uuid).catch(() => null);
-    if (!doc) { aliases.delete(uuid); gone.push(uuid); continue; }
-    const raw = doc.toObject();
+    const cached=known.get(key),doc=cached?null:await fromUuid(uuid).catch(() => null);
+    if (!cached&&!doc) { aliases.delete(uuid); gone.push(uuid); continue; }
+    const raw = cached??doc.toObject();
     // A scene reached only by a link goes as every other scene does, and brings what it needs.
-    const plain = type === "Scene" && scene ? scene.prepare(raw) : raw;
+    const plain = type === "Scene" && scene && !cached ? scene.prepare(raw) : raw;
     if (type === "Scene" && scene) queue.push(...scene.links(raw));
     docs.set(key, plain);
     queue.push(...uuidsIn(plain, systemId));
@@ -65,8 +67,9 @@ async function gatherDocuments(seeds, systemId, known = new Map(), scene = null)
 }
 
 /** The world as a module: { name, parts, report, problems }. onStep(message, 0 to 1) tells how far along it is. */
-export async function buildExport(def, { moduleId, title, version, rootScene }, onStep = () => {}) {
-  const records=[],seen=new Set(),links=[],queue=[{def,data:await worldData(def.id)}];
+export async function buildExport(def, { moduleId, title, version, rootScene, includeTravel=false, includeCardActors=false }, onStep = () => {}) {
+  const options={includeTravel:!!includeTravel,includeCardActors:!!includeCardActors};
+  const records=[],seen=new Set(),links=[],queue=[{def,data:worldForExport(await worldData(def.id),options)}];
   const sourceScenes=new Map();
   const sceneAvailable=async(id,owner)=>{
     if(game.scenes.get(id))return true;
@@ -89,11 +92,11 @@ export async function buildExport(def, { moduleId, title, version, rootScene }, 
       const data=await worldData(child.id),state=allWorlds().map(w=>w.regionalMaps?.state?.[child.id]).find(Boolean);
       if(state&&!Object.keys(data.regionalEdits?.edits??{}).length&&!Object.keys(data.regionalEdits?.added??{}).length)data.regionalEdits=structuredClone(state.placeEdits??{});
       if(data.regionalSnow===undefined&&state?.snow!==undefined)data.regionalSnow=state.snow;
-      links.push(structuredClone(link));queue.push({def:child,data});
+      links.push(structuredClone(link));queue.push({def:child,data:worldForExport(data,options)});
     }
   }
   const shared={claim:assetNamer(moduleId),written:new Set()},built=[];
-  for(const [i,record] of records.entries())built.push(await buildWorldExport(record.def,{moduleId,title,version},(message,pct)=>onStep(`${record.def.title??record.def.id}: ${message}`,(i+pct)/records.length),{...shared,data:record.data,namespace:links.length?record.def.id:null,regional:i>0,rootScene:i?links.find(l=>l.world===record.def.id)?.scene:rootScene,parentScene:links.find(l=>l.world===record.def.id)?.parentScene}));
+  for(const [i,record] of records.entries())built.push(await buildWorldExport(record.def,{moduleId,title,version},(message,pct)=>onStep(`${record.def.title??record.def.id}: ${message}`,(i+pct)/records.length),{...shared,options,data:record.data,namespace:links.length?record.def.id:null,regional:i>0,rootScene:i?links.find(l=>l.world===record.def.id)?.scene:rootScene,parentScene:links.find(l=>l.world===record.def.id)?.parentScene}));
   for(const link of links){
     const bundle=built.find(b=>b.registration.id===link.world),node=bundle?.registration.sceneTemplates.scenes.find(n=>n.id===link.scene);
     const place=regionalPlace(link,records.find(r=>r.def.id===link.parent)?.data.places??[]);
@@ -109,9 +112,9 @@ export async function buildExport(def, { moduleId, title, version, rootScene }, 
     entries.set(entry.name,entry);
   }
   const add=(name,bytes)=>{const entry=zipEntry(name,bytes);entry.body=new Blob([bytes]);entries.set(name,entry);};
-  const {id:_,title:__,module:___,...options}=world;
+  const {id:_,title:__,module:___,...registrationOptions}=world;
   add(`${moduleId}/module.json`,json(manifest));
-  add(`${moduleId}/scripts/main.mjs`,encoder.encode(moduleScript(moduleId,{...worldDef(def.id),...def,id:world.id,title:world.title},{...options,additionalWorlds:built.slice(1).map(b=>b.registration)})));
+  add(`${moduleId}/scripts/main.mjs`,encoder.encode(moduleScript(moduleId,{...worldDef(def.id),...def,id:world.id,title:world.title},{...registrationOptions,additionalWorlds:built.slice(1).map(b=>b.registration)})));
   const report=`Regional maps included: ${records.length-1}\nCoverage, alignment, crossings, local marker edits and Regional snow settings are restored after the linked scenes are imported.\n\n${built.map(b=>b.report).join('\n\n')}`;
   add(`${moduleId}/export-report.txt`,encoder.encode(report));
   const all=[...entries.values()];if(!zipCanBuild(all))throw Error('This realm and its Regional maps exceed the browser archive limits.');
@@ -133,7 +136,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const optionalJson=async(rel,fallback)=>{const response=await fetch(worldUrl(def.id,rel),{cache:'no-store'});if(response.status===404)return fallback;if(!response.ok)throw Error(`${rel}: HTTP ${response.status}`);return response.json();};
 
   onStep("Reading the world's data", 0);
-  const data = context.data ?? await worldData(def.id);
+  const options=context.options??{},data = context.data ?? worldForExport(await worldData(def.id),options);
   const index = await getJson("index.json"), pack = await getJson(def.terrainPack ?? "terrain-pack.json");
   // A companion's biome grid is world-relative data, not card artwork. Keep its path.
   if (index.terrain?.file) {
@@ -158,7 +161,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
     ["trade.json", { ...trade, edits: data.tradeEdits }],
     ["local/index.json", presets]
   ]);
-  for (const entry of presets) for (const rel of [entry.file, entry.effects?.file]) if (rel) files.set(`local/${rel}`, await getJson(`local/${rel}`));
+  for (const entry of presets) for (const rel of [entry.file, entry.effects?.file]) if (rel) files.set(`local/${rel}`, presetForExport(await getJson(`local/${rel}`),options));
   const calendar = currentCalendar();
   if (calendar) files.set("calendar.json", calendar);
 
@@ -171,7 +174,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const allScenes=new Map(sourceScenes.map(s=>[s._id,s]));
   for(const s of game.scenes.map(s=>s.toObject()))allScenes.set(s._id,s);
   const { scenes: sceneDocs, missing: scenesMissing } = scenesOfWorld([...allScenes.values()], places, def.id);
-  const scenes = sceneDocs.map((s) => sceneForExport(s, s.flags?.[ID]?.world ?? s.flags?.[ID]?.localMap?.world ?? def.id, (t) => !isPlayers(t)));
+  const scenes = sceneDocs.map((s) => sceneForExport(s, s.flags?.[ID]?.world ?? s.flags?.[ID]?.localMap?.world ?? def.id, (t) => !isPlayers(t),options));
   let skippedTokens = sceneDocs.reduce((n, s) => n + (s.tokens ?? []).filter(isPlayers).length, 0);
   const markers = markersUsed(data.markers, [places, scenes]);
 
@@ -182,12 +185,15 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
     const key=`${sourcePack.type}.${raw._id}`,live=await fromUuid(key).catch(()=>null);
     known.set(key,docForPack(live?.toObject?.()??raw));
   }
-  const seeds = uuidsIn([...files.values(), ...known.values()], systemId);
+  const seeds = uuidsIn([...files.values(), ...scenes], systemId);
+  for(const s of scenes)seeds.add(`Scene.${s._id}`);
+  for(const e of Object.values(data.encounters??{}))if(e.scene)seeds.add(`Scene.${e.scene}`);
+  if(options.includeTravel)for(const s of scenes)for(const uuid of travelLinks(s))seeds.add(uuid);
   const keepToken = (t) => !isPlayers(t);
   for (const s of sceneDocs) for (const link of sceneLinks(s, keepToken)) if (!link.startsWith("Scene.") || !scenes.some((x) => `Scene.${x._id}` === link)) seeds.add(link);
   const { docs, aliases, gone } = await gatherDocuments(seeds, systemId, known, {
-    prepare: (raw) => { skippedTokens += (raw.tokens ?? []).filter(isPlayers).length; return sceneForExport(raw, def.id, keepToken); },
-    links: (raw) => sceneLinks(raw, keepToken)
+    prepare: (raw) => { skippedTokens += (raw.tokens ?? []).filter(isPlayers).length; return sceneForExport(raw, def.id, keepToken,options); },
+    links: (raw) => [...sceneLinks(raw, keepToken),...(options.includeTravel?travelLinks(raw):[])]
   });
   // Which compendium each document goes in, by kind.
   const groups = new Map();
@@ -201,11 +207,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const uuids = new Map([...aliases].map(([from, key]) => [from, newUuid(key)]));
 
   // Every file those name, and where it goes.
-  const named = new Map();
-  if (calendar) scanFiles(calendar, () => "assets/calendar", named);
-  scanFiles([...files].map(([rel, value]) => rel === "index.json" ? { ...value, terrain: undefined } : value), cardFolder, named);
-  scanFiles(markers, cardFolder, named);
-  for (const [type, list] of groups) scanFiles(list, type === "Scene" ? sceneFolder : packFolder(type), named);
+  const {named,usage}=collectExportFiles(groups,files,markers,{title:def.title,world:def.id,calendar,systemId});
 
   const where = { origin: location.origin, prefix: (foundry.utils.getRoute("") ?? "").replace(/^\/+|\/+$/g, "") };
   const claim = context.claim ?? assetNamer(moduleId), paths = new Map(), written = context.written ?? new Set(), missing = [], external = [];
@@ -286,7 +288,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
       if (!written.has(placed.rel)) { written.add(placed.rel); await add(`${moduleId}/${placed.rel}`, bytes); }
       paths.set(raw, placed.ref);
     } catch (err) {
-      (ref.kind === "external" ? external : missing).push(`${raw}: ${err?.message ?? err}`);
+      (ref.kind === "external" ? external : missing).push(exportFileProblem(raw,err?.message??err,usage));
     }
   }
 
@@ -326,13 +328,13 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   const minimum=kg?.version&&(Number(kg.version.split('.')[0])>0||Number(kg.version.split('.')[1])>=94)?kg.version:'0.94.0';
   const manifest={ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: String(game.release?.generation??13), maximum:'14' }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) };
   const sceneTemplates=sceneTemplateCatalog(def.id,groups.get('Scene')??[],places,{...context,presets});
-  const options={snow:data.snow,markers:finalMarkers,rules:def.rules,packs:packList,localMapAssets:localMapAssets.filter(a=>!a.tileId),sceneTemplates,calendar:calendar?{file:'calendar.json',name:calendar.name,signature:crc32(json(calendar.data))}:null};
-  const registration=exportWorldDefinition(moduleId,def,options);
+  const registrationOptions={snow:data.snow,markers:finalMarkers,rules:def.rules,packs:packList,localMapAssets:localMapAssets.filter(a=>!a.tileId),sceneTemplates,calendar:calendar?{file:'calendar.json',name:calendar.name,signature:crc32(json(calendar.data))}:null};
+  const registration=exportWorldDefinition(moduleId,def,registrationOptions);
   await add(`${moduleId}/module.json`, encoder.encode(JSON.stringify(manifest, null, 2)));
-  await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, options)));
+  await add(`${moduleId}/scripts/main.mjs`, encoder.encode(moduleScript(moduleId, def, registrationOptions)));
 
   const report = exportReport({
-    title, version, moduleId, calendar, skippedTokens, scenesMissing, gone, missing, external,
+    title, version, moduleId, calendar, skippedTokens, scenesMissing, gone, missing, external, options,
     counts: { "places": places.length, "roads": routes.features.length, "rivers and shores": Object.keys(data.waterways).length, "encounters": Object.keys(data.encounters).length, "scenes": counts.scenes, "actors": counts.actors, "journals": counts.journals, "items": counts.items, "tables": counts.tables, "macros": counts.macros, "playlists": counts.playlists, "card decks": counts.cards, "pictures and sounds": written.size, "custom markers": Object.keys(markers).length, "map tiles": tiles.length }
   });
   await add(`${moduleId}/export-report.txt`, encoder.encode(report));
@@ -375,7 +377,9 @@ export async function exportModule(def, rootScene) {
     content: `<div class="form-group"><label>Module title</label><input name="title" type="text" value="KG Realms: ${esc(def.title)}"></div>
       <div class="form-group"><label>Module id ${q("The folder name in Data/modules: lowercase letters, digits and dashes.")}</label><input name="id" type="text" value="${esc(moduleIdFrom(def.title))}" pattern="[a-z0-9-]+"></div>
       <div class="form-group"><label>Version</label><input name="version" type="text" value="1.0.0"></div>
-      <p class="notes">The zip holds the whole world: its map, places, roads, rivers, biomes, encounters, trade and snow with every edit, each linked Regional map and its placement, each scene it links to, every actor, journal and item those link to, and all their pictures, moved into the module and linked up. ${q("Pictures on cards and markers go to assets/poi-img, scene maps to assets/maps, and actor, journal and item art to their own folders. Links into your game system's own compendiums stay as they are. Your players' tokens stay out of the scenes.")}</p>
+      <div class="form-group"><label class="checkbox"><input type="checkbox" name="includeTravel"> Export current Travel (including encounters)</label><p class="hint">Include saved routes, travel progress and encounter cards. The focused party's route becomes the default. Player tokens stay out. Permanent map hazards are always included.</p></div>
+      <div class="form-group"><label class="checkbox"><input type="checkbox" name="includeCardActors"> Export linked Card actors</label><p class="hint">Include actors attached or linked to place and encounter cards. Actors needed by placed scene tokens are always included.</p></div>
+      <p class="notes">The zip holds the realm, places, roads, rivers, biomes, trade and snow, each linked Regional map and its placement, linked scenes with their contents, required documents and their files. Travel and Card actors follow the choices above. ${q("Pictures on cards and markers go to assets/poi-img, scene maps to assets/maps, and actor, journal and item art to their own folders. Links into your game system's own compendiums stay as they are. Your players' tokens stay out of the scenes.")}</p>
       <p class="notes">Calendar: ${esc(here ? calendarLabel(here) : "none, Calendaria is not active")}. ${q("The calendar this game world uses now, complete, whether built in, edited or your own, and today's in-game date. When a GM first loads the module, the calendar is added if need be and set as active. The date is used only where the clock has not started. A campaign already running on another calendar keeps its own.")}</p>
       <p class="notes">Afterwards you get a report of anything that could not be carried. It is also in the zip, as export-report.txt.</p>
       <p class="notes">After enabling the module, choose maps from its hierarchy checklist. Generate the realm and any Regional or local maps now, or generate a linked map from its place card later. ${q("Complete scene snapshots keep their map tiles, walls, lights, pins, roads and linked documents. Existing generated scenes keep their edits.")}</p>`,
@@ -385,7 +389,8 @@ export async function exportModule(def, rootScene) {
   const moduleId = /^[a-z0-9-]+$/.test(values.id ?? "") ? values.id : moduleIdFrom(def.title), title = String(values.title || `KG Realms: ${def.title}`), version = String(values.version || "1.0.0");
   const note = ui.notifications.info(`KG Realms: building ${title}...`, { permanent: true, progress: true });
   try {
-    const built = await buildExport(def, { moduleId, title, version, rootScene }, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
+    const checked=value=>value===true||value==='on'||value==='true';
+    const built = await buildExport(def, { moduleId, title, version, rootScene,includeTravel:checked(values.includeTravel),includeCardActors:checked(values.includeCardActors) }, (message, pct) => note?.update?.({ message: `KG Realms: ${message}`, pct }));
     if(built.problems){
       await foundry.applications.api.DialogV2.prompt({window:{title:'Export needs repair'},position:{width:620},content:`<p>The module was not downloaded. Fix the missing files or document links listed below, then export again.</p><pre class="kgr-export-problems">${esc(built.report)}</pre>`,ok:{label:'Close'},rejectClose:false});
       return;

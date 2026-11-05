@@ -30,7 +30,7 @@ test('mutually linked interior scenes have a usable checklist tree without rewri
   assert.deepEqual(selectedScenePlan(catalog.scenes,[I]).map(n=>n.id),[R,L,I]);assert.deepEqual(scenes,before);
 });
 
-async function fixture({retiled=false}={}){
+async function fixture({retiled=false,exportOptions={},configure,allowProblems=false}={}){
   const served=new Map(),settings=new Map(),requests=[],created=[],dialogs=[],messages=[],edits=[];
   const gm={id:'gm',isGM:true,active:true,can:()=>true};
   globalThis.game={user:gm,users:Object.assign([gm],{activeGM:gm}),release:{generation:13},system:{id:'dnd5e'},time:{worldTime:0},actors:collection(),journal:collection(),playlists:collection(),scenes:collection(),modules:{get:()=>({version:'0.94.0'})},settings:{get:(_m,k)=>settings.get(k),set:async(_m,k,v)=>settings.set(k,structuredClone(v))}};
@@ -71,7 +71,8 @@ async function fixture({retiled=false}={}){
     await buildLocalMapTiles(scene,'worlds/author/new master.webp',{...io,beforePublish:()=>stagePlacedMapTiles(scene,io)});
   }
   setExportData(async id=>structuredClone(state[id]));
-  const exported=await buildExport(defs[ROOT],{moduleId:MODULE,title:'Trorune',version:'1.0.0',rootScene:R});assert.equal(exported.problems,0);
+  await configure?.({state,sourceDocs,served,scenes:game.scenes,defs});
+  const exported=await buildExport(defs[ROOT],{moduleId:MODULE,title:'Trorune',version:'1.0.0',rootScene:R,...exportOptions});if(!allowProblems)assert.equal(exported.problems,0);
   const files=await unzip(exported.parts),worlds=[];
   runInNewContext(new TextDecoder().decode(files.get(`${MODULE}/scripts/main.mjs`)),{Hooks:{once:(_name,fn)=>fn({registerWorld:w=>worlds.push(JSON.parse(JSON.stringify(w)))})}});
   // A fresh installation: only the exported module's bytes remain accessible.
@@ -86,6 +87,77 @@ async function fixture({retiled=false}={}){
   const maps={getRealmPlaces:async()=>[],savePlaceEdit:async(...args)=>edits.push(args)};game.modules.get=()=>({version:'0.94.0',api:{localMaps:maps}});
   return{root,worlds,files,served,requests,created,dialogs,settings,messages,edits,link,exported};
 }
+
+const CARD_ACTOR='k'.repeat(16),CARD_ITEM='v'.repeat(16),ENCOUNTER_ACTOR='e'.repeat(16),TRAVEL_SCENE='q'.repeat(16);
+function optionalContent({missing=false}={}){
+  return({state,sourceDocs,served,scenes})=>{
+    state[ROOT].places[0].actor=`Actor.${CARD_ACTOR}`;
+    scenes.get(L).notes[0].flags['kg-realms'].local.actor=`Actor.${CARD_ACTOR}`;
+    scenes.get(R).flags['kg-realms'].journey={name:'Campaign route',waypoints:[{id:'town'}],trip:{departed:12},encounters:[{id:'private',name:'Private ambush',scene:TRAVEL_SCENE,actors:[`Actor.${ENCOUNTER_ACTOR}`]}]};
+    state[ROOT].encounters={ambush:{name:'Road ambush',actors:[`Actor.${ENCOUNTER_ACTOR}`],scene:TRAVEL_SCENE},rapids:{name:'Rapids',kind:'hazard',subtype:'rapids'}};
+    state[CHILD].encounters={ambush:{name:'Regional ambush',actors:[`Actor.${ENCOUNTER_ACTOR}`]}};
+    sourceDocs.set(`Actor.${CARD_ACTOR}`,{_id:CARD_ACTOR,name:'Card only guide',img:'worlds/author/card-guide.webp',description:`@UUID[Item.${CARD_ITEM}]{Guide cloak}`});
+    sourceDocs.set(`Item.${CARD_ITEM}`,{_id:CARD_ITEM,name:'Guide cloak',img:'worlds/author/cloak.webp'});
+    sourceDocs.set(`Actor.${ENCOUNTER_ACTOR}`,{_id:ENCOUNTER_ACTOR,name:'Encounter guard',img:'worlds/author/guard.webp'});
+    sourceDocs.set(`Scene.${TRAVEL_SCENE}`,{_id:TRAVEL_SCENE,name:'Road encounter scene',tokens:[],notes:[],flags:{}});
+    if(!missing)for(const file of ['card-guide','cloak','guard'])served.set(`worlds/author/${file}.webp`,new TextEncoder().encode(file));
+  };
+}
+
+function exportedData(f){
+  setExportData(async id=>({places:jsonFile(f.files,`${MODULE}/data/worlds/${id}/index.json`).places,routeEdits:{},waterways:{},biomes:{},encounters:jsonFile(f.files,`${MODULE}/data/worlds/${id}/encounters.json`).encounters,tradeEdits:{},markers:{},regionalLinks:[],regionalEdits:{}}));
+}
+
+for(const includeTravel of [false,true])for(const includeCardActors of [false,true])test(`export choices remain independent: Travel ${includeTravel}, Card actors ${includeCardActors}`,async()=>{
+  const f=await fixture({exportOptions:{includeTravel,includeCardActors},configure:optionalContent()}),docs=[ROOT,CHILD].flatMap(id=>jsonFile(f.files,`${MODULE}/data/worlds/${id}/packs/scenes.json`));
+  const actorIds=[ROOT,CHILD].flatMap(id=>{const path=`${MODULE}/data/worlds/${id}/packs/actors.json`;return f.files.has(path)?jsonFile(f.files,path).map(a=>a._id):[];});
+  assert.ok(actorIds.includes(A),'placed scene token actors remain required');
+  assert.equal(actorIds.includes(CARD_ACTOR),includeCardActors);assert.equal(actorIds.includes(ENCOUNTER_ACTOR),includeTravel&&includeCardActors);
+  const place=jsonFile(f.files,`${MODULE}/data/worlds/${ROOT}/index.json`).places.find(p=>p.id==='town');assert.equal(!!place.actor,includeCardActors);
+  const town=docs.find(s=>s._id===L);assert.equal(!!town.notes[0].flags['kg-realms'].local.actor,includeCardActors);
+  const realm=docs.find(s=>s._id===R);assert.equal(!!realm.flags['kg-realms'].journey,includeTravel);
+  const encounters=jsonFile(f.files,`${MODULE}/data/worlds/${ROOT}/encounters.json`).encounters;assert.equal(!!encounters.ambush,includeTravel);assert.ok(encounters.rapids);
+  assert.equal(docs.some(s=>s._id===TRAVEL_SCENE),includeTravel);
+  if(includeTravel){assert.equal(realm.flags['kg-realms'].journey.trip.departed,12);assert.equal(!!realm.flags['kg-realms'].journey.encounters[0].actors,includeCardActors);}
+  assert.match(f.exported.report,new RegExp(`Current Travel \\(including encounters\\): ${includeTravel?'included':'excluded'}`));
+  assert.equal([...f.files.keys()].some(path=>path.endsWith('/card-guide.webp')),includeCardActors);
+  await generateSelectedScenes(f.root,[L]);assert.equal(game.scenes.get(L).tokens[0].actorId,A);assert.ok(game.actors.has(A));
+});
+
+test('unchecked optional content cannot block export with its missing pictures or nested item art',async()=>{
+  const f=await fixture({configure:optionalContent({missing:true})});
+  assert.equal(f.exported.problems,0);assert.doesNotMatch(f.exported.report,/card-guide.webp|cloak.webp|guard.webp/);
+  assert.ok(![...f.files.keys()].some(path=>path.endsWith('/packs/items.json')));
+});
+
+test('missing selected Card actor and item artwork names their documents and the maps that reference them',async()=>{
+  const f=await fixture({exportOptions:{includeCardActors:true},configure:optionalContent({missing:true}),allowProblems:true});
+  assert.equal(f.exported.problems,4,'the two missing files are reported in both realm and Regional bundles');
+  for(const text of ['Actor "Card only guide"','Item "Guide cloak"','Scene "Trorune"','Scene "Stonebridge"'])assert.ok(f.exported.report.includes(text),text);
+  assert.doesNotMatch(f.exported.report,/guard.webp/,'unchecked Travel is not collected');
+});
+
+test('re-export prunes unchecked Card actor dependencies from an installed companion without dropping placed token actors',async()=>{
+  const f=await fixture({exportOptions:{includeTravel:true,includeCardActors:true},configure:optionalContent()});exportedData(f);
+  const result=await buildExport(f.root,{moduleId:'pruned-bundle',title:'Pruned',version:'1',rootScene:R,includeTravel:false,includeCardActors:false});
+  assert.equal(result.problems,0);const files=await unzip(result.parts);
+  const actors=jsonFile(files,`pruned-bundle/data/worlds/${CHILD}/packs/actors.json`);assert.ok(actors.some(a=>a._id===A));
+  assert.ok(!actors.some(a=>a._id===CARD_ACTOR||a._id===ENCOUNTER_ACTOR));
+  assert.ok(![...files.keys()].some(path=>/\/(?:card-guide|cloak|guard)\.webp$/.test(path)));
+  const place=jsonFile(files,`pruned-bundle/data/worlds/${ROOT}/index.json`).places.find(p=>p.id==='town');assert.equal(place.actor,undefined);
+});
+
+test('export form offers both unchecked choices and applies their submitted values',async()=>{
+  const f=await fixture({exportOptions:{includeTravel:true,includeCardActors:true},configure:optionalContent()});exportedData(f);
+  let form,download;
+  foundry.applications.api.DialogV2.wait=async options=>{form=options;return{id:'form-bundle',title:'Form export',version:'1',includeTravel:false,includeCardActors:false};};
+  foundry.applications.api.DialogV2.prompt=async()=>{};foundry.utils.saveDataToFile=blob=>{download=blob;};
+  await exportModule(f.root,R);
+  const {document}=parseHTML(form.content);for(const name of ['includeTravel','includeCardActors']){const checkbox=document.querySelector(`input[name="${name}"]`);assert.equal(checkbox.type,'checkbox');assert.equal(checkbox.hasAttribute('checked'),false);}
+  assert.ok(download);const files=await unzip([download]);
+  const scenes=jsonFile(files,`form-bundle/data/worlds/${ROOT}/packs/scenes.json`);assert.equal(scenes.find(s=>s._id===R).flags['kg-realms'].journey,undefined);
+  assert.equal(jsonFile(files,`form-bundle/data/worlds/${ROOT}/index.json`).places.find(p=>p.id==='town').actor,undefined);
+});
 
 test('a fresh exported module generates the realm and Regional map, then generates the tiled settlement and interior on demand',async()=>{
   const f=await fixture(),nodes=sceneTemplates(f.root),town=nodes.find(n=>n.id===L);
