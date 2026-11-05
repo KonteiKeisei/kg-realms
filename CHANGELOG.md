@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.95.2: route marker proportions and dropdown colours
+
+- Give route-number badges equal 24 px width and height, with matching grid columns. Keep the starting-party badge circular and numbered stops square with rounded corners.
+- Set opaque option and option-group backgrounds, text and selected-option colours from each KG Realms theme. Prevent Foundry's global light or dark theme from creating unreadable dropdowns, including Holy White.
+
 ## 0.95.1: frosted glass interface and compact watch cards
 
 - Apply the approved glass style to Travel, Camp, settlement travel, map and local editors, place and encounter cards, trade, navigation, setup, generation, export/import and progress windows. Use translucent frames, darker inset controls, thin borders, Signika titles and consistent selected states. Keep existing actions, permissions, scene content and travel behavior.
