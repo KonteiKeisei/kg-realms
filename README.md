@@ -4,6 +4,9 @@
 
 # KG Realms
 
+<img width="1580" height="1136" alt="image" src="https://github.com/user-attachments/assets/c18f6c66-5c9e-49ad-93f5-5ff995b18993" />
+
+
 Realm maps for Foundry VTT (v13 and v14, D&D 5e). Turn a world map into a living travel map: places with cards and journals, roads, rivers and sea lanes, areas, biomes, journeys planned and played out day by day, camps and watches, encounters, weather, night and seasons, and settlement maps the party can walk or ride through.
 
 KG Realms is the engine. A world is either one you make from your own map picture, or one that comes in a world module.
