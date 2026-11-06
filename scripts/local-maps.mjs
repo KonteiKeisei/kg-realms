@@ -32,6 +32,25 @@ export const localOf = (note) => {
   return doc?.getFlag?.(MODULE_ID, "local") ?? null;
 };
 
+/** Keep native note tools away from KG places, without changing normal journal notes. */
+export function protectLocalPlaceNotes(Note) {
+  for (const method of ["_canControl", "_canDrag", "_canDelete", "_canConfigure"]) {
+    const original = Note.prototype[method];
+    if (typeof original !== "function") continue;
+    Note.prototype[method] = function (...args) {
+      return localOf(this) ? false : original.apply(this, args);
+    };
+  }
+  // Foundry's Delete key and Clear Notes bypass placeable permission methods.
+  Hooks.on("preDeleteNote", (note, options = {}) => {
+    if (!localOf(note)) return;
+    // Clear Notes may send deleteAll to the server even after individual IDs were
+    // vetoed. Foundry copies these shared hook options back to the operation.
+    options.deleteAll = false;
+    if (!options.kgRealmsPlaceDelete && !options.kgRealmsPlaceMaintenance) return false;
+  });
+}
+
 /** A journal page's (or entry's) text, read once to copy it into a card. */
 function pageHtml(doc) {
   if (!doc) return "";
@@ -127,7 +146,7 @@ export class LocalMaps {
 
   async deletePlace(note){
     if(!game.user?.isGM||!localOf(note))throw Error('Only a GM can delete a local place.');
-    await this.rememberDeletedPlace(note.parent,localOf(note));await note.delete();await this.unlinkScene(note);
+    await this.rememberDeletedPlace(note.parent,localOf(note));await note.delete({kgRealmsPlaceDelete:true});await this.unlinkScene(note);
   }
 
   async deleteUnplaced(scene,index){
@@ -151,6 +170,7 @@ export class LocalMaps {
   install() {
     const Note = foundry.canvas.placeables.Note;
     const self = this;
+    protectLocalPlaceNotes(Note);
     // Players see a local place unless it is hidden, whatever its journal's permissions; the GM always.
     let vis = null;
     for (let proto = Note.prototype; proto && !vis; proto = Object.getPrototypeOf(proto)) vis = Object.getOwnPropertyDescriptor(proto, "isVisible");
@@ -182,10 +202,11 @@ export class LocalMaps {
     Hooks.on("canvasPan", () => this.fitAllToZoom());
     Hooks.on("refreshNote", (note) => this.#style(note));
     Hooks.on('updateNote', (doc) => { if(doc.parent === canvas.scene){const note=doc.object??canvas.notes?.get(doc.id);if(note)this.#style(note);} });
-    Hooks.on('deleteNote',(note,_options,userId)=>{if(userId===game.user.id&&game.user.isGM&&localOf(note)&&game.scenes.get(note.parent?.id))this.rememberDeletedPlace(note.parent,localOf(note)).catch(error=>console.error('kg-realms | deleted place',error));});
+    Hooks.on('deleteNote',(note,options,userId)=>{if(!options?.kgRealmsPlaceMaintenance&&userId===game.user.id&&game.user.isGM&&localOf(note)&&game.scenes.get(note.parent?.id))this.rememberDeletedPlace(note.parent,localOf(note)).catch(error=>console.error('kg-realms | deleted place',error));});
     // The hover card waits as the realm map's does (the Place card hover delay setting).
     Hooks.on("hoverNote", (note, hovered) => {
       clearTimeout(this.hoverTimer);
+      if (this.editor.active && this.editor.tab === "places") return this.hideMarkerCard();
       if (!hovered) return this.#hideCard();
       this.hoverTimer = setTimeout(() => { if (note.hover && !note.destroyed) this.#showCard(note); }, Math.max(0, Number(this.hoverDelayMs?.()) || 0));
     });
@@ -219,6 +240,13 @@ export class LocalMaps {
   }
 
   /* ---------------------------------------------------------------- drawing */
+
+  hideMarkerCard() { clearTimeout(this.hoverTimer); this.#hideCard(); }
+
+  refreshMarker(doc) {
+    const note = doc?.object;
+    if (note && !note.destroyed) this.#style(note);
+  }
 
   refreshMarkers(scene=globalThis.canvas?.scene,force=false){
     if(!scene||scene!==globalThis.canvas?.scene)return;const map=localMapOf(scene),key=`${scene.id}|${resolvedIconPack(map)}|${Number(map?.markerScale)||1}`;
@@ -265,7 +293,7 @@ export class LocalMaps {
     const icon = note.controlIcon, m = note.kgrMarker;
     if (!rec || !icon || !m || m.destroyed || note.destroyed) return;
     const size = note.document.iconSize || 48, base = size * scale, zoom = canvas.stage?.scale?.x || 1;
-    const busy = note.controlled || note.hover || note._dragPassthrough || note.isPreview;
+    const busy = note.controlled || note.hover || note._dragPassthrough || note.isPreview || note.kgrPlaceDragging;
     // Sized for the zoom as it changes; shown or hidden by the zoom once it has settled (fitAllToZoom).
     const fit = markerAtZoom(base, zoom, { always: alwaysShown(rec) || busy });
     fit.visible = markerAtZoom(base, this.settledZoom ?? zoom, { always: alwaysShown(rec) || busy }).visible;
@@ -274,7 +302,7 @@ export class LocalMaps {
     icon.scale.set(k); icon.position.set(cx - size * k / 2, cy - size * k / 2);
     m.width = m.height = base * fit.factor; m.position.set(cx, cy);
     note.visible = (note.isVisible ?? true) && fit.visible;
-    const selected = pack !== 'current' && (note.controlled || note.hover); let halo = note.kgrMarkerHalo;
+    const selected = pack !== 'current' && (note.controlled || note.hover || note.kgrPlaceDragging); let halo = note.kgrMarkerHalo;
     if (selected) {
       if (!halo || halo.destroyed) { halo = note.kgrMarkerHalo = new PIXI.Graphics(); halo.eventMode = 'none'; note.addChildAt(halo, note.getChildIndex(m)); }
       halo.clear().lineStyle(Math.max(1, base * fit.factor * .035), 0xeed596, .8).drawCircle(cx, cy, base * fit.factor * .51);
@@ -826,7 +854,7 @@ export class LocalMaps {
     }
     if (updates.length) await scene.updateEmbeddedDocuments("Note", updates);
     if (creates.length) await scene.createEmbeddedDocuments("Note", creates);
-    if (drops.length) await scene.deleteEmbeddedDocuments("Note", drops);
+    if (drops.length) await scene.deleteEmbeddedDocuments("Note", drops, {kgRealmsPlaceMaintenance:true});
     const unplaced = preset.unplaced.map((u) => ({ name: u.name, category: u.category, known: textOf(u) }))
       .filter((u) => (onlyDeleted?deletedLocalPlace({deletedPlaces:onlyDeleted},u):!deletedLocalPlace(localMapOf(scene),u))&&!scene.notes.some((n) => localOf(n)?.name.toLowerCase() === u.name.toLowerCase()));
     if(onlyDeleted)for(const rec of unplaced)for(const key of localSourceKeys(rec))restored.add(key);

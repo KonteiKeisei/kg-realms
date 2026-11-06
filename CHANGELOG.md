@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.95.4: consistent local marker editing
+
+- Drag existing settlement and local-map places directly while the KG Realms Places editor is open, including from token mode. Preview locally and save only coordinates on release. Keep marker IDs, cards, scene links, gates, docks and export data. Double-click a marker to open its card.
+- Cancel an unfinished drag with Escape, loss of pointer capture, changing editor tabs, closing the editor, changing scenes or losing GM access. Do not overwrite a position changed by another GM during the drag. Coalesce previews to one animation frame and save once per completed drag.
+- Keep KG place markers out of native Journal Notes selection, dragging, configuration and deletion. Protect against Delete and Clear Notes, including bulk deleteAll operations. Ordinary journal notes retain their normal controls. Keep confirmed deletion through the KG editor or place card and preserve internal preset cleanup.
+
 ## 0.95.3: Naval Hazards, map animation work and readable card chips
 
 - Add Naval Hazard to the Hazard subtype selectors in the map editor and encounter cards. Place it anywhere on the sea without snapping to roads or requiring a river. Retain perception, reach, linked cards, discovery and visibility controls.

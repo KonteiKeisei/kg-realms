@@ -1,5 +1,5 @@
 import {RealmDialog} from "./ui-theme.mjs";
-// The GM's Local places panel on a local map (the Journal Notes tools), in the panel shell
+// The GM's Local places panel on a local map, with its own marker editing, in the panel shell
 // (ui-shell.mjs), with three tabs:
 //  Places:    Place, Gate and Dock (click the map, and the card opens to be filled in); the places on
 //             the map in sections (ways in, the rest), with a find box; and the places not yet on the
@@ -12,6 +12,7 @@ import { CATEGORIES, localRecord, categoryFor,localPlaceType } from "./local-pla
 import { asSecret } from "./place-card.mjs";
 import { editBar } from "./ui-editbar.mjs";
 import { onCanvas } from "./canvas-input.mjs";
+import { EditorFrame } from "./editor-frame.mjs";
 import { shellHead, shellTabs, shellSection, movable, placeKept, isLocked, toggleLocked, panelState, setPanelState, applyMin } from "./ui-shell.mjs";
 import { entranceType } from "./settlement-entry.mjs";
 import {ICON_PACKS,iconPackOverride,worldIconPack,resolvedIconPack,iconPackOptions,paintIconPackPreview} from './local-icon-packs.mjs';
@@ -31,10 +32,15 @@ export class LocalEditor {
     this.shut = new Set();   // sections folded away
     this.placing = null;   // { name, category, known, index } waiting for a click on the map
     this.onDown = (e) => this.#down(e);
+    this.onMove = (e) => this.#move(e);
+    this.onUp = (e) => this.#up(e);
+    this.onCancel = e => { if (e?.pointerId == null || this.press?.pointerId === e.pointerId) this.#cancelDrag(); };
+    this.previewFrame = new EditorFrame(() => this.#previewDrag());
     // Esc steps back: stop placing, then leave editing. (On the Roads tab, the road editor's own.)
     this.onKey = (e) => {
       if (e.key !== "Escape" || this.tab === "roads" || e.target?.closest?.("input, textarea, select, [contenteditable]")) return;
       e.stopPropagation();
+      if (this.press) { e.preventDefault(); this.#cancelDrag(); return; }
       if (this.placing) { this.placing = null; return this.render(); }
       this.close();
     };
@@ -60,6 +66,7 @@ export class LocalEditor {
     if (this.active) { if (tab && tab !== this.tab) this.#setTab(tab); return; }
     if (tab && TABS[tab]) this.tab = tab;
     this.active = true;
+    this.editScene = this.scene;
     this.el = document.createElement("div");
     this.el.className = "kgr-ui kgr-panel kgr-editor kgr-local-editor";
     document.body.append(this.el);
@@ -75,12 +82,14 @@ export class LocalEditor {
     this.el.addEventListener("toggle", (e) => { const k = e.target.dataset?.sec; if (k && !e.target.closest(".kgr-sh-host")) this.shut[e.target.open ? "delete" : "add"](k); }, true);
     // Movable by its header like every panel; double-click the header to put it back under the bar.
     movable(this.el, "local", { moved: () => { editBar.anchor(this.el, false); this.el.classList.remove("kgr-anchored"); }, redock: () => this.render() });
-    this.offCanvas = onCanvas({ pointerdown: this.onDown });
+    this.offCanvas = onCanvas({ pointerdown: this.onDown, pointermove: this.onMove, pointerup: this.onUp, pointercancel: this.onCancel, lostpointercapture: this.onCancel });
+    window.addEventListener("blur", this.onCancel);
     document.addEventListener("keydown", this.onKey, { capture: true });
     this.hooks = [
       ["createNote", Hooks.on("createNote", () => this.render())],
       ["deleteNote", Hooks.on("deleteNote", () => this.render())],
       ["updateNote", Hooks.on("updateNote", () => this.render())],
+      ["updateUser", Hooks.on("updateUser", user => { if (user.id === game.user.id && !game.user.isGM) this.close(); })],
       ["updateScene", Hooks.on("updateScene", (s) => { if (s === this.scene) this.render(); })]
     ];
     this.render();
@@ -89,9 +98,11 @@ export class LocalEditor {
 
   close() {
     if (!this.active) return;
+    this.#cancelDrag();
     this.active = false;
     if (this.roads?.active) this.roads.close();
     this.offCanvas?.(); this.offCanvas = null;
+    window.removeEventListener("blur", this.onCancel);
     document.removeEventListener("keydown", this.onKey, { capture: true });
     for (const [name, id] of this.hooks ?? []) Hooks.off(name, id);
     this.hooks = null;
@@ -99,6 +110,8 @@ export class LocalEditor {
     this.el?.remove();
     this.el = null;
     this.placing = null;
+    this.lastMarkerClick = null;
+    this.editScene = null;
     this.renderedTab = null;
     editBar.hide(this);
     this.onClose?.();
@@ -106,6 +119,7 @@ export class LocalEditor {
 
   #setTab(tab) {
     if (!TABS[tab] || tab === this.tab) return;
+    this.#cancelDrag();
     if (this.tab === "roads" && this.roads?.active) this.roads.close();
     this.tab = tab;
     this.placing = null;
@@ -114,6 +128,7 @@ export class LocalEditor {
 
   render() {
     if (!this.el) return;
+    if (this.editScene !== this.scene || !game.user.isGM) return this.close();
     const map = this.map;
     if (!map) return this.close();
     const tab = this.tab, notes = this.#notes();
@@ -233,9 +248,104 @@ export class LocalEditor {
     if (act === "import") return this.#import();
   }
 
-  /** The click that places a new place (or one from the list), then its card opens to be filled in. */
+  #canEdit() { return this.active && game.user.isGM && this.tab === "places" && this.editScene === this.scene && !!this.map; }
+
+  #point(e) {
+    const r = canvas.app.view.getBoundingClientRect();
+    return canvas.stage.worldTransform.applyInverse({x:e.clientX-r.left,y:e.clientY-r.top});
+  }
+
+  #hit(at) {
+    const zoom = canvas.stage.scale.x || 1, scale = Number(this.map?.markerScale) || 1;
+    let best = null;
+    for (const note of this.#notes()) {
+      if (note.object?.destroyed || note.object?.visible === false) continue;
+      const width = note.object?.kgrMarker?.width ?? (note.iconSize || 64) * scale;
+      const radius = Math.max(width / 2, 12 / zoom), distance = Math.hypot(note.x-at.x,note.y-at.y);
+      if (distance <= radius && (!best || distance < best.distance)) best = {note,distance};
+    }
+    return best?.note;
+  }
+
+  #stop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+
   async #down(e) {
-    if (!this.placing || e.button !== 0) return;
+    if (!this.#canEdit() || e.button !== 0 || this.press || this.saving) return;
+    if (this.placing) return this.#placeNew(e);
+    const at = this.#point(e), note = this.#hit(at);
+    if (!note) { this.lastMarkerClick = null; return; }
+    this.#stop(e);
+    const object = note.object;
+    this.press = {note,object,scene:this.scene,at,start:[e.clientX,e.clientY],origin:{x:note.x,y:note.y},offset:{x:(object?.position.x ?? note.x)-note.x,y:(object?.position.y ?? note.y)-note.y},pointerId:e.pointerId,moved:false};
+    if (object) object.kgrPlaceDragging = true;
+    this.maps.hideMarkerCard?.();
+    this.maps.refreshMarker?.(note);
+    try { canvas.app.view.setPointerCapture?.(e.pointerId); } catch { /* synthetic or already released pointer */ }
+  }
+
+  #validPress(p) {
+    return this.#canEdit() && p.scene === this.scene && this.scene.notes.get(p.note.id) === p.note && p.note.x === p.origin.x && p.note.y === p.origin.y;
+  }
+
+  #move(e) {
+    const p = this.press;
+    if (!p || (p.pointerId != null && e.pointerId != null && p.pointerId !== e.pointerId)) return;
+    if (!this.#validPress(p)) return this.#cancelDrag();
+    this.#stop(e);
+    if (!p.moved && Math.hypot(e.clientX-p.start[0],e.clientY-p.start[1]) < 4) return;
+    const at = this.#point(e);
+    p.moved = true;
+    p.target = {x:Math.round(p.origin.x+at.x-p.at.x),y:Math.round(p.origin.y+at.y-p.at.y)};
+    this.previewFrame.schedule();
+  }
+
+  #previewDrag() {
+    const p = this.press;
+    if (!p || !p.target || !this.#validPress(p)) return this.#cancelDrag();
+    if (p.object && !p.object.destroyed) p.object.position.set(p.target.x+p.offset.x,p.target.y+p.offset.y);
+  }
+
+  #restore(p) {
+    if (p.object && !p.object.destroyed) {
+      p.object.kgrPlaceDragging = false;
+      p.object.position.set(p.note.x+p.offset.x,p.note.y+p.offset.y);
+      this.maps.refreshMarker?.(p.note);
+    }
+  }
+
+  #cancelDrag() {
+    const p = this.press;
+    this.press = null;
+    this.previewFrame.clear();
+    if (!p) return;
+    this.#restore(p);
+    try { canvas.app.view.releasePointerCapture?.(p.pointerId); } catch { /* scene teardown may release capture first */ }
+  }
+
+  async #up(e) {
+    const p = this.press;
+    if (!p || e.button !== 0 || (p.pointerId != null && e.pointerId != null && p.pointerId !== e.pointerId)) return;
+    this.#move(e);
+    if (this.press !== p) return;
+    this.previewFrame.clear();
+    this.press = null;
+    try { canvas.app.view.releasePointerCapture?.(p.pointerId); } catch { /* pointer already released */ }
+    if (!p.moved) {
+      this.#restore(p);
+      const now = Date.now(), last = this.lastMarkerClick;
+      this.lastMarkerClick = {id:p.note.id,at:now};
+      if (last?.id === p.note.id && now-last.at < 450) { this.lastMarkerClick=null; return this.maps.open(p.note); }
+      return;
+    }
+    this.lastMarkerClick = null;
+    this.saving = p;
+    try { await p.note.update(p.target); }
+    catch (error) { ui.notifications.error(`KG Realms: could not move this place (${error.message}).`); }
+    finally { this.#restore(p); this.saving = null; }
+  }
+
+  /** The click that places a new place (or one from the list), then its card opens to be filled in. */
+  async #placeNew(e) {
     e.preventDefault(); e.stopImmediatePropagation();
     const r = canvas.app.view.getBoundingClientRect();
     const at = canvas.stage.worldTransform.applyInverse({ x: e.clientX - r.left, y: e.clientY - r.top });
