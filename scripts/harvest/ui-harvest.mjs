@@ -27,7 +27,7 @@ const SHORT = { sur: "Sur", med: "Med", slt: "Sle" };
 const playersOf = (actor) => Array.from(game.users ?? []).filter((u) => u.active && !u.isGM && actor?.testUserPermission?.(u, "OWNER"));
 
 export const HARVEST_RULES = {
-  who: ruleParagraphs([["Who", "The party token's members and the characters with a token on this scene, each once. Drag a player onto a creature: the first one leads and makes every check. One more can help."], ["Help", "The helper rolls too, against their own DC. A success adds 1 to the leader's roll; a failure takes 1 off."], ["Gets the parts", "The leader. Players stay in this list, free to work on other creatures."]]),
+  who: ruleParagraphs([["Who", "The party token's members and the characters with a token on this scene, each once. Drag a player onto a creature: the first one leads and makes every check. One more can help."], ["Right-click", "Set as primary: leads every creature with parts to take. Set as secondary: helps on every one. Or take them off every creature."], ["Help", "The helper rolls too, against their own DC. A success adds 1 to the leader's roll; a failure takes 1 off."], ["Gets the parts", "The leader. Players stay in this list, free to work on other creatures."]]),
   harvest: ruleParagraphs([["Checks", "One check for each part: Survival, Medicine or Sleight of Hand."], ["Success", "The part, in the amount rolled."], ["Failure", "Nothing, and the part can be tried again. Fail by 5 or more and it is ruined."], ["Meat", "A knife can't make meat inedible. A failed meat check still gives a quarter of it, rounded down, as mangled meat: edible and good for rations, but nobody buys it."], ["Downed", "A creature at 0 hit points, dead or defeated."]]),
   dc: ruleParagraphs([["DC", "Base DC + half the creature's CR, rounded down + the part's difficulty."], ["Skill", "Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing."], ["GM", "The DCs tab changes the base DC, what each skill takes off, and every part's difficulty, for this world."]]),
   rarity: ruleParagraphs([["Rarity", "By the creature's CR. Common 0 to 1, uncommon 2 to 4, rare 5 to 10, very rare 11 to 16, legendary 17 or more."], ["Value", "Each rarity is worth more: ×1, ×2, ×5, ×15 and ×40. The world's Prices setting applies too."], ["Stacking", "Items are named by rarity and kind, never by the creature, so like stacks with like."]]),
@@ -93,10 +93,75 @@ export class HarvestWindow {
     this.el.addEventListener("dragover", (e) => { const t = e.target.closest?.("[data-drop]"); if (t) { e.preventDefault(); t.classList.add("hot"); } });
     this.el.addEventListener("dragleave", (e) => e.target.closest?.("[data-drop]")?.classList.remove("hot"));
     this.el.addEventListener("drop", (e) => this.#drop(e));
+    this.el.addEventListener("contextmenu", (e) => { const p = e.target.closest?.("[data-pc]"); if (!p) return; e.preventDefault(); this.#menu(p.dataset.pc, e.clientX, e.clientY); });
+  }
+
+  /* ------------------------------------------------------------------ the party's right-click menu */
+
+  /** A party member's menu: primary (leads) or secondary (helps) on every creature, or off them all. */
+  #menu(actorId, x, y) {
+    this.#closeMenu();
+    const a = game.actors.get(actorId);
+    if (!a) return;
+    const name = first(a.name), n = this.#workable().length;
+    const m = document.createElement("div");
+    m.className = "kgr-ui kgr-panel kgr-hv-menu";
+    m.setAttribute("role", "menu");
+    m.innerHTML = `<div class="kgr-hv-menu-head"><b>${esc(a.name)}</b><small>Every creature with parts to take (${n})</small></div>
+      <button type="button" role="menuitem" data-menu="primary"><i class="fa-solid fa-crown"></i><span>Set as primary<small>${esc(name)} leads every creature</small></span></button>
+      <button type="button" role="menuitem" data-menu="secondary"><i class="fa-solid fa-handshake-angle"></i><span>Set as secondary<small>${esc(name)} helps on every creature</small></span></button>
+      <button type="button" role="menuitem" data-menu="off"><i class="fa-solid fa-xmark"></i><span>Take off every creature</span></button>`;
+    document.body.append(m);
+    Object.assign(m.style, { left: `${Math.min(x, window.innerWidth - m.offsetWidth - 8)}px`, top: `${Math.min(y, window.innerHeight - m.offsetHeight - 8)}px` });
+    m.addEventListener("click", (e) => { const b = e.target.closest("[data-menu]"); if (!b) return; this.#closeMenu(); this.#setEverywhere(actorId, b.dataset.menu); });
+    this.menuEl = m;
+    this.menuOff = (e) => { if (e.type === "keydown" ? e.key === "Escape" : !m.contains(e.target)) this.#closeMenu(); };
+    setTimeout(() => { document.addEventListener("pointerdown", this.menuOff, true); document.addEventListener("keydown", this.menuOff, true); }, 0);
+    m.querySelector("button")?.focus();
+  }
+  #closeMenu() {
+    this.menuEl?.remove(); this.menuEl = null;
+    if (this.menuOff) { document.removeEventListener("pointerdown", this.menuOff, true); document.removeEventListener("keydown", this.menuOff, true); this.menuOff = null; }
+  }
+  /** The creatures a player can be put on: those with parts still to take. */
+  #workable() { return this.creatures.filter((c) => this.partsOf(c).some((p) => !p.taken)); }
+
+  /** Put a player on every creature as primary (leader) or secondary (helper), or take them off every one. */
+  #setEverywhere(actorId, role) {
+    if (this.#lockedOut("assign")) return;
+    const a = game.actors.get(actorId);
+    if (!a) return;
+    const slot = () => ({ id: a.id, skill: this.#bestSkill(a) }), list = this.#workable();
+    let n = 0;
+    for (const c of (role === "off" ? this.creatures : list)) {
+      const wasLead = c.crew.leader?.id === a.id, wasHelp = c.crew.helper?.id === a.id;
+      // The one they replace swaps into the other slot when it is free, so nobody is lost.
+      if (role === "primary") {
+        if (wasLead) continue;
+        const old = c.crew.leader;
+        if (wasHelp) c.crew.helper = null;
+        c.crew.leader = slot();
+        if (old && !c.crew.helper) c.crew.helper = old;
+        n++;
+      } else if (role === "secondary") {
+        if (wasHelp) continue;
+        const old = c.crew.helper;
+        c.crew.helper = slot();
+        if (wasLead) c.crew.leader = old ?? null;
+        n++;
+      } else if (wasLead || wasHelp) {
+        if (wasLead) { c.crew.leader = c.crew.helper; c.crew.helper = null; } else c.crew.helper = null;
+        n++;
+      }
+    }
+    const what = role === "primary" ? `leads ${n} more creature${n === 1 ? "" : "s"}` : role === "secondary" ? `helps on ${n} more creature${n === 1 ? "" : "s"}` : `is off ${n} creature${n === 1 ? "" : "s"}`;
+    ui.notifications.info(`KG Realms: ${a.name} ${what}.${role === "secondary" && list.some((c) => !c.crew.leader) ? " Creatures with no primary still need one." : ""}`);
+    this.render();
   }
 
   /** Closing ends the session (and a harvest under way): a new one starts on the next open. */
   close() {
+    this.#closeMenu();
     if (this.running) this.runner.end();
     this.el?.remove(); this.el = null; this.creatures = []; this.log = []; this.runs = [];
   }
@@ -186,7 +251,7 @@ export class HarvestWindow {
       || `<p class="hint">No downed creatures on this scene. A creature is downed at 0 hit points, or when it is dead or defeated.</p>`;
     return `<div class="hv-panes">
       <div class="hv-left"><div class="hv-cap">Party<span class="sp"></span>${rule(HARVEST_RULES.who)}</div>${pcs}
-        <span class="hint">Drag a player onto a creature. The first leads, a second can help. Players stay here, free for other creatures.</span></div>
+        <span class="hint">Drag a player onto a creature. The first leads, a second can help. Players stay here, free for other creatures. Right-click a player to set them as primary or secondary on every creature.</span></div>
       <div class="hv-right"><div class="hv-cap">Downed creatures<span class="sp"></span>${rule(HARVEST_RULES.harvest)}</div>${list}
         ${locked ? "" : `<div class="hv-drop" data-drop="compendium">Drop a creature from a compendium or the Actors sidebar here, for a kill off the map</div>`}</div>
     </div>`;

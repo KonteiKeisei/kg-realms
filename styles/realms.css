@@ -2343,3 +2343,12 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-harvest-run .hr-override[open] > summary { margin-bottom: 6px; }
 .kgr-harvest-run .cs-summary ul { margin: 4px 0 0; padding-left: 18px; }
 .kgr-harvest .hv-why { display: block; color: var(--kgr-muted); font-size: 11px; }
+/* Harvest: a party member's right-click menu (primary or secondary on every creature). */
+.kgr-ui.kgr-hv-menu { z-index: 1000; min-width: 240px; padding: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--kgr-text); }
+.kgr-hv-menu .kgr-hv-menu-head { display: flex; flex-direction: column; padding: 4px 8px 6px; border-bottom: 1px solid var(--kgr-line); margin-bottom: 2px; }
+.kgr-hv-menu .kgr-hv-menu-head small { color: var(--kgr-muted); font-size: 11px; }
+.kgr-hv-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; margin: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--kgr-text); font: inherit; text-align: left; box-shadow: none; cursor: pointer; }
+.kgr-hv-menu button:hover, .kgr-hv-menu button:focus-visible { background: var(--kgr-hover); outline: 0; }
+.kgr-hv-menu button > i { width: 16px; color: var(--kgr-accent); text-align: center; }
+.kgr-hv-menu button span { display: flex; flex-direction: column; }
+.kgr-hv-menu button small { color: var(--kgr-muted); font-size: 11px; }

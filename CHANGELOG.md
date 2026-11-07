@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.96.3-harvest-test: primary and secondary for every creature (test build, not released)
+
+- Right-click a player in the harvest window's party list: Set as primary (leads every creature with parts to take), Set as secondary (helps on every one), or Take off every creature.
+- Whoever they replace swaps into the other slot when it is free, so nobody is lost.
+
 ## 0.96.2-harvest-test: the harvest runs like the camp's activities (test build, not released)
 
 - Start harvest opens the harvest's steps, in the same view as the camp's activities, on the GM's and the players' screens: a step for each creature, then Done.
