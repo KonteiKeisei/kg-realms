@@ -22,7 +22,8 @@ import { ruleTooltip } from "./travel-rules.mjs";
 //    spent on its chat card), and the GM confirms the result or allows a reroll.
 // Players' changes use their User document; the primary GM validates and writes the journey.
 import { SLEEP, FORAGE, WATCH_HOURS, sleepOf, planWatches, awakeAt, campPhases, campSchedule } from "./camp.mjs";
-import { TASKS, ALARM_DC, SHIFT_BONUS, leaderWithHelp, concealed, setupWork, pastTaskSummary } from "./camp-tasks.mjs";
+import { TASKS, WORK, ALARM_DC, SHIFT_BONUS, leaderWithHelp, concealed, setupWork, pastTaskSummary, provisionPounds } from "./camp-tasks.mjs";
+import { provision, foodOn } from "./harvest/items.mjs";
 import { promptCompletedCampRest } from "./rest-recovery.mjs";
 import { isPrimaryGM } from "./authority.mjs";
 import { journeyKey } from "./journey-state.mjs";
@@ -315,7 +316,7 @@ export class CampPanel {
     const c = this.watch.checks, campId = this.watch.campId;
     if (!campId || c?.campId !== campId || c.night !== night) return { night, campId };
     const clean = { ...c };
-    for (const key of ["forage", "conceal", "alarm"]) if (clean[key]?.campId !== campId && (clean[key]?.asked || clean[key]?.done || Object.keys(clean[key]?.rolls ?? {}).length)) delete clean[key];
+    for (const key of WORK) if (clean[key]?.campId !== campId && (clean[key]?.asked || clean[key]?.done || Object.keys(clean[key]?.rolls ?? {}).length)) delete clean[key];
     return clean;
   }
 
@@ -530,7 +531,7 @@ export class CampPanel {
       return `<li class="camp-task-row"><img src="${esc(m.img)}" alt=""><b class="grow">${esc(m.name)}</b>
         <select data-camp="task" data-id="${m.id}" ${mine ? "" : "disabled"} aria-label="${esc(m.name)}'s task">${keys.map((k) => `<option value="${k}" ${k === t ? "selected" : ""}>${esc(TASKS[k].label)}</option>`).join("")}</select></li>`;
     }).join("");
-    const checks = ["forage", "conceal", "alarm"].filter((k) => this.taskOn(k)).map((k) => this.#taskCheck(k, p, members)).join("");
+    const checks = WORK.filter((k) => this.taskOn(k)).map((k) => this.#taskCheck(k, p, members)).join("");
     return `<section class="camp-step"><h4><span class="step">1</span> Camp tasks ${rule(R.tasks)}<span class="sp"></span><small>One setup activity each. Watch duty is separate.</small></h4>${this.watch.biome?`<p class="hint">Biome: ${esc(this.watch.biome.name)}. Task DCs start from this biome's settings; the GM can override them.</p>`:""}
       <ul class="camp-tasks">${rows}</ul>${checks}</section>`;
   }
@@ -547,7 +548,7 @@ export class CampPanel {
     const best = [...who].sort((a, b) => Math.max(...T.skills.map((s) => skillMod(b.actor, s))) - Math.max(...T.skills.map((s) => skillMod(a.actor, s))))[0];
     const leader = T.help ? (who.some((m) => m.id === c.leader) ? c.leader : best.id) : null;
     const skills = T.skills.map((s) => SKILLS[s].label).join(" or ");
-    const tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm }[key];
+    const tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm, provision: R.provision }[key];
     const head = `<div class="camp-task-head"><i class="fa-solid ${T.icon}"></i><b>${esc(T.label)}</b> ${rule(tip)}<span class="grow"></span><small>${esc(skills)}${seen ? ` · DC ${dc}` : ""}</small></div>`;
     if (c.done) return `<div class="camp-task done">${head}${this.#taskResult(key, c, who)}</div>`;
     // Before asking (GM): the DC and the leader.
@@ -574,7 +575,7 @@ export class CampPanel {
       sum = lw ? `<p class="camp-task-sum">${lw.base}${lw.helps.map((h) => ` ${h.ok ? "+" : "−"} 1`).join("")} = <b>${lw.total}</b>${seen ? ` against DC ${dc}: <span class="${lw.success ? "ok" : "no"}">${lw.success ? "success" : "failure"}</span>` : ""}</p>` : "";
     } else if (T.stack) {
       const n = concealed(c.rolls, dc), rolled = Object.values(c.rolls ?? {}).filter((r) => r?.total != null).length;
-      sum = rolled ? `<p class="camp-task-sum">${n} of ${rolled} succeeded: <b>+${n}</b> to the watch count for tonight's encounter dice.</p>` : "";
+      sum = !rolled ? "" : key === "provision" ? `<p class="camp-task-sum">${n} of ${rolled} succeeded: up to <b>${provisionPounds(c.rolls, dc)} lb</b> of meat can be preserved.</p>` : `<p class="camp-task-sum">${n} of ${rolled} succeeded: <b>+${n}</b> to the watch count for tonight's encounter dice.</p>`;
     }
     const anyRolled = Object.values(c.rolls ?? {}).some((r) => r?.total != null), ready = T.help ? c.rolls?.[leader]?.total != null : anyRolled;
     const confirm = gm ? `<div class="row"><button data-camp="task-confirm" data-key="${key}" class="primary grow" ${ready ? "" : "disabled"}><i class="fa-solid fa-check"></i> Confirm result</button></div>` : `<small class="hint">${spend.trim()} The GM confirms the result, or allows a reroll.</small>`;
@@ -584,9 +585,10 @@ export class CampPanel {
   /** A confirmed task's result line. */
   #taskResult(key, c, who) {
     const r = c.result ?? {}, seen = game.user.isGM || showDC();
-    const success = key === "conceal" ? r.successes > 0 : !!r.success;
+    const success = key === "conceal" ? r.successes > 0 : key === "provision" ? r.rations > 0 : !!r.success;
     const line = !c.override && r.total != null ? `${r.total}${seen ? ` against DC ${c.dc}` : ""}. ` : "";
     const effect = key === "conceal" ? (success ? `The camp was concealed. Add ${r.successes} to the watch encounter dice.` : "The camp could not be hidden.")
+      : key === "provision" ? (success ? `${r.lb} lb of meat became ${r.rations} rations.` : r.note ?? "No meat was preserved.")
       : key === "forage" ? (success ? `Food was found for everyone.${c.given ? ` ${c.given} rations handed out.` : ""}` : "No food found.")
       : success ? `Alarms were set. Perception DC was ${ALARM_DC} lower; the camp cannot be surprised.` : "The alarms did not work.";
     return `<div class="camp-result ${success ? "ok" : "no"}"><span class="grow"><strong>${c.override?.automatic ? "Automatic " : ""}${success ? "Success" : "Failure"}.</strong> ${line}${effect}${c.override ? `<span class="camp-ruling-reason"><strong>Reason:</strong> ${esc(c.override.reason)}</span>` : ""}</span></div>`;
@@ -606,6 +608,7 @@ export class CampPanel {
       const all = this.#checks(night), c = all[key] ?? {}; if (c.done) return;
       const who = this.members().filter((m) => this.taskOf(m.id) === key);
       const result = TASKS[key].stack ? { successes: success ? who.length : 0 } : { success };
+      if (key === "provision") Object.assign(result, await this.#provision(who.length * (success ? 20 : 10)));
       const given = success && key === "forage" && !this.practice ? await this.#giveRations(this.members().map((m) => m.actor)) : 0;
       return this.write({ checks: { ...all, [key]: { ...c, campId: this.watch.campId, dc: c.dc ?? this.defaultTaskDc(key), workers: who.map((m) => m.id), done: true, result, given, override: { success, reason, automatic: !c.asked, by: game.user.id, at: this.now } } } });
     }
@@ -659,7 +662,10 @@ export class CampPanel {
     // Each roll as its chat card stands now (after any spend).
     const rolls = Object.fromEntries(Object.entries(c.rolls ?? {}).map(([id, r]) => [id, { ...r, total: game.messages.get(r.msg)?.rolls?.[0]?.total ?? r.total }]));
     let result, given = 0;
-    if (TASKS[key].stack) result = { successes: concealed(rolls, c.dc) };
+    if (TASKS[key].stack) {
+      result = { successes: concealed(rolls, c.dc) };
+      if (key === "provision") Object.assign(result, await this.#provision(provisionPounds(rolls, c.dc)));
+    }
     else {
       const lw = leaderWithHelp(rolls, c.leader, c.dc);
       if (!lw) return;
@@ -847,7 +853,7 @@ export class CampPanel {
     // While the camp scene runs it holds the checks and the encounter; the panel keeps a summary.
     const run = this.sceneNow(p);
     const check = !run && p.status === "encounter" ? this.#watchCheck(p, w, m) : "";
-    const ch = this.#checks(p.night), done = ["forage", "conceal", "alarm"].filter((k) => ch[k]?.done);
+    const ch = this.#checks(p.night), done = WORK.filter((k) => ch[k]?.done);
     const tasks = done.length ? `<div class="camp-rolls"><div class="camp-rolls-head"><b>Completed camp tasks</b></div><div class="camp-task-sum">${done.map((k) => `<span class="camp-task-status ${(k === "conceal" ? ch[k].result?.successes > 0 : ch[k].result?.success) ? "ok" : "no"}"><i class="fa-solid ${TASKS[k].icon}"></i> ${esc(pastTaskSummary(k, ch[k].result))}</span>`).join("<br>")}</div></div>` : "";
     const scene = run ? `<div class="row camp-hold"><span class="grow"><i class="fa-solid fa-campground"></i> The camp scene is ${run.hold && p.status === "encounter" ? "holding for this encounter" : "running the night"}: ${esc(this.#stepLabel(run.step))}. Watches, rolls and encounters happen there.</span>${this.sceneMin ? `<button data-camp="scene-show">Show the camp scene</button>` : ""}</div>` : "";
     return `<div class="camp camp-night">${this.#strip(p, n)}${this.#bar(pl, members, into >= 0 ? nowAt : null, start, cur)}${watchLine}${scene}${run ? "" : tasks + this.#rollLog(p, n, members)}${encs}${check}${go}</div>`;
@@ -1206,6 +1212,22 @@ export class CampPanel {
     await this.save({ encounters: [...(s.encounters ?? []), enc], watch: { ...this.watch, encWatch: { ...(this.watch.encWatch ?? {}), [id]: "random" } } });
   }
 
+  /**
+   * Provisioning (0.96): the party's harvested meat and greens into rations, up to `capacity` pounds,
+   * each character's own into their own pack. Returns { lb, rations, note }. A practice night makes none.
+   */
+  async #provision(capacity) {
+    if (this.practice) return { lb: 0, rations: 0, note: "A practice night preserves nothing." };
+    const actors = this.members().map((m) => m.actor).filter(Boolean);
+    if (!actors.some((a) => foodOn(a) > 0)) return { lb: 0, rations: 0, note: "There was no harvested meat to preserve." };
+    try { return await provision(actors, capacity, this.#setting("rationItem")); }
+    catch (err) {
+      console.error("kg-realms | Provisioning:", err);
+      ui.notifications.error(`KG Realms: Provisioning made no rations: ${err.message}.`);
+      return { lb: 0, rations: 0, note: `Nothing was preserved: ${err.message}.` };
+    }
+  }
+
   /** One ration (the module's ration item) for each character. Returns how many were given. */
   async #giveRations(actors) {
     const uuid = this.#setting("rationItem");
@@ -1256,7 +1278,7 @@ export class CampPanel {
   /** Tonight's steps. */
   #steps() {
     const out = ["camp"];
-    if (this.advanced) for (const k of ["forage", "conceal", "alarm"]) if (this.taskOn(k) && this.members().some((m) => this.taskOf(m.id) === k)) out.push(k);
+    if (this.advanced) for (const k of WORK) if (this.taskOn(k) && this.members().some((m) => this.taskOf(m.id) === k)) out.push(k);
     const n = this.plan().watches.length;
     if (n) for (let i = 0; i < n; i++) out.push(`w${i}`); else out.push("night");
     if (this.plan().version === 2) { out.push("recovery"); if (this.plan().wait > 0) out.push("wait"); out.push("pack"); }
@@ -1267,7 +1289,7 @@ export class CampPanel {
   #stepWatch(step) { return step === "night" ? -1 : /^w\d+$/.test(step ?? "") ? Number(step.slice(1)) : null; }
   #stepLabel(step) {
     const i = this.#stepWatch(step);
-    return i != null ? (i < 0 ? "Rest without a watch" : `Watch ${i + 1}`) : { camp: "Setup camp", forage: "Forage", conceal: "Conceal", alarm: "Alarms", recovery: "Rest complete", wait: "Wait before packing", pack: "Pack up", dawn: "Rest ends" }[step] ?? step;
+    return i != null ? (i < 0 ? "Rest without a watch" : `Watch ${i + 1}`) : { camp: "Setup camp", forage: "Forage", conceal: "Conceal", alarm: "Alarms", provision: "Provisioning", recovery: "Rest complete", wait: "Wait before packing", pack: "Pack up", dawn: "Rest ends" }[step] ?? step;
   }
 
   /** The scene now: { night, step, hold, steps, at }, while it runs tonight; else null. */
@@ -1591,7 +1613,7 @@ export class CampPanel {
     return ids.map((id) => {
       const work = this.fatigue(id); if (!work) return "";
       const name = members.find((m) => m.id === id)?.name ?? "Watcher";
-      const activity = { forage: "foraging", conceal: "concealing the camp", alarm: "setting alarms" }[work];
+      const activity = { forage: "foraging", conceal: "concealing the camp", alarm: "setting alarms", provision: "provisioning" }[work];
       return `<span class="cs-fatigue-note">${esc(name)}: tired from ${activity}. Disadvantage on watch checks.</span>`;
     }).join("");
   }
@@ -1650,11 +1672,11 @@ export class CampPanel {
   /** The camp: everyone by task, Watch last in watch order (a shared shift together). */
   #sceneCamp(p) {
     const members = this.members(), pl = this.plan(), start = (p.since ?? this.now) + (pl.setup ?? pl.rest - pl.window) * 3600;
-    const groups = this.advanced ? ["forage", "conceal", "alarm"].filter((k) => this.taskOn(k)).map((k) => {
+    const groups = this.advanced ? WORK.filter((k) => this.taskOn(k)).map((k) => {
       const who = members.filter((m) => this.taskOf(m.id) === k);
       if (!who.length) return "";
       const c = this.#checks(p.night)[k] ?? {}, lead = TASKS[k].help ? c.leader ?? null : null;
-      const R = this.hud.ruleText(), tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm }[k];
+      const R = this.hud.ruleText(), tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm, provision: R.provision }[k];
       return `<div class="cs-group"><span class="cs-group-head"><i class="fa-solid ${TASKS[k].icon}"></i><b>${esc(TASKS[k].label)}</b>${tip ? rule(tip) : ""}${TASKS[k].help ? "<small>Leader with Help</small>" : ""}</span>
         ${who.map((m) => `<span class="cs-who">${this.#face(m, m.id === lead ? 54 : 44)}<span><b>${esc(m.name)}</b><small>${m.id === lead ? "leads" : TASKS[k].help && lead ? "helps" : (TASKS[k].skills ?? []).map((s) => SKILLS[s].short).join(" or ")}</small></span></span>`).join("")}</div>`;
     }).join("") : "";
@@ -1683,7 +1705,7 @@ export class CampPanel {
   #sceneTask(key, p) {
     const gm = game.user.isGM, T = TASKS[key], members = this.members(), who = members.filter((m) => this.taskOf(m.id) === key);
     const c = this.#checks(p.night)[key] ?? {}, dc = c.dc ?? this.defaultTaskDc(key), seen = gm || showDC(), leader = c.leader;
-    const sub = `${key === "forage" ? "Within 100 feet of camp. " : ""}${T.skills.map((s) => SKILLS[s].label).join(" -or- ")}${seen && !c.done ? `. DC ${dc}` : ""}`;
+    const sub = `${key === "forage" ? "Within 100 feet of camp. " : ""}${key === "provision" ? `${members.reduce((s, m) => s + (m.actor ? foodOn(m.actor) : 0), 0)} lb of harvested meat on hand. ` : ""}${T.skills.map((s) => SKILLS[s].label).join(" -or- ")}${seen && !c.done ? `. DC ${dc}` : ""}`;
     const faces = who.map((m) => {
       const r = c.rolls?.[m.id], lead = T.help && m.id === leader;
       const res = r?.total != null ? c.done ? T.skills.length > 1 ? `<span class="cs-meta">${esc(SKILLS[r.skill]?.short ?? "")}</span>` : ""
@@ -1704,7 +1726,7 @@ export class CampPanel {
     const done = c.done ? `<div class="cs-result">${this.#taskResult(key, c, who)}</div>` : "";
     const ready = T.help ? c.rolls?.[leader]?.total != null : Object.values(c.rolls ?? {}).some((r) => r?.total != null);
     const confirm = gm && !c.done && c.asked ? `<button data-camp="task-confirm" data-key="${key}" class="primary" ${ready ? "" : "disabled"}><i class="fa-solid fa-check"></i> Confirm result</button>` : "";
-    const R = this.hud.ruleText(), tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm }[key];
+    const R = this.hud.ruleText(), tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm, provision: R.provision }[key];
     return `<div class="cs-title"><b>${esc(T.label)} ${rule(tip)}</b><span class="cs-meta">${esc(sub)}</span></div><div class="cs-people">${faces}</div>
       ${sum ? `<p class="cs-sum">${sum}</p>` : ""}${done}<div class="cs-actions">${gm && !c.done && !c.asked ? `<button data-camp="task-ask" data-key="${key}" class="primary">Request rolls</button>` : ""}${confirm}${!c.done ? this.#overrideUI(key, "task", !c.asked) : ""}${!gm && !c.done ? `<span class="cs-note">${spend}Waiting for GM confirmation.</span>` : ""}</div>`;
   }
@@ -1740,7 +1762,7 @@ export class CampPanel {
   /** End of rest: camp results and the actual completion time. */
   #sceneRestEnd(p) {
     const gm = game.user.isGM, members = this.members(), c = this.#checks(p.night), pl = this.plan();
-    const tasks = ["forage", "conceal", "alarm"].filter((k) => c[k]?.done).map((k) => `<li><i class="fa-solid ${TASKS[k].icon}"></i> ${esc(pastTaskSummary(k, c[k].result))}</li>`).join("");
+    const tasks = WORK.filter((k) => c[k]?.done).map((k) => `<li><i class="fa-solid ${TASKS[k].icon}"></i> ${esc(pastTaskSummary(k, c[k].result))}</li>`).join("");
     const hide = !gm && !!this.#setting("hideEncounterRolls");
     const watches = hide ? "" : (this.st.encounters ?? []).filter((e) => e.rest?.night === p.night).flatMap((e) => (e.rest.rolls ?? []).map((r) => `<li><i class="fa-solid fa-eye"></i> ${r.w < 0 ? "The night" : `Watch ${r.w + 1}, ${esc(members.find((m) => m.id === pl.watches[r.w]?.id)?.name.split(" ")[0] ?? "?")}`}: 1d${r.die}: ${r.roll}, ${r.roll === 1 ? (gm ? esc(e.name) : "an encounter") : "quiet"}</li>`)).join("");
     let profile = "";
@@ -1814,6 +1836,7 @@ export function advancedWatchesMenu() {
           ${task("forage", "Foraging", "Search for food within 100 feet of the camp: Wisdom (Survival), DC by what the land offers. Leader with Help. Success: each character is given a ration (below).")}
           ${task("conceal", "Concealment", "Camouflage and clear tracks: Wisdom (Survival) or Dexterity (Stealth). Each success counts as one more watcher for the night's encounter dice.")}
           ${task("alarm", "Alarms", "Tripwires and the like: Wisdom (Survival) or Dexterity (Sleight of Hand). Leader with Help. Success: the night's Perception DC 5 lower, and no surprise.")}
+          ${task("provision", "Provisioning", "Turn harvested meat and greens into rations: Wisdom (Survival), DC 10, each character on it. Success: up to 20 lb each; failure: 10 lb. Every 3 lb makes 1 ration (the ration item below).")}
         </div>
         <h4>Ration item</h4><p>Given to each character when foraging succeeds. With none set, only the result is shown.</p>
         ${await drop("rationItem", "Item", "fa-drumstick-bite", "Drop a ration item here, from a compendium or the Items sidebar")}

@@ -1419,7 +1419,7 @@ export class TravelHud {
       ${sec("Forced march", `${ruleContent(R.forced)}`)}
       ${sec("Resting", `${ruleContent(R.rest)}${ruleContent(R.sleep)}`)}
       ${sec("Keeping watch", `${ruleContent(R.watch)}${ruleContent(R.campRolls)}`)}
-      ${sec("Advanced watches", `${ruleContent(R.tasks)}${ruleContent(R.forage)}${ruleContent(R.conceal)}${ruleContent(R.alarm)}`, "Table rules")}
+      ${sec("Advanced watches", `${ruleContent(R.tasks)}${ruleContent(R.forage)}${ruleContent(R.conceal)}${ruleContent(R.alarm)}${ruleContent(R.provision)}`, "Table rules")}
       ${sec("Travelling by", `${Object.entries(METHODS).map(([k, m]) => `<b>${esc(m.short)}</b>: ${ruleContent(R.methods[k])}`).join("")}`)}
       ${sec("By water", `${ruleContent(R.ways)}`)}
       ${sec("Vessels", `<table class="rules-table"><tr><th>Vessel</th><th>mph</th><th>A day</th></tr>${Object.values(VESSELS).map((v) => row([esc(v.label), v.mph, `${mi(v.mph * (v.crewed ? 24 : 8))} mi${v.crewed ? "" : " (8 h)"}`])).join("")}</table>${ruleContent(R.sail)}`)}
@@ -1525,6 +1525,19 @@ export class TravelHud {
 
   /** The party's characters: the Party Token's group members, else the travelling tokens' actors, else the players' characters. */
   members() {return [...new Map(this.partyTokens().flatMap(t=>groupMembers(t.actor)).map(a=>[a.id,a])).values()];}
+
+  /**
+   * Harvesting (0.96): the party stays where it is for `seconds` from now, a halt on its journey, so
+   * the clock moving on doesn't carry it along. Only while it is on the move (waiting at an encounter,
+   * resting or halted, it stays put already). Returns whether a halt was added.
+   */
+  async holdFor(seconds, why = "harvest") {
+    const s = this.state;
+    if (!s?.trip || !(seconds > 0) || this.progress()?.status !== "moving") return false;
+    const now = game.time.worldTime;
+    await this.save({ trip: { ...s.trip, halts: [...(s.trip.halts ?? []), { from: now, to: now + seconds, why }] } });
+    return true;
+  }
 
   /** Characters for Perception. */
   party() { return this.members().map((a) => ({ name: a.name, passive: Number(a.system?.skills?.prc?.passive ?? 10) })); }

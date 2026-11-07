@@ -83,6 +83,8 @@ import { BiomeEditor } from "./ui-biomes.mjs";
 import { biomeLookup, biomeTypes, biomeFlag, onlyBiomeFlagChanged, mergeBiomeConfig, biomeEdits } from "./biomes.mjs";
 import { hazardVisible, isRiverHazard, isHazard, hazardSubtype, HAZARD_TYPES } from "./river-hazards.mjs";
 import { EncounterBox } from "./ui-encounter-box.mjs";
+import { HarvestWindow, isDowned } from "./harvest/ui-harvest.mjs";
+import { spoilFood } from "./harvest/items.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
 import { seasonOf, buildSea, automaticPort, terrainHarbours } from "./waterways.mjs";
 import { TravelHud } from "./ui-hud.mjs";
@@ -742,6 +744,32 @@ Hooks.on("updateUser", (user, changes) => { if(user.id===game.user.id&&"role" in
 
 const planner = { open: () => hud.toggle() };
 // On a scene an encounter links to: the encounter's small box (its assets, and back to the journey).
+// Harvesting (0.96): the GM's harvest window, from a downed creature's token HUD.
+const harvest = new HarvestWindow({ hud });
+Hooks.on("renderTokenHUD", (app, html) => {
+  const token = app.object ?? app.token, root = html instanceof HTMLElement ? html : html?.[0];
+  if (!game.user.isGM || !root || !isDowned(token)) return;
+  const col = root.querySelector(".col.left") ?? root.querySelector(".col.right");
+  if (!col || col.querySelector('[data-action="kgr-harvest"]')) return;
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "control-icon"; b.dataset.action = "kgr-harvest"; b.dataset.tooltip = "Harvest";
+  b.setAttribute("aria-label", "Harvest this creature");
+  b.innerHTML = '<i class="fa-solid fa-scissors"></i>';
+  b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); harvest.open(token).catch((err) => { console.error(`${MODULE_ID} | harvest window:`, err); ui.notifications.error(`KG Realms: the harvest window could not open: ${err.message}`); }); });
+  col.append(b);
+});
+Hooks.on("canvasReady", () => { if (harvest.el && harvest.sceneId !== canvas.scene?.id) harvest.close(); });
+for (const h of ["updateActor", "updateToken", "updateCombatant", "createToken", "deleteToken"]) Hooks.on(h, () => { if (harvest.el) harvestRefresh(); });
+const harvestRefresh = foundry.utils.debounce(() => harvest.render(), 150);
+// Spoilage (the world setting): fresh meat goes off after 3 days. The primary GM checks as time passes.
+const checkSpoilage = foundry.utils.debounce(async () => {
+  if (!isPrimaryGM() || !setting("harvestSpoilage")) return;
+  try {
+    const gone = await spoilFood(game.actors.filter((a) => a.hasPlayerOwner));
+    if (gone.length) ChatMessage.create({ content: `<p><i class="fa-solid fa-biohazard"></i> <b>Spoiled</b>: ${gone.map((g) => `${foundry.utils.escapeHTML(g.actor.name)}'s ${g.lb} lb of ${foundry.utils.escapeHTML(g.name.toLowerCase())}`).join(", ")}.</p>`, speaker: { alias: "Harvest" }, whisper: game.users.filter((u) => u.isGM).map((u) => u.id) });
+  } catch (err) { console.error(`${MODULE_ID} | spoilage:`, err); ui.notifications.error(`KG Realms: spoilage could not be checked: ${err.message}`); }
+}, 1000);
+
 const encounterBox = new EncounterBox({ worldEncounters: () => setting("encounters") ?? {}, openCard: (ref) => openCard(ref), onJourneyChanged: (scene) => syncJourney(scene, { force: true }) });
 const refreshEncounterBox = () => (regionOf(canvas.scene) ? encounterBox.close() : encounterBox.refresh());
 const pins = new PinEditor({
@@ -1054,7 +1082,11 @@ Hooks.once("init", () => {
   // Before Advanced watches (0.56.0) foraging had a setting of its own: kept only to carry it over.
   register("forageAtCamp", { scope: "world", config: false, type: Boolean, default: false });
   // Advanced watches (ui-camp.mjs): its own window, Advanced watches in the module settings.
-  for (const k of ["advancedWatches", "taskForage", "taskConceal", "taskAlarm"]) register(k, { scope: "world", config: false, type: Boolean, default: false, onChange: () => hud.render() });
+  for (const k of ["advancedWatches", "taskForage", "taskConceal", "taskAlarm", "taskProvision"]) register(k, { scope: "world", config: false, type: Boolean, default: false, onChange: () => hud.render() });
+  // Harvesting (0.96).
+  register("harvestDCs", { scope: "world", config: false, type: Object, default: {}, onChange: () => harvest.render() });
+  register("harvestHumanoidMeat", { name: "Harvest: eat humanoids and giants", hint: "On: a downed humanoid or giant gives edible meat, as beasts do. Off: they give no meat at all.", scope: "world", config: true, type: Boolean, default: false, onChange: () => harvest.render() });
+  register("harvestSpoilage", { name: "Harvest: meat spoils", hint: "On: harvested meat and greens spoil 3 days after the kill, unless Provisioning at camp turns them into rations first.", scope: "world", config: true, type: Boolean, default: false });
   register("campEncounterTable", { scope: "world", config: false, type: String, default: "" });
   register("advancedMigrated", { scope: "world", config: false, type: Boolean, default: false });
   register("rationItem", { scope: "world", config: false, type: String, default: "" });
@@ -1519,6 +1551,8 @@ Hooks.on("updateWorldTime", () => {
   // The party travels with the clock.
   if (current && hud.el && (!isPrimaryGM()||!current.scene.getFlag(MODULE_ID,'partyJourneys'))) hud.tick();
   if (isPrimaryGM()) syncViewedJourneys();
+  // Harvested meat spoils with the days, when the world's setting says so.
+  checkSpoilage();
 });
 
 /* ---------------------------------------- */

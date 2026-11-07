@@ -1,5 +1,19 @@
 # KG Realms changelog
 
+## 0.96.0-harvest-test: creature harvesting (test build, not released)
+
+- Harvest: a downed creature's token HUD (0 hit points, dead or defeated) has a Harvest button for the GM. It opens the harvest window with every downed creature on the scene. Drop more from a compendium or the Actors sidebar.
+- Parts come from the creature's own sheet: its type, size, CR, attacks and damage types, senses, flying speed, traits, spellcasting and legendary actions. Any creature works, homebrew included.
+- Drag players onto creatures. The first leads and makes every check (Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing). One more can help: a success is +1, a failure -1.
+- Each part is its own check. Failing by 5 or more ruins it. A failed meat check still gives a quarter, as mangled meat: edible and good for rations, but nobody buys it.
+- Items are made on the spot, no compendium. They are named by rarity and kind ("Rare red dragon scales", "Uncommon edible meat"), so like stacks with like. Values follow the rarity and the world's Prices setting.
+- The clock moves on by the longest player's share. A moving party halts for that long.
+- Results go to the window's Log tab, a GM chat card, and a Harvests journal with a page a day. Harvested parts are marked on the token.
+- Practice run: a checkbox in the window. Rolls every check quietly and shows the results in the Log tab only. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.
+- DCs tab: the GM changes the base DC, what Survival and Medicine take off, and each part's difficulty.
+- Provisioning: a new Advanced watches camp task. Survival DC 10 for each character on it. A success preserves up to 20 lb of harvested meat, a failure 10 lb. Every 3 lb makes 1 ration.
+- New settings: eat humanoids and giants (off), and meat spoils 3 days after the kill (off).
+
 ## 0.95.5: static map lights, serialized saves, faster sea routing
 
 - Night lights, gold place glows and settlement lights are static. The realm map no longer redraws 10 times a second at night or with gold places.
