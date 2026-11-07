@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.96.4-harvest-test: the party sets up each creature; the harvest window moves (test build, not released)
+
+- Each creature's step in the harvest now has Who and what: who leads, who helps, each one's skill, and which parts to take. The GM or any player with a character in the party can change it, on everyone's screen, until the GM requests that creature's rolls. The next creature can be set up differently.
+- Start harvest no longer needs anyone dragged onto a creature first: every downed creature with parts left gets a step. What the harvest window sets (including right-click primary and secondary) is only where each step starts. A creature nobody leads can be skipped.
+- The harvest's step view is a window like the others: drag it by its header (double-click the header to put it back). It now sits below Foundry's windows, so roll dialogs open on top of it instead of behind it.
+- A roll waiting on its dialog holds only its own button. Before, one roll dialog hidden behind the harvest greyed out Confirm results and Finish until Skip was used.
+- Confirm results gives the parts and goes straight on to the next creature, or to Done after the last. Skip names where it goes.
+
 ## 0.96.3-harvest-test: primary and secondary for every creature (test build, not released)
 
 - Right-click a player in the harvest window's party list: Set as primary (leads every creature with parts to take), Set as secondary (helps on every one), or Take off every creature.

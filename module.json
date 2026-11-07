@@ -2,7 +2,7 @@
   "id": "kg-realms",
   "title": "KG Realms",
   "description": "Realm maps for Foundry VTT: turn your own world map into a travel map with places, roads, rivers, areas, journeys, encounters, camps, weather and settlement maps. Right-click a scene with a map picture and choose Make realm world, or install a world module.",
-  "version": "0.96.3-harvest-test",
+  "version": "0.96.4-harvest-test",
   "compatibility": {
     "minimum": "13.351",
     "verified": "13",

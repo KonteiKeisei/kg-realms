@@ -8,9 +8,15 @@
 //
 // The GM's client holds the run and sends it to the players; a player's roll comes back to the GM,
 // who takes it only from a user who owns that character.
+//
+// 0.96.4: who leads, who helps, with which skill, and which parts are set on each creature's own step,
+// in this shared view, by the GM or any player in the party, until the GM requests that step's rolls.
+// The view is a window like the others: dragged by its header, below Foundry's windows so the roll
+// dialogs open on top. A roll waiting on its dialog holds only that roll's button.
 import { ruleTooltip, ruleParagraphs } from "../travel-rules.mjs";
-import { harvestCheck, harvestYield, rollAmount, coins, minutesText, HARVEST_SKILLS } from "./catalog.mjs";
+import { harvestCheck, harvestYield, rollAmount, coins, minutesText, workMinutes, HARVEST_SKILLS } from "./catalog.mjs";
 import { giveYield } from "./items.mjs";
+import { movable, placeKept } from "../ui-shell.mjs";
 
 const MODULE_ID = "kg-realms";
 const SOCKET = `module.${MODULE_ID}`;
@@ -51,8 +57,59 @@ export async function skillRoll(actor, skill, { dc = null, flavor = "Harvest", c
   }
 }
 
-/** The checks of a creature's step: [{ id, key, role, actor, skill, dc }]. */
+/**
+ * Recompute a step from its setup: the parts ticked (all minus skip), each with the DC for the leader's
+ * and the helper's skill, and the time. A step: { all: [part with dcs: { sur, med, slt }], skip: [key],
+ * lead, help }.
+ */
+export function applySetup(s) {
+  const skip = new Set(s.skip ?? []);
+  s.parts = (s.all ?? []).filter((p) => !skip.has(p.key)).map((p) => ({ ...p, dcLead: s.lead ? p.dcs[s.lead.skill] : null, dcHelp: s.help ? p.dcs[s.help.skill] : null }));
+  s.minutes = workMinutes(s.parts);
+  return s;
+}
+
+/** The best skill for someone on a step: the most over the DC of its first part. mods: { sur, med, slt }. */
+export function bestSkill(mods, all) {
+  const p = all?.[0];
+  if (!p) return "sur";
+  return Object.keys(HARVEST_SKILLS).sort((a, b) => ((mods?.[b] ?? 0) - p.dcs[b]) - ((mods?.[a] ?? 0) - p.dcs[a]))[0];
+}
+
+/**
+ * Change a step's setup (before its rolls are asked for). change: { field: "lead" | "help" | "skill" |
+ * "part", value, role, key, on }. party: [{ id, name, img, mods }]. Returns whether anything changed.
+ */
+export function changeSetup(s, change, party) {
+  if (!s || s.asked || s.done) return false;
+  const who = (id) => { const m = party.find((x) => x.id === id); return m ? { id: m.id, name: m.name, img: m.img, skill: bestSkill(m.mods, s.all) } : null; };
+  const { field, value } = change ?? {};
+  if (field === "lead") {
+    const old = s.lead;
+    s.lead = value ? who(value) : null;
+    if (value && !s.lead) return false;
+    if (s.help && s.lead && s.help.id === s.lead.id) s.help = old && old.id !== s.lead.id ? old : null;
+  } else if (field === "help") {
+    if (value && value === s.lead?.id) return false;
+    s.help = value ? who(value) : null;
+    if (value && !s.help) return false;
+  } else if (field === "skill") {
+    const slot = change.role === "help" ? s.help : s.lead;
+    if (!slot || !HARVEST_SKILLS[value]) return false;
+    slot.skill = value;
+  } else if (field === "part") {
+    if (!s.all.some((p) => p.key === change.key)) return false;
+    const skip = new Set(s.skip ?? []);
+    if (change.on) skip.delete(change.key); else skip.add(change.key);
+    s.skip = [...skip];
+  } else return false;
+  applySetup(s);
+  return true;
+}
+
+/** The checks of a creature's step: [{ id, key, role, actor, skill, dc }]. None until someone leads. */
 export function stepChecks(s) {
+  if (!s.lead) return [];
   return s.parts.flatMap((p) => [
     { id: `${p.key}|lead`, key: p.key, role: "lead", actor: s.lead.id, skill: s.lead.skill, dc: p.dcLead, part: p.name },
     ...(s.help ? [{ id: `${p.key}|help`, key: p.key, role: "help", actor: s.help.id, skill: s.help.skill, dc: p.dcHelp, part: p.name }] : [])
@@ -60,7 +117,7 @@ export function stepChecks(s) {
 }
 
 /** Whether a step's results can be confirmed: each part has the leader's roll, or a GM ruling. */
-export const stepReady = (s) => s.asked && s.parts.every((p) => s.overrides[p.key] || s.rolls[`${p.key}|lead`] != null);
+export const stepReady = (s) => s.asked && !!s.lead && s.parts.length > 0 && s.parts.every((p) => s.overrides[p.key] || s.rolls[`${p.key}|lead`] != null);
 
 /**
  * A confirmed step's rows: each part's roll (with help), its DC and what it gave. amount(dice) rolls
@@ -92,7 +149,9 @@ export function outcomeText(r) {
 
 export class HarvestRun {
   /** gm: { hud, onFinished(entries, seconds, practice), onChange() } on the GM's client; null for a player. */
-  constructor(gm = null) { this.gm = gm; this.el = null; this.run = null; this.min = false; this.reasons = {}; this.busy = false; }
+  // saving: results being given or the harvest being finished. rolling: the checks whose rolls are
+  // under way on this client (a roll dialog left open holds only its own button, nothing else).
+  constructor(gm = null) { this.gm = gm; this.el = null; this.run = null; this.min = false; this.reasons = {}; this.saving = false; this.rolling = new Set(); }
 
   get authority() { return !!this.gm && game.user.isGM; }
   get step() { return this.run?.steps[this.run.at] ?? null; }
@@ -100,9 +159,9 @@ export class HarvestRun {
   /* ---------------------------------------------------------------- the GM's side */
 
   /** Start a run from the harvest window's plan. */
-  start({ steps, practice, scene }) {
-    this.run = { session: foundry.utils.randomID(), practice, scene, start: game.time.worldTime, at: 0, steps: steps.map((s) => ({ ...s, asked: false, rolls: {}, overrides: {}, done: false, rows: null })), finished: false };
-    this.min = false; this.reasons = {};
+  start({ steps, practice, scene, party = [] }) {
+    this.run = { session: foundry.utils.randomID(), practice, scene, party, start: game.time.worldTime, at: 0, steps: steps.map((s) => applySetup({ ...s, skip: [...(s.skip ?? [])], asked: false, rolls: {}, overrides: {}, done: false, rows: null })), finished: false };
+    this.min = false; this.reasons = {}; this.rolling.clear();
     this.#changed();
   }
 
@@ -127,6 +186,14 @@ export class HarvestRun {
       const r = this.run;
       if (!r || r.practice) return;
       if (m?.type === "harvest-again") return game.socket.emit(SOCKET, { type: "harvest-run", run: r });
+      // A player changing who does what on a creature: anyone who plays a character in the party.
+      if (m?.type === "harvest-setup" && m.session === r.session) {
+        const user = game.users.get(userId ?? m.user);
+        const inParty = user && (user.isGM || r.party.some((p) => game.actors.get(p.id)?.testUserPermission(user, "OWNER")));
+        if (inParty && m.step === r.at && changeSetup(r.steps[m.step], m.change, r.party)) this.#changed();
+        else game.socket.emit(SOCKET, { type: "harvest-run", run: r });
+        return;
+      }
       if (m?.type !== "harvest-roll" || m.session !== r.session) return;
       const s = r.steps[m.step], ch = s ? stepChecks(s).find((c) => c.id === m.id) : null, actor = ch ? game.actors.get(ch.actor) : null;
       const user = game.users.get(userId ?? m.user);
@@ -136,7 +203,7 @@ export class HarvestRun {
     }
     if (game.user.isGM) return;
     if (m?.type === "harvest-run") {
-      const mine = m.run?.steps?.some((s) => [s.lead, s.help].some((p) => p && game.actors.get(p.id)?.isOwner));
+      const mine = (m.run?.party ?? []).some((p) => game.actors.get(p.id)?.isOwner) || m.run?.steps?.some((s) => [s.lead, s.help].some((p) => p && game.actors.get(p.id)?.isOwner));
       if (!mine && !this.run) return;
       if (!this.run || this.run.session !== m.run.session) { this.min = false; ui.notifications.info("KG Realms: the harvest begins."); }
       this.run = m.run;
@@ -150,8 +217,8 @@ export class HarvestRun {
 
   async #confirm() {
     const s = this.step;
-    if (!s || s.done || !stepReady(s) || this.busy) return;
-    this.busy = true;
+    if (!s || s.done || !stepReady(s) || this.saving) return;
+    this.saving = true;
     try {
       const scale = Number(this.gm?.hud?.priceScale) || 1;
       s.rows = stepRows(s).map((r) => ({ ...r, gp: r.gp * scale, unitGp: r.unitGp * scale }));
@@ -164,10 +231,12 @@ export class HarvestRun {
         if (token && Object.keys(marks).length) await token.setFlag(MODULE_ID, "harvested", { ...(token.getFlag(MODULE_ID, "harvested") ?? {}), ...marks });
       }
       s.done = true;
+      // Straight on to the next creature, or to Done after the last.
+      this.run.at += 1;
     } catch (err) {
       console.error(`${MODULE_ID} | harvest:`, err);
       ui.notifications.error(`KG Realms: the results could not be given: ${err.message}. See the console (F12).`);
-    } finally { this.busy = false; this.#changed(); }
+    } finally { this.saving = false; this.#changed(); }
   }
 
   /** The clock: the longest leader's share of the creatures done. */
@@ -179,16 +248,16 @@ export class HarvestRun {
 
   async #finish() {
     const r = this.run;
-    if (!r || this.busy) return;
-    this.busy = true;
+    if (!r || this.saving) return;
+    this.saving = true; this.render();
     try {
       const seconds = this.#seconds();
       const entries = r.steps.filter((s) => s.done).map((s) => ({ creature: s.cid, tokenId: s.tokenId, name: s.name, leader: s.lead.name, helper: s.help?.name ?? null, rows: s.rows, minutes: s.minutes, practice: r.practice }));
       await this.gm.onFinished(entries, seconds, r.practice);
-      this.busy = false;
+      this.saving = false;
       this.end();
     } catch (err) {
-      this.busy = false;
+      this.saving = false;
       console.error(`${MODULE_ID} | harvest:`, err);
       ui.notifications.error(`KG Realms: the harvest could not be finished: ${err.message}. See the console (F12).`);
       this.render();
@@ -206,15 +275,19 @@ export class HarvestRun {
 
   async #roll(stepIndex, ids, { dialog = true } = {}) {
     const r = this.run, s = r?.steps[stepIndex];
-    if (!s || !s.asked || s.done || this.busy) return;
-    this.busy = true; this.render();
+    ids = ids.filter((id) => !this.rolling.has(id));
+    if (!s || !s.asked || s.done || !ids.length) return;
+    ids.forEach((id) => this.rolling.add(id));
+    this.render();
     try {
       for (const id of ids) {
         const ch = stepChecks(s).find((c) => c.id === id), actor = ch ? game.actors.get(ch.actor) : null;
-        if (!ch || !actor || s.rolls[id] != null) continue;
+        // The step may have moved on (confirmed, skipped, a reroll allowed) while a dialog was open.
+        if (!ch || !actor || s.rolls[id] != null || s.done || r !== this.run) continue;
         const flavor = `Harvest: ${ch.part} (${s.name}), ${HARVEST_SKILLS[ch.skill].label}${ch.role === "help" ? ", helping" : ""}`;
         const total = await skillRoll(actor, ch.skill, { dc: showDC() || game.user.isGM ? ch.dc : null, flavor, chat: !r.practice, dialog: dialog && ids.length === 1 });
         if (total == null) break;
+        if (s.done || r !== this.run || s.rolls[id] != null) continue;
         if (this.authority) s.rolls[id] = total;
         else { s.rolls[id] = total; game.socket.emit(SOCKET, { type: "harvest-roll", session: r.session, step: stepIndex, id, total, user: game.user.id }); }
       }
@@ -222,7 +295,8 @@ export class HarvestRun {
       console.error(`${MODULE_ID} | harvest roll:`, err);
       ui.notifications.error(`KG Realms: the harvest check did not roll: ${err.message}`);
     } finally {
-      this.busy = false;
+      ids.forEach((id) => this.rolling.delete(id));
+      if (!this.run) return;
       if (this.authority) this.#changed(); else this.render();
     }
   }
@@ -241,7 +315,16 @@ export class HarvestRun {
       this.el.innerHTML = `<div class="cs-body"></div>`;
       this.el.addEventListener("click", (e) => { const b = e.target.closest("[data-hr]"); if (b && b.tagName === "BUTTON") this.#click(b); });
       this.el.addEventListener("input", (e) => { const t = e.target; if (t.dataset?.hr === "reason") this.reasons[`${this.run?.at}|${t.dataset.key}`] = t.value; });
+      this.el.addEventListener("change", (e) => { const t = e.target.closest?.("[data-hr-set]"); if (t) this.#setup(t); });
       this.el.addEventListener("focusout", () => setTimeout(() => { if (this.held && this.el && !this.el.contains(document.activeElement)) { this.held = false; this.render(); } }, 0));
+      // Dragged by its header like every panel. It sits centred by a transform: take that off first,
+      // where it stands, so the drag starts from the right place.
+      this.el.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || !e.target.closest("header") || e.target.closest("button, input, select, a")) return;
+        const r = this.el.getBoundingClientRect();
+        Object.assign(this.el.style, { transform: "none", left: `${r.left}px`, top: `${r.top}px` });
+      }, true);
+      movable(this.el, "harvest-run", { redock: () => this.#place() });
       document.body.append(this.el);
     }
     // Keep a reason being typed: redraw once it loses focus.
@@ -251,11 +334,57 @@ export class HarvestRun {
     this.el.classList.toggle("min", this.min);
     const html = this.min ? this.#minBar() : this.#html();
     if (html !== this.html) { this.el.querySelector(".cs-body").innerHTML = html; this.html = html; }
+    this.#place();
+  }
+
+  /** Where it was dragged to (kept per user), or centred at the top. */
+  #place() {
+    if (!this.el) return;
+    if (placeKept(this.el, "harvest-run")) this.el.style.transform = "none";
+    else Object.assign(this.el.style, { left: "", top: "", transform: "" });
   }
 
   #minBar() {
     const s = this.step;
-    return `<div class="cs-bar"><i class="fa-solid fa-scissors"></i><span class="grow">The harvest · ${esc(s?.name ?? "Done")}</span><button data-hr="show" class="primary">Show</button></div>`;
+    return `<header class="cs-bar" title="Drag to move. Double-click to put it back."><i class="fa-solid fa-scissors"></i><span class="grow">The harvest · ${esc(s?.name ?? "Done")}</span><button data-hr="show" class="primary">Show</button></header>`;
+  }
+
+  /** A setup control changed: the GM applies it; a player sends it to the GM. */
+  #setup(t) {
+    const r = this.run, s = this.step;
+    if (!r || !s || s.asked || s.done) return;
+    const change = { field: t.dataset.hrSet, value: t.type === "checkbox" ? null : t.value, role: t.dataset.role, key: t.dataset.key, on: t.type === "checkbox" ? t.checked : undefined };
+    if (this.authority) { if (changeSetup(s, change, r.party)) this.#changed(); else this.render(); return; }
+    // Show it straight away; the GM's copy comes back and settles it.
+    changeSetup(s, change, r.party);
+    this.render();
+    game.socket.emit(SOCKET, { type: "harvest-setup", session: r.session, step: r.at, change, user: game.user.id });
+  }
+
+  /** Whether this user can change who does what: the GM running it, or a player with a character in the party. */
+  #canSet() {
+    const r = this.run;
+    if (!r) return false;
+    if (game.user.isGM) return this.authority;
+    return !r.practice && (r.party ?? []).some((p) => game.actors.get(p.id)?.isOwner);
+  }
+
+  /** Who does what on this creature, open to the party until the GM requests its rolls. */
+  #setupBox(s) {
+    const r = this.run, can = this.#canSet() && !s.asked && !s.done, party = r.party ?? [];
+    const mods = (id) => party.find((p) => p.id === id)?.mods ?? {};
+    const people = (sel, skipId, none) => `${none ? `<option value="">${none}</option>` : ""}${party.filter((p) => p.id !== skipId).map((p) => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.name)}</option>`).join("")}`;
+    const skills = (slot) => Object.entries(HARVEST_SKILLS).map(([k, sk]) => {
+      const dc = s.all[0]?.dcs[k];
+      return `<option value="${k}" ${k === slot.skill ? "selected" : ""}>${esc(sk.label)} ${signed(mods(slot.id)[k] ?? 0)}${dc != null && (game.user.isGM || showDC()) ? ` (DC ${dc}${s.all.length > 1 ? "+" : ""})` : ""}</option>`;
+    }).join("");
+    const dis = can ? "" : "disabled";
+    const row = (label, field, slot, skipId, none) => `<div class="hr-setup-row"><span>${label}</span><select data-hr-set="${field}" aria-label="${label}" ${dis}>${people(slot?.id, skipId, none)}</select>${slot ? `<select data-hr-set="skill" data-role="${field}" aria-label="${label}: skill" ${dis}>${skills(slot)}</select>` : "<span></span>"}</div>`;
+    const parts = s.all.map((p) => `<label><input type="checkbox" data-hr-set="part" data-key="${esc(p.key)}" ${(s.skip ?? []).includes(p.key) ? "" : "checked"} ${dis}> ${esc(p.name)}</label>`).join("");
+    const note = s.done ? "" : s.asked ? "Set when the GM asked for the rolls." : can ? "Anyone in the party can change this until the GM requests the rolls." : "The party sets this; the GM then requests the rolls.";
+    return `<section class="hr-setup ${can ? "" : "locked"}"><div class="hr-part-head"><b>Who and what</b>${note ? `<span class="cs-note">${note}</span>` : ""}</div>
+      ${row("Leads", "lead", s.lead, null, s.lead ? "" : "Nobody yet")}${row("Helps", "help", s.help, s.lead?.id, "Nobody")}
+      <div class="hr-setup-parts">${parts}</div></section>`;
   }
 
   #html() {
@@ -267,17 +396,17 @@ export class HarvestRun {
     let go = "", advance = "";
     if (gm && this.authority) {
       if (s) {
+        // Confirm results moves on by itself; this only skips a creature nobody is harvesting.
         const next = r.steps[at + 1];
-        go = `<button data-hr="next" class="primary" ${s.done ? "" : "disabled"}>Next: ${esc(next?.name ?? "Done")}</button>`;
+        go = `<button data-hr="skip">${next ? `Skip to ${esc(next.name)}` : "Skip to the end"}</button>`;
         advance = "No world time advances yet. The clock moves on when the harvest is done.";
-        if (!s.done) go += `<button data-hr="skip">${next ? "Skip this creature" : "Skip to the end"}</button>`;
       } else {
         const seconds = this.#seconds();
-        go = `<button data-hr="finish" class="primary" ${this.busy ? "disabled" : ""}>${r.practice ? "End practice" : seconds ? `Finish: advance ${minutesText(seconds / 60)}` : "Finish"}</button>`;
+        go = `<button data-hr="finish" class="primary" ${this.saving ? "disabled" : ""}>${r.practice ? "End practice" : seconds ? `Finish: advance ${minutesText(seconds / 60)}` : "Finish"}</button>`;
         advance = r.practice ? "A practice run: no time passes and nothing is kept." : seconds ? `Advance ${minutesText(seconds / 60)} to ${this.gm.hud?.dateText?.(game.time.worldTime + seconds) ?? "then"}. The party stays here.` : "Nothing was harvested: no world time advances.";
       }
     }
-    return `<div class="cs-carousel-head"><div><span class="cs-context">Harvest${r.scene ? ` · ${esc(r.scene)}` : ""}</span><span class="cs-context" role="status" aria-live="polite">Step ${Math.min(at + 1, n + 1)} of ${n + 1}</span></div><button data-hr="min" class="cs-min" aria-label="Minimise the harvest">-</button></div>
+    return `<header class="cs-carousel-head" title="Drag to move. Double-click to put it back."><div><span class="cs-context">Harvest${r.scene ? ` · ${esc(r.scene)}` : ""}</span><span class="cs-context" role="status" aria-live="polite">Step ${Math.min(at + 1, n + 1)} of ${n + 1}</span></div><button data-hr="min" class="cs-min" aria-label="Minimise the harvest">-</button></header>
       <div class="cs-chips" aria-label="Harvest progress">${chips}</div>${body}${advance ? `<p class="cs-clock-advance">${esc(advance)}</p>` : ""}
       <div class="cs-foot">${go}${gm ? "" : '<span class="cs-note">The GM moves the harvest on.</span>'}</div>`;
   }
@@ -285,6 +414,11 @@ export class HarvestRun {
   /** A creature's step: each part with its people, their rolls and the result. */
   #creature(s) {
     const gm = game.user.isGM, seen = gm || showDC(), mine = [];
+    const setup = this.#setupBox(s);
+    if (!s.lead || !s.parts.length) {
+      const why = !s.lead ? "Nobody leads this creature yet. Pick a leader above, or skip it." : "No parts are ticked. Tick at least one, or skip it.";
+      return `<div class="cs-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${esc(s.desc)}.</span></div>${setup}<p class="cs-note">${why}</p>`;
+    }
     const lead = game.actors.get(s.lead.id) ?? s.lead, help = s.help ? game.actors.get(s.help.id) ?? s.help : null;
     const parts = s.parts.map((p) => {
       const o = s.overrides[p.key], row = s.rows?.find((x) => x.part === p.key);
@@ -295,8 +429,8 @@ export class HarvestRun {
         if (total != null) res = `<span class="cs-roll ${seen && s.done ? (total >= dc ? "ok" : "no") : ""}">Rolled ${total}</span>${gm && !s.done && this.authority ? `<button data-hr="reroll" data-id="${esc(id)}" class="cs-small"><i class="fa-solid fa-rotate-right"></i> Allow reroll</button>` : ""}`;
         else if (s.done || o) res = `<span class="cs-meta">No roll</span>`;
         else if (!s.asked) res = `<span class="cs-meta">Waiting for the GM</span>`;
-        else if (this.rollsFor(who)) { mine.push(id); res = `<button data-hr="roll" data-id="${esc(id)}" class="primary" ${this.busy ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> Roll ${esc(label)}</button>`; }
-        else res = `<span class="cs-meta">Waiting for a roll</span>${gm && this.authority ? `<button data-hr="roll" data-id="${esc(id)}" class="cs-small"><i class="fa-solid fa-dice-d20"></i> Roll ${esc(label)} for them</button>` : ""}`;
+        else if (this.rollsFor(who)) { mine.push(id); res = `<button data-hr="roll" data-id="${esc(id)}" class="primary" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> ${this.rolling.has(id) ? "Rolling…" : `Roll ${esc(label)}`}</button>`; }
+        else res = `<span class="cs-meta">Waiting for a roll</span>${gm && this.authority ? `<button data-hr="roll" data-id="${esc(id)}" class="cs-small" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> Roll ${esc(label)} for them</button>` : ""}`;
         return `<div class="cs-person ${role === "lead" ? "lead" : ""}">${face(who)}<span class="cs-person-name">${esc(who.name)}</span>${help ? `<span class="cs-meta">${role === "lead" ? "Leader" : "Helping: success +1, failure −1"}</span>` : ""}${res}</div>`;
       };
       let sum = "";
@@ -313,13 +447,17 @@ export class HarvestRun {
     if (gm && this.authority && !s.done) {
       if (!s.asked) actions = `<button data-hr="ask" class="primary">${this.run.practice ? "Start the checks" : "Request rolls"}</button>`;
       else {
-        const left = stepChecks(s).filter((c) => s.rolls[c.id] == null && !s.overrides[c.key]).map((c) => c.id);
-        actions = `<button data-hr="confirm" class="primary" ${stepReady(s) && !this.busy ? "" : "disabled"}><i class="fa-solid fa-check"></i> Confirm results</button>${left.length ? `<button data-hr="roll-all" data-ids="${esc(left.join(","))}">Roll the rest${this.run.practice ? "" : " for them"} (${left.length})</button>` : ""}`;
+        const left = stepChecks(s).filter((c) => s.rolls[c.id] == null && !s.overrides[c.key] && !this.rolling.has(c.id)).map((c) => c.id);
+        const next = this.run.steps[this.run.at + 1];
+        actions = `<button data-hr="confirm" class="primary" ${stepReady(s) && !this.saving ? "" : "disabled"}><i class="fa-solid fa-check"></i> Confirm results, then ${esc(next ? next.name : "Done")}</button>${left.length ? `<button data-hr="roll-all" data-ids="${esc(left.join(","))}">Roll the rest${this.run.practice ? "" : " for them"} (${left.length})</button>` : ""}`;
       }
+    } else if (!gm && !s.asked && !s.done) {
+      actions = `<span class="cs-note">The GM requests the rolls when you're ready.</span>`;
     } else if (!gm && s.asked && !s.done) {
-      actions = `${mine.length > 1 ? `<button data-hr="roll-all" data-ids="${esc(mine.join(","))}" ${this.busy ? "disabled" : ""}>Roll all mine (${mine.length})</button>` : ""}<span class="cs-note">Waiting for GM confirmation.</span>`;
+      const free = mine.filter((id) => !this.rolling.has(id));
+      actions = `${free.length > 1 ? `<button data-hr="roll-all" data-ids="${esc(free.join(","))}">Roll all mine (${free.length})</button>` : ""}<span class="cs-note">Waiting for GM confirmation.</span>`;
     }
-    return `<div class="cs-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${meta}</span></div>${parts}<div class="cs-actions">${actions}</div>`;
+    return `<div class="cs-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${meta}</span></div>${setup}${parts}<div class="cs-actions">${actions}</div>`;
   }
 
   /** The GM's ruling for a part: a reason, and success or failure (automatic before any roll), as camp tasks have. */
@@ -342,7 +480,7 @@ export class HarvestRun {
     if (a === "roll") return this.#roll(this.run.at, [b.dataset.id]);
     if (a === "roll-all") return this.#roll(this.run.at, b.dataset.ids.split(",").filter(Boolean), { dialog: false });
     if (!this.authority) return;
-    if (a === "ask" && s) {
+    if (a === "ask" && s && s.lead && s.parts.length) {
       s.asked = true;
       if (!this.run.practice) {
         const offline = [...new Set([s.lead, s.help].filter(Boolean).map((p) => game.actors.get(p.id)).filter((x) => x && !playersOf(x).length).map((x) => x.name))];

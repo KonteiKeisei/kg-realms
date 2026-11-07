@@ -2177,7 +2177,7 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-harvest .hv-person.done small { color: var(--kgr-ok); }
 
 /* Harvest run (0.96): the camp step view's rules, copied so the two look alike. */
-.kgr-harvest-run { position: fixed; inset: 0; z-index: 8500; isolation: isolate; display: flex; color: var(--kgr-text); font-family: Signika, sans-serif; background: radial-gradient(ellipse at 50% 55%, rgba(10, 6, 3, 0.35), rgba(5, 3, 2, 0.88)); animation: kgr-wb-in 0.6s ease-out; }
+.kgr-harvest-run { position: fixed; inset: 0; z-index: var(--z-index-window, 100); isolation: isolate; display: flex; color: var(--kgr-text); font-family: Signika, sans-serif; background: radial-gradient(ellipse at 50% 55%, rgba(10, 6, 3, 0.35), rgba(5, 3, 2, 0.88)); animation: kgr-wb-in 0.6s ease-out; }
 .kgr-harvest-run .cs-bg { position: absolute; inset: 0; z-index: -1; overflow: hidden; }
 .kgr-harvest-run .cs-bg video, .kgr-harvest-run .cs-bg img { width: 100%; height: 100%; object-fit: cover; border: 0; }
 .kgr-harvest-run .cs-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 32px 48px; overflow: auto; }
@@ -2297,6 +2297,19 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-harvest-run .cs-context { font-size: 13px; font-weight: 600; color: var(--kgr-text-2); }
 .kgr-harvest-run .cs-clock-advance { margin: 0; padding: 8px 10px; font: inherit; color: var(--kgr-accent); border-left: 2px solid var(--kgr-accent); background: var(--kgr-accent-soft); }
 .kgr-harvest-run :is(.cs-title, .cs-watch) > b { font-family: inherit; font-size: 17px; line-height: 1.4; }
+/* 0.96.4: a window like the others. Below Foundry's windows, so roll dialogs open on top; dragged by its header. */
+.kgr-harvest-run > .cs-body > header { cursor: move; user-select: none; }
+.kgr-harvest-run.dragging { transition: none; }
+.kgr-harvest-run .hr-setup { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--kgr-line-2); border-radius: 8px; background: var(--kgr-surface); }
+.kgr-harvest-run .hr-setup.locked { opacity: 0.85; }
+.kgr-harvest-run .hr-setup-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 190px); gap: 6px; align-items: center; }
+.kgr-harvest-run .hr-setup-row > span { color: var(--kgr-muted-2); font-size: 12px; font-weight: 600; }
+.kgr-harvest-run .hr-setup select { width: 100%; min-width: 0; height: 28px; margin: 0; font-size: 12px; color: var(--kgr-text); background: var(--kgr-surface-2, rgba(0, 0, 0, 0.3)); border: 1px solid var(--kgr-line-2); border-radius: 6px; }
+.kgr-harvest-run .hr-setup-parts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.kgr-harvest-run .hr-setup-parts label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.kgr-harvest-run .hr-setup-parts input { margin: 0; }
+.kgr-harvest-run .hr-setup .cs-note { font-size: 12px; }
+@media (max-width: 560px) { .kgr-harvest-run .hr-setup-row { grid-template-columns: 1fr; } }
 .kgr-harvest-run :is(.cs-title, .cs-watch) > i { font-size: 13px; font-style: normal; color: var(--kgr-muted-2); }
 .kgr-harvest-run .cs-title.rest-end > b { font-family: inherit; font-size: 17px; }
 .kgr-harvest-run .cs-person-name { font-size: 13px; font-weight: 600; }

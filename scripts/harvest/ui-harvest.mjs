@@ -201,25 +201,32 @@ export class HarvestWindow {
   workOf(c) { return this.partsOf(c).filter((p) => !p.taken && !c.skip.has(p.key)); }
   #ready() { return this.creatures.filter((c) => c.crew.leader && this.workOf(c).length); }
 
-  /** The harvest's steps, fixed as it starts: one for each creature with a leader and parts to take. */
+  /**
+   * The harvest's steps: one for each creature with parts still to take, whether or not anyone is on it
+   * yet. What is set here (leader, helper, skills, parts) is only where each step starts: the party
+   * changes it on each creature's own step, in the harvest (0.96.4).
+   */
   #steps() {
-    return this.#ready().map((c) => {
-      const lead = game.actors.get(c.crew.leader.id), help = c.crew.helper ? game.actors.get(c.crew.helper.id) : null;
-      const ls = c.crew.leader.skill, hs = c.crew.helper?.skill, parts = this.workOf(c);
-      const who = (a, skill) => ({ id: a.id, name: a.name, img: a.img, skill });
+    const who = (slot) => { const a = slot ? game.actors.get(slot.id) : null; return a ? { id: a.id, name: a.name, img: a.img, skill: slot.skill } : null; };
+    return this.#workable().map((c) => {
+      const all = this.partsOf(c).filter((p) => !p.taken);
       return {
-        cid: c.id, name: c.name, img: c.img, tokenId: c.tokenId, minutes: workMinutes(parts),
+        cid: c.id, name: c.name, img: c.img, tokenId: c.tokenId,
         desc: `${SIZES[c.profile.size]?.label ?? "Medium"} ${c.profile.type || "creature"} · CR ${c.profile.cr} · ${tierOf(c.profile.cr).label.toLowerCase()}`,
-        lead: who(lead, ls), help: help ? who(help, hs) : null,
-        parts: parts.map((p) => ({ key: p.key, name: p.name, kind: p.part, perLb: p.perLb, dice: p.dice, unitGp: p.unitGp, minutes: p.minutes, dcLead: dcFor(p, ls, this.dcs), dcHelp: help ? dcFor(p, hs, this.dcs) : null, amountText: this.#amount(p) }))
+        lead: who(c.crew.leader), help: who(c.crew.helper), skip: [...c.skip],
+        all: all.map((p) => ({ key: p.key, name: p.name, kind: p.part, perLb: p.perLb, dice: p.dice, unitGp: p.unitGp, minutes: p.minutes, dcs: Object.fromEntries(Object.keys(HARVEST_SKILLS).map((k) => [k, dcFor(p, k, this.dcs)])), amountText: this.#amount(p) }))
       };
     });
   }
+  /** The party as the harvest needs it: who they are and their bonus for each harvest skill. */
+  #partyList() {
+    return this.party().map((a) => ({ id: a.id, name: a.name, img: a.img, mods: Object.fromEntries(Object.keys(HARVEST_SKILLS).map((k) => [k, skillMod(a, k)])) }));
+  }
   #amount(p) { return p.perLb ? `${diceText(p.dice)} lb` : p.max > 1 && p.dice[1] > 1 ? `${diceText(p.dice)}, max ${p.max}` : String(p.max); }
-  /** Each leader's share of the time, in minutes, for these steps: { actorId: minutes }. */
-  #shares(steps) {
+  /** Each leader's share of the time, in minutes, as set up so far: { actorId: minutes }. */
+  #shares() {
     const out = {};
-    for (const s of steps) out[s.lead.id] = (out[s.lead.id] ?? 0) + s.minutes;
+    for (const c of this.#ready()) out[c.crew.leader.id] = (out[c.crew.leader.id] ?? 0) + workMinutes(this.workOf(c));
     return out;
   }
 
@@ -317,16 +324,17 @@ export class HarvestWindow {
       return `<div class="hv-pin"><div class="hv-pos"><b>${r.practice ? "Practice run" : "Harvest"} under way</b><small>${s ? `${esc(s.name)} · step ${r.at + 1} of ${r.steps.length + 1}` : "done: finish it in the harvest"} · ${done} of ${r.steps.length} confirmed</small><span class="sp"></span>${rule(HARVEST_RULES.run)}</div>
         <p class="hv-tell">Who harvests what is fixed until it ends. Carry it out in the harvest's steps.</p><button type="button" class="primary" data-act="show-run">Show the harvest</button></div>`;
     }
-    const steps = this.#steps(), shares = this.#shares(steps), names = Object.entries(shares).filter(([, m]) => m > 0).sort((a, b) => b[1] - a[1]);
-    const by = names.map(([id]) => first(game.actors.get(id)?.name)), checks = steps.reduce((t, s) => t + s.parts.length * (s.help ? 2 : 1), 0);
+    const steps = this.#steps(), shares = this.#shares(), names = Object.entries(shares).filter(([, m]) => m > 0).sort((a, b) => b[1] - a[1]);
+    const by = names.map(([id]) => first(game.actors.get(id)?.name)), set = this.#ready().length;
     const practice = `<label class="hv-practice-box"><input type="checkbox" data-act="practice" ${this.practice ? "checked" : ""}> Practice run ${rule(HARVEST_RULES.practice)}</label>`;
     if (!steps.length) {
-      return `<div class="hv-pin"><div class="hv-pos"><b>${this.runs.length ? "Harvest done" : "Nobody on a creature yet"}</b><span class="sp"></span>${practice}</div><p class="hv-tell">${this.runs.length ? "Closing the window ends this harvest. Drag players onto creatures to harvest more." : "Drag a player from the party onto a creature to lead its harvest."}</p><button type="button" class="primary" disabled>Start harvest</button></div>`;
+      return `<div class="hv-pin"><div class="hv-pos"><b>${this.runs.length ? "Harvest done" : "Nothing to harvest"}</b><span class="sp"></span>${practice}</div><p class="hv-tell">${this.runs.length ? "Closing the window ends this harvest." : "No downed creature here has parts left to take."}</p><button type="button" class="primary" disabled>Start harvest</button></div>`;
     }
-    const time = names.length ? `Takes about ${minutesText(names[0][1])}${by.length > 1 ? `, ${esc(by[0])}'s share` : ""}.` : "";
-    const tell = this.practice ? `${time} A practice run: the same steps on your screen only, rolled quietly. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.` : `${time} Each player rolls their own checks, a creature at a time. The clock moves on at the end and the party stays here. ${rule(HARVEST_RULES.time)}`;
+    const time = names.length ? `Takes about ${minutesText(names[0][1])} as set so far${by.length > 1 ? `, ${esc(by[0])}'s share` : ""}.` : "";
+    const who = `Who leads, who helps and which parts are set on each creature's own step, by the party, until you request its rolls.${set ? ` What you set here is where each one starts (${set} of ${steps.length} set).` : ""}`;
+    const tell = this.practice ? `${time} A practice run: the same steps on your screen only, rolled quietly. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.` : `${time} ${who} The clock moves on at the end and the party stays here. ${rule(HARVEST_RULES.time)}`;
     const n = steps.length;
-    return `<div class="hv-pin"><div class="hv-pos"><b>${n} creature${n === 1 ? "" : "s"} ready</b><small>${checks} check${checks === 1 ? "" : "s"}</small><span class="sp"></span>${practice}${rule(HARVEST_RULES.run)}</div>
+    return `<div class="hv-pin"><div class="hv-pos"><b>${n} creature${n === 1 ? "" : "s"} to harvest</b><small>${set} set up</small><span class="sp"></span>${practice}${rule(HARVEST_RULES.run)}</div>
       <p class="hv-tell">${tell}</p><button type="button" class="primary" data-act="start">${this.practice ? "Start practice run" : "Start harvest"}: ${n} creature${n === 1 ? "" : "s"}</button></div>`;
   }
 
@@ -429,7 +437,7 @@ export class HarvestWindow {
   #begin() {
     const steps = this.#steps();
     if (!steps.length) return;
-    this.runner.start({ steps, practice: this.practice, scene: game.scenes.get(this.sceneId)?.name ?? "" });
+    this.runner.start({ steps, practice: this.practice, scene: game.scenes.get(this.sceneId)?.name ?? "", party: this.#partyList() });
   }
 
   /** The harvest is done: log it; a real one also gets its card, its journal page and the clock moving on. */
