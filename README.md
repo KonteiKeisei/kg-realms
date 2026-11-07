@@ -4,74 +4,77 @@
 
 # KG Realms
 
-Realm maps for Foundry VTT (v13 and v14, D&D 5e). Turn a world map into a living travel map: places with cards and journals, roads, rivers and sea lanes, areas, biomes, journeys planned and played out day by day, camps and watches, encounters, weather, night and seasons, and settlement maps the party can walk or ride through.
+Travel maps for Foundry VTT v13 and v14 (D&D 5e). A realm map holds places, roads, rivers, sea lanes, areas and biomes. Parties plan and run journeys on it, with camps, watches, encounters, weather, day and night, seasons, and settlement maps they can walk or ride through.
 
-KG Realms is the engine. A world is either one you make from your own map picture, or one that comes in a world module.
+A world comes from your own map picture or from a world module.
 
 ## Install
 
-In Foundry's **Add-on Modules**, choose **Install Module** and paste this manifest URL:
+Foundry **Add-on Modules** > **Install Module**, manifest URL:
 
 ```
 https://github.com/KonteiKeisei/kg-realms/releases/latest/download/module.json
 ```
 
-Or download `kg-realms.zip` from the [latest release](https://github.com/KonteiKeisei/kg-realms/releases/latest) and extract it into `Data/modules`.
+Or extract `kg-realms.zip` from the [latest release](https://github.com/KonteiKeisei/kg-realms/releases/latest) into `Data/modules`.
 
-## Make your own world
+## Make a world from a map picture
 
-1. Make a scene whose background is your world map picture.
-2. In the Scenes sidebar, right-click it and choose **Make realm world**.
-3. Give the world a name and the map's width in miles (from its left edge to its right). Travel times use it.
-4. Wait while KG Realms backs up the scene, cuts the picture into compressed map tiles and saves the world. A map 12,000 px wide takes a few minutes. Foundry stays usable meanwhile.
-5. Open the scene. It is now a realm map with nothing on it yet. Add places, roads, rivers, areas and biomes with the editors, and set a party token travelling.
+1. Create a scene with the map picture as its background.
+2. Scenes sidebar: right-click the scene > **Make realm world**.
+3. Enter a name and the map's width in miles, left edge to right edge. Travel times use it.
+4. KG Realms backs up the scene, cuts the picture into compressed tiles and saves the world. A 12,000 px map takes a few minutes; Foundry stays usable.
+5. Open the scene and add places, roads, rivers, areas and biomes with the editors.
 
-The map's files are saved in Foundry's Data folder (`KG Realms Data/World/<world id>/`), outside every game world, so include that folder in your backups. Places, roads and other edits are saved in the game world itself. Right-click the scene again for:
+Storage:
 
-- **Realm world settings**: its name and width in miles.
-- **Revert to backup**: the scene's picture and grid come back. The world and its tiles stay saved, so making it a realm world again is quick.
-- **Export as module**: a zip that installs like any world module, to keep or share.
+- Map tiles: `Data/KG Realms Data/World/<world id>/`, outside any game world. Back this folder up.
+- Places, roads and other edits: the game world.
 
-Notes:
+Scene right-click menu:
 
-- Pictures larger than 16,384 px on a side are shrunk to fit (a browser limit). The picture file itself is never changed.
-- Foundry does not accept `.ktx2` uploads, so tiles are saved as `.ktx2.fbx` with their bytes unchanged. Before it starts, KG Realms checks that your server keeps them intact.
-- Making tiles needs Foundry opened over https or on localhost.
+- **Realm world settings**: name and width in miles.
+- **Revert to backup**: restores the scene's picture and grid. The world and tiles stay, so converting again is quick.
+- **Export as module**: a zip that installs as a world module.
+
+Limits:
+
+- Pictures over 16,384 px on a side are scaled down to fit (browser limit). The source file is not changed.
+- Foundry rejects `.ktx2` uploads, so tiles are saved as `.ktx2.fbx` with unchanged bytes. KG Realms checks first that the server keeps them intact.
+- Making tiles requires Foundry over https or on localhost.
 
 ## World modules
 
-A world module registers its world as KG Realms starts:
+A world module registers its world at startup:
 
 ```js
 Hooks.once("kgRealmsRegisterWorlds", ({ registerWorld }) => registerWorld({
   id: "my-world",            // as stored in scenes
   title: "My World",
-  module: "my-world-module", // its data is at modules/<module>/data/worlds/<id>/
+  module: "my-world-module", // data at modules/<module>/data/worlds/<id>/
   mapName: "My World",
   terrainPack: "terrain-pack.json"
 }));
 ```
 
-**Export as module** writes one of these for you. The world API is also at `game.modules.get("kg-realms").api.registerWorld` and `.worlds()`.
-
-## Settings worth knowing
-
-- **Carriage ride sound**: a looping sound for the settlement carriage ride. None ships with KG Realms; empty keeps the ride silent.
-- **Manage map files** (Ctrl+Shift+M): each player can save a world's map tiles to a folder on their computer instead of streaming them.
-
-GM encounter previews: hover a red encounter dot on the realm or regional map to read its description, Perception DC and GM notes. Double-click to open the full card. Both cards have an orange-yellow outline and a GM only badge. These encounter dots and cards are blocked for players, independently of the encounter's discovery setting.
-
-## Credits and licences
-
-- [MapLibre GL JS](https://maplibre.org/) (BSD 3-Clause), `lib/maplibre`.
-- Mapbox vector-tile, pbf and point-geometry (BSD 3-Clause, ISC), `lib/mvt`.
-- [Basis Universal](https://github.com/BinomialLLC/basis_universal) encoder by Binomial LLC (Apache 2.0, with BSD and MIT parts), `lib/basis`. See `lib/basis/README.txt`. KG Realms is not affiliated with Binomial LLC.
-- Noto Sans glyphs (SIL Open Font License), `data/fonts`.
+**Export as module** generates this. The same API is at `game.modules.get("kg-realms").api.registerWorld` and `.worlds()`.
 
 ## Regional maps
 
-Link a detailed regional map beneath a realm by placing an aspect-matched rectangle. Regional scale and terrain control travel inside its coverage, including journeys that enter and leave it. Both map views share one journey. See [Regional map setup and travel](docs/regional-maps.md).
+A regional map is a detailed map placed under part of a realm as an aspect-matched rectangle. Inside it, regional scale and terrain set travel times, including for journeys that cross its edge. Both views share one journey. Setup: [Regional map setup and travel](docs/regional-maps.md).
 
-Party token outlines: Configure Settings > KG Realms > Party token appearance > Configure token outlines. The GM's colour applies to the glowing outer outline and portrait borders; the surrounding band is transparent.
+Terms: **Areas** are Domains and Territories, each with its own border. **Regional maps** are the detailed maps under a realm. **Regions** are Foundry's own scene feature and are unrelated.
 
-Areas group Domains and Territories, each with its own border. Regional maps are the detailed maps beneath a realm. Foundry Regions remain Foundry's own scene feature.
+## Notes for GMs
+
+- **Encounter previews**: hover a red encounter dot on a realm or regional map for its description, Perception DC and GM notes; double-click for the full card. GM-only cards have an orange-yellow outline and a GM only badge. Players' maps don't show these dots or cards, whatever the encounter's discovery setting.
+- **Party token outlines**: Configure Settings > KG Realms > Party token appearance > Configure token outlines. The colour applies to the outer outline and portrait borders.
+- **Carriage ride sound**: optional looping sound for settlement carriage rides. None ships; empty means silent.
+- **Manage map files** (Ctrl+Shift+M): each user can store a world's map tiles in a local folder instead of streaming them.
+
+## Credits and licences
+
+- [MapLibre GL JS](https://maplibre.org/) (BSD 3-Clause): `lib/maplibre`.
+- Mapbox vector-tile, pbf and point-geometry (BSD 3-Clause, ISC): `lib/mvt`.
+- [Basis Universal](https://github.com/BinomialLLC/basis_universal) encoder by Binomial LLC (Apache 2.0, with BSD and MIT parts): `lib/basis`, see `lib/basis/README.txt`. KG Realms is not affiliated with Binomial LLC.
+- Noto Sans glyphs (SIL Open Font License): `data/fonts`.

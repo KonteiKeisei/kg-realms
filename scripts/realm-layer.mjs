@@ -27,18 +27,6 @@ const PROTOCOL = "kgrealms";
 const TOP_SOURCES = new Set(["journey", "journey-camps", "encounters", "flash", "area-edit", "area-edit-nodes"]);
 export const onTop = (layer) => layer.type === "symbol" || TOP_SOURCES.has(layer.source);
 
-/** Animate only the canvas that owns a glow. Every style write can redraw and upload that canvas. */
-export function updateMapGlows(maps, {night, gold, phase}) {
-  if ((!night && !gold) || globalThis.document?.hidden) return;
-  const opacity = 0.25 + 0.45 * (Math.sin(phase / 2.6 * 2 * Math.PI) + 1) / 2;
-  for (const map of maps) {
-    if (!map.isStyleLoaded()) continue;
-    const shown = id => map.getLayer(id) && map.getLayoutProperty?.(id, "visibility") !== "none";
-    if (night && shown("night-glow")) map.setGlobalStateProperty("phase", phase);
-    if (gold && shown("place-glow")) map.setPaintProperty("place-glow", "circle-opacity", opacity);
-  }
-}
-
 /** Open world archives by key ("toril-surface"), read by the MapLibre protocol below. */
 const archives = new Map();
 const details = new Map();
@@ -231,7 +219,6 @@ export class RealmLayer {
 
   setPlaces(geojson) {
     this.places = geojson;
-    this.hasGoldPlaces = !!geojson?.features.some(f => f.properties.gold);
     this.symbols?.preload(geojson);
     this.#whenLoaded((map) => {
       // The GM sees hidden places, faded, so their cards can be opened (players never get them).
@@ -369,36 +356,22 @@ export class RealmLayer {
     return hits[0].properties.id;
   }
 
-  /** Blink a ring on some points (GeoJSON) for a few seconds, then fade. Only on this screen. */
-  flash(geojson, { seconds = 3.5, fade = 1 } = {}) {
+  /** A steady ring on some points (GeoJSON) for a few seconds, then gone. Only on this screen. No animation. */
+  flash(geojson, { seconds = 4.5 } = {}) {
     if (!this.ready) return;
-    clearInterval(this.flashTimer);
+    clearTimeout(this.flashTimer);
     const map = this.labels ?? this.map;
     if (!map) return;
     const go = () => {
+      map.setPaintProperty("flash-glow", "circle-opacity", 0.8);
+      map.setPaintProperty("flash-ring", "circle-stroke-opacity", 1);
       map.getSource("flash")?.setData(geojson);
-      const start = performance.now();
-      this.flashTimer = setInterval(() => {
-        const t = (performance.now() - start) / 1000;
-        const envelope = t < seconds ? 1 : Math.max(0, 1 - (t - seconds) / fade);
-        const a = envelope * (0.35 + 0.65 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 1.6)));
-        map.setPaintProperty("flash-glow", "circle-opacity", 0.8 * a);
-        map.setPaintProperty("flash-ring", "circle-stroke-opacity", a);
-        if (envelope <= 0) {
-          clearInterval(this.flashTimer);
-          map.getSource("flash")?.setData({ type: "FeatureCollection", features: [] });
-        }
-      }, 50);
+      this.flashTimer = setTimeout(() => {
+        this.flashTimer = null;
+        if (this.ready) map.getSource("flash")?.setData({ type: "FeatureCollection", features: [] });
+      }, seconds * 1000);
     };
     if (map.isStyleLoaded()) go(); else map.once("idle", go);
-  }
-
-  /** A slow breathing glow on the points of interest, only while some glow. */
-  #startPulse() {
-    const start = performance.now();
-    this.pulse = setInterval(() => {
-      updateMapGlows(this.#maps(), {night:this.options?.look === "night",gold:this.hasGoldPlaces,phase:(performance.now()-start)/1000});
-    }, 100);
   }
 
   #style(part = "all") {
@@ -528,17 +501,15 @@ export class RealmLayer {
     if (this.areas) this.setAreas(this.areas);
     if (this.mapLayers) this.setMapLayers(this.mapLayers);
     this.setEditing(this.editing);
-    this.#startPulse();
     this.update();
   }
 
   destroy() {
     this.generation++;
     this.ready = false;
-    clearInterval(this.pulse);
-    clearInterval(this.flashTimer);
+    clearTimeout(this.flashTimer);
     clearTimeout(this.settleTimer);
-    this.pulse = this.flashTimer = null;
+    this.flashTimer = null;
     this.settledZoom = null;
     this.elSize = null;
     window.removeEventListener("resize", this.onResize);

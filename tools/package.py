@@ -7,7 +7,7 @@ the same version is never overwritten. Bump the version for a new build.
 
 It holds the Foundry runtime files plus the optional server-side image migration tool: the
 manifest, scripts, styles, MapLibre and the vector-tile libraries, the fonts, the README and
-CHANGELOG, the marker art and the ambient media, all inside a top-level kg-realms/ folder.
+CHANGELOG, the marker art and the carriage ride's pictures, all inside a top-level kg-realms/ folder.
 Extract it into Data/modules. Worlds ship in their own modules (KG Realms: Faerûn); in a dev
 checkout data/worlds and the world assets are links to them and are never packaged here.
 """
@@ -32,11 +32,22 @@ INCLUDE = [
     "lib/**/*",
     "data/fonts/**/*",
     "data/markers/*",
-    # The carriage ride's pictures and the watch banner video. Its sound is the GM's own (a setting).
+    # The carriage ride's pictures (REQUIRED_MEDIA). Its sound is the GM's own (a setting).
     "assets/media/*.jpg",
-    "assets/media/*.webm",
     "lib/basis/*",
 ]
+# Media the module loads at runtime. A release without one of them would build but show a broken
+# picture, so packaging stops instead. Kept in step with the code by tests/release-media.test.mjs.
+REQUIRED_MEDIA = [
+    "assets/media/city-carriage-driver.jpg",
+    "assets/media/city-carriage-passenger.jpg",
+]
+missing = [m for m in REQUIRED_MEDIA if not (ROOT / m).is_file()]
+if missing:
+    sys.exit("Required media missing, no zip written:\n" + "\n".join(f"  {m}" for m in missing))
+if "--check" in sys.argv:
+    print(f"Required media present: {len(REQUIRED_MEDIA)} files. --check: no zip written.")
+    sys.exit(0)
 # Already compressed: stored as they are (faster, and the zip would not shrink them).
 STORED = {".pmtiles", ".pbf", ".webm", ".mp4", ".ktx2"}
 

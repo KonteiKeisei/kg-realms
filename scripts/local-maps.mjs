@@ -9,6 +9,7 @@ import { worldUrl, defaultWorldId, allWorlds } from "./worlds.mjs";
 import { asHtml, asSecret, excerptHtml } from "./place-card.mjs";
 import { LocalEditor } from "./ui-local.mjs";
 import { isPrimaryGM } from "./authority.mjs";
+import { onlyJourneyProgress } from "./journey-state.mjs";
 import {sceneContextEntry} from './foundry-compat.mjs';
 import { settlementAmbience } from "./scene-ambience.mjs";
 import {settlementEntrances} from './settlement-entry.mjs';
@@ -227,7 +228,8 @@ export class LocalMaps {
     // The way back: a bar on a place's own scene (to the local map) and on a local map (to the realm).
     Hooks.on("canvasReady", () => { this.#drawBar(); this.#centre(); this.ensureEntrance().catch(error => console.warn('kg-realms | entrance setup:', error)); });
     Hooks.on("canvasTearDown", () => { this.editor.close(); this.#removeBar(); });
-    Hooks.on("updateScene", (scene, changes) => { if(scene!==canvas.scene)return;if(foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`))this.#drawBar();this.refreshMarkers(scene); });
+    // A travelling party's position (journey.now) changes neither the way back nor the markers.
+    Hooks.on("updateScene", (scene, changes) => { if(scene!==canvas.scene||onlyJourneyProgress(changes))return;if(foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`))this.#drawBar();this.refreshMarkers(scene); });
     // The GM's Local places tool, with the Journal Notes tools, on a local map.
     Hooks.on("getSceneControlButtons", (controls) => {
       if (!game.user.isGM || !localMapOf(canvas.scene) || !controls.notes) return;

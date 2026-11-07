@@ -302,7 +302,31 @@ export function buildSea(grid, waterways, { milesPerPixel, coarse = 3, ports = [
     }
     reachOf.push({ wind: wl, cells });
   }
-  return { W, H, cs, water, offshore, nodes, lines, links, N, milesPerPixel, cellOf, centre, nearWater, reachOf, winds: new Map() };
+  return { W, H, cs, water, offshore, nodes, lines, links, N, milesPerPixel, cellOf, centre, nearWater, reachOf, winds: new Map(), region: waterRegions(W, H, water, N + nodes.length, links) };
+}
+
+/**
+ * Which water joins which: for each water cell and line node, a label shared by everything a boat
+ * could reach from it (open water, and the rivers, lanes and currents between waters). Built over
+ * every kind of way, so two places with different labels are never joined by water, whatever the
+ * voyage's ways. Land cells are -1.
+ */
+export function waterRegions(W, H, water, count, links) {
+  const parent = new Int32Array(count);
+  for (let i = 0; i < count; i++) parent[i] = i;
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const join = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a < b ? b : a] = a < b ? a : b; };
+  // Open water: 4-way is enough, since a diagonal move needs both cells beside it to be water too.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const c = y * W + x;
+    if (!water[c]) continue;
+    if (x + 1 < W && water[c + 1]) join(c, c + 1);
+    if (y + 1 < H && water[c + W]) join(c, c + W);
+  }
+  for (const [a, edges] of links) for (const e of edges) join(a, e.to);
+  const region = new Int32Array(count), N = W * H;
+  for (let i = 0; i < count; i++) region[i] = i < N && !water[i] ? -1 : find(i);
+  return region;
 }
 
 /**
@@ -389,6 +413,11 @@ export function planSea(sea, from, to, { mph = 2, season = "summer", reach = 40,
   const starts = ends(from);
   for (const e of ends(to)) goalLinks.set(e.id, Math.min(goalLinks.get(e.id) ?? Infinity, e.miles));
   if (!starts.length || !goalLinks.size) return null;
+  // No water joins the two ends: say so now, rather than searching every water cell on the map first.
+  if (!through && sea.region) {
+    const reached = new Set(starts.map((s) => sea.region[s.id]));
+    if (![...goalLinks.keys()].some((id) => reached.has(sea.region[id]))) return null;
+  }
   const at = (id) => (id < N ? sea.centre(id) : id < START ? nodes[id - N].at : id === START ? from : to);
   const h = (id) => { const p = at(id); return Math.hypot(p[0] - to[0], p[1] - to[1]) * mpp / vmax; };
   const g = new Map(), prev = new Map(), heap = [];

@@ -1781,22 +1781,11 @@ export function showBanner(d) {
   el.className = "kgr-ui kgr-watch-banner";
   el.setAttribute("role", "status");
   el.style.setProperty("--kgr-watch", colour(d.colour));
-  // Behind it all, the Watch background setting: a video loops at 30% volume, a picture stands still.
-  let bg = "";
-  try { bg = String(game.settings.get(MODULE_ID, "watchBackground") ?? ""); } catch { /* not registered */ }
-  const media = bg ? (/\.(webm|mp4|m4v|ogv|ogg)$/i.test(bg) ? `<video class="wb-bg" src="${esc(foundry.utils.getRoute(bg))}" autoplay loop playsinline></video>` : `<img class="wb-bg" src="${esc(foundry.utils.getRoute(bg))}" alt="">`) : "";
-  el.classList.toggle("with-bg", !!media);
-  el.innerHTML = `${media}<div class="wb-portrait"><img src="${esc(d.img)}" alt=""></div>
+  el.innerHTML = `<div class="wb-portrait"><img src="${esc(d.img)}" alt=""></div>
     <div class="wb-card"><span class="wb-n">Watch ${num(d.n, 1)} of ${num(d.total, 1)}</span><b class="wb-name">${esc(d.name)}</b><span class="wb-when">takes the watch · ${esc(d.when)}</span></div>
     <i class="wb-line">${esc(d.line)}</i>
     <div class="wb-bar"><div class="camp-ticks">${ticks}</div><div class="camp-bar">${parts}${gap}<i class="camp-now" style="left:${(Math.max(0, Math.min(1, num(d.nowAt))) * 100).toFixed(1)}%"></i></div></div>`;
-  const video = el.querySelector("video.wb-bg");
-  if (video) {
-    video.volume = 0.3;
-    // A browser that will not play it with sound (no click yet this session) plays it silent.
-    video.play?.().catch(() => { video.muted = true; video.play().catch(() => {}); });
-  }
-  const close = () => { el.classList.add("out"); setTimeout(() => { video?.pause(); el.remove(); }, 700); };
+  const close = () => { el.classList.add("out"); setTimeout(() => el.remove(), 700); };
   el.addEventListener("click", close);
   overCanvas(el);
   setTimeout(close, 5200);

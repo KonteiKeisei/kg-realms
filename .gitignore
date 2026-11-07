@@ -4,7 +4,15 @@ node_modules/
 __pycache__/
 # Art and media are packaged into releases, not kept in git. In a dev checkout, assets/maps,
 # assets/poi-img and assets/terrain are links to the KG Realms: Faerûn checkout beside this one.
-assets/
+assets/*
+# The carriage ride's pictures are the author's own and kept in git (packaged into releases).
+!assets/media/
+assets/media/*
+!assets/media/city-carriage-driver.jpg
+!assets/media/city-carriage-passenger.jpg
+# Public guide illustrations are code-drawn sample UI, not campaign assets.
+!docs/guide/assets/
+!docs/guide/assets/**
 # Worlds ship in their own modules (KG Realms: Faerûn). In a dev checkout these are links to them.
 data/worlds/
 # Versioned module zips: published as GitHub releases.

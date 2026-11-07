@@ -26,13 +26,15 @@ import { flagsNeedRedraw, lakeBiome } from "./biome-climate.mjs";
 Hooks.once("init", () => { registerHomebrew(); collectWorlds({ registerWorld }); });
 import {bypassPartyEncounter} from './party-encounters.mjs';
 import {writeJourney} from './journey-write.mjs';
+import {writeQueue} from './write-queue.mjs';
+import {requestCoalescer} from './sync-requests.mjs';
 import {journeyKey} from './journey-state.mjs';
 import {focusedScene,partyScene,journeyScenes,sceneParties,partyLabel} from './party-groups.mjs';
 import {PartyManager} from './party-manager.mjs';
 import {PartyPortraits,PartyInterface} from './party-ui.mjs';
 import { latLonToScene, makeFrame, sceneToLatLon, aspect, worldFloor } from "./geo.mjs";
 import { isPrimaryGM, primaryGMChoices, userChangeMatters } from "./authority.mjs";
-import { needsRouteRefresh, ROUTE_FIELDS } from "./journey-state.mjs";
+import { needsRouteRefresh, ROUTE_FIELDS, onlyJourneyProgress } from "./journey-state.mjs";
 import { TravelBounce } from "./travel-motion.mjs";
 import { rollCampRequest, applyWatchFatigue } from "./camp-rolls.mjs";
 import { partyPicker, scenePartyPicker } from "./party-token.mjs";
@@ -252,13 +254,19 @@ async function importOldJournals() {
 // Snow starting or stopping (Calendaria) changes seasonal local maps.
 Hooks.on("calendaria.weatherChange", () => localMaps.applySeasons());
 // The card follows changes to what it shows (another GM's edit, a save, a reveal).
-for (const hook of ["updateNote", "deleteNote", "updateScene"]) Hooks.on(hook, () => cards.refresh());
+// A party's position as it travels (journey.now) is not on any card: those updates leave it be.
+for (const hook of ["updateNote", "deleteNote", "updateScene"]) Hooks.on(hook, (_doc, changes) => { if (hook === "updateScene" && onlyJourneyProgress(changes)) return; cards.refresh(); });
 
-async function saveEdits(world, fn) {
-  const all = foundry.utils.deepClone(setting("placeEdits") ?? {});
-  const before=structuredClone(all[world]??{edits:{},added:{}});
-  all[world] = regional.reconcileEdits(world,before,fn(structuredClone(before)),all);
-  await game.settings.set(MODULE_ID, "placeEdits", all);
+// Each of these settings is read, changed and written whole: their writes go one at a time, so a
+// save never works from a value an earlier save is about to replace.
+const placeWrites = writeQueue(), routeWrites = writeQueue(), waterwayWrites = writeQueue();
+function saveEdits(world, fn) {
+  return placeWrites(async () => {
+    const all = foundry.utils.deepClone(setting("placeEdits") ?? {});
+    const before=structuredClone(all[world]??{edits:{},added:{}});
+    all[world] = regional.reconcileEdits(world,before,fn(structuredClone(before)),all);
+    await game.settings.set(MODULE_ID, "placeEdits", all);
+  });
 }
 
 /**
@@ -297,10 +305,12 @@ const getPlace = id => id?.startsWith("journey-encounter:") ? journeyEncounterPr
 // Road edits, like place edits: a world setting keyed by world id,
 // { [world]: { edited: { [id]: {...} }, added: { [id]: {...} }, deleted: [id] } }.
 const routeEditsOf = (world) => (setting("routeEdits") ?? {})[world] ?? { edited: {}, added: {}, deleted: [] };
-async function saveRouteEdits(world, fn) {
-  const all = foundry.utils.deepClone(setting("routeEdits") ?? {});
-  all[world] = fn(foundry.utils.deepClone(all[world] ?? { edited: {}, added: {}, deleted: [] }));
-  await game.settings.set(MODULE_ID, "routeEdits", all);
+function saveRouteEdits(world, fn) {
+  return routeWrites(async () => {
+    const all = foundry.utils.deepClone(setting("routeEdits") ?? {});
+    all[world] = fn(foundry.utils.deepClone(all[world] ?? { edited: {}, added: {}, deleted: [] }));
+    await game.settings.set(MODULE_ID, "routeEdits", all);
+  });
 }
 /** Roads as drawn and travelled: curves through the nodes the editor keeps. */
 const curved = (fc) => (fc && current?.world?.sourceMap ? smoothRoutes(fc, lonLatToSource, sourceToLonLat) : fc);
@@ -411,14 +421,16 @@ function borderIndex(world) {
 }
 function waterwaysOf(world) { return waterwaysWithBorders(storedWaterways(world), borderIndex(world)); }
 /** fn(the waterways as they are) gives them as they should be; only what differs from the module's is kept. */
-async function saveWaterways(world, fn) {
-  const shipped = await loadShippedWaterways(world), next = fn(foundry.utils.deepClone(waterwaysOf(world))) ?? {};
-  const own = {};
-  for (const [id, w] of Object.entries(next)) if (!shipped[id] || JSON.stringify(shipped[id]) !== JSON.stringify(w)) own[id] = w;
-  for (const id of Object.keys(shipped)) if (!(id in next)) own[id] = null;
-  const all = foundry.utils.deepClone(setting("waterways") ?? {});
-  all[world] = own;
-  await game.settings.set(MODULE_ID, "waterways", all);
+function saveWaterways(world, fn) {
+  return waterwayWrites(async () => {
+    const shipped = await loadShippedWaterways(world), next = fn(foundry.utils.deepClone(waterwaysOf(world))) ?? {};
+    const own = {};
+    for (const [id, w] of Object.entries(next)) if (!shipped[id] || JSON.stringify(shipped[id]) !== JSON.stringify(w)) own[id] = w;
+    for (const id of Object.keys(shipped)) if (!(id in next)) own[id] = null;
+    const all = foundry.utils.deepClone(setting("waterways") ?? {});
+    all[world] = own;
+    await game.settings.set(MODULE_ID, "waterways", all);
+  });
 }
 /**
  * Each load (the active GM): a world's own copy of one of the module's lines that is now just the
@@ -1049,7 +1061,6 @@ Hooks.once("init", () => {
   game.settings.registerMenu(MODULE_ID, "advancedWatchesMenu", { name: "Advanced watches", label: "Advanced watches", hint: "Camp tasks for the hour before sleep (Watch, Foraging, Concealment, Alarms), the ration item foraging hands out, and the random encounter table for a night in camp.", icon: "fa-solid fa-campground", type: advancedWatchesMenu(), restricted: true });
   register("watchesAtSea", { name: "Watches at sea", hint: "Off: aboard a crewed ship the crew keeps watch and the party sleeps through. On: the party keeps its watch order on a voyage's nights too.", scope: "world", config: true, type: Boolean, default: false, onChange: () => hud.render() });
   register("showPerceptionDC", { name: "Show Perception DC", hint: "Players see the DC of the checks the travel panel asks for (the watcher's Wisdom (Perception) check, the party's at an encounter on the road, and the forager's Wisdom (Survival) check), and the roll's chat card shows success or failure.", scope: "world", config: true, type: Boolean, default: true, onChange: () => hud.render() });
-  register("watchBackground", { name: "Watch background", hint: "The picture or video behind the watch change banner, when a new watch begins. A video loops, at 30% volume. Empty: none.", scope: "world", config: true, type: String, filePicker: "imagevideo", default: `modules/${MODULE_ID}/assets/media/kgrestbg.webm` });
   // The GM's checkbox in camp, kept from one encounter to the next.
   register("hideEncounterRolls", { scope: "world", config: false, type: Boolean, default: false, onChange: () => hud.render() });
 
@@ -1384,10 +1395,16 @@ Hooks.on("canvasReady", () => { drawRegion(); enforceWeatherFilter(regionOf); re
 Hooks.once("ready", () => installWeatherFilter(regionOf));
 Hooks.on("updateUser", (user, changes, _options, userId) => receiveCampMessage(user, changes, userId, (message, sender) => hud.camp.onMessage(message, sender)));
 // Explicit journey sync requests are read-only requests; only the primary GM writes state.
+// Each player's requests for a scene: answered at once, then at most once every 2 seconds (a
+// follow-up answers any that came in between). Checked again when answered.
+const answerSync = requestCoalescer((userId, sceneId) => {
+  const user = game.users.get(userId), scene = game.scenes.get(sceneId);
+  if (isPrimaryGM() && user?.active && scene && regionOf(scene)) syncJourney(scene, { force: true });
+});
 Hooks.once("ready", () => game.socket.on(`module.${MODULE_ID}`, (m, userId) => {
   if (m?.type === "request-sync") {
-    const user = game.users.get(userId ?? m.user), scene = game.scenes.get(m.scene);
-    if (isPrimaryGM() && user?.active && scene && regionOf(scene)) syncJourney(scene, { force: true });
+    const from = userId ?? m.user;
+    if (isPrimaryGM() && typeof from === "string" && typeof m.scene === "string") answerSync(`${from}:${m.scene}`, from, m.scene);
     return;
   }
   // Camp changes arrive through authenticated User document updates.

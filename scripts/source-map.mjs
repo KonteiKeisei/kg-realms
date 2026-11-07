@@ -77,7 +77,7 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
   // Close in, every marker shows; names move to a free side, and hide only where there is no room.
   ...(fixed?{'text-variable-anchor':['left','right','top','bottom'],'text-radial-offset':0.9,'text-justify':'auto'}:{}),'symbol-sort-key':priority},
   paint:{'text-color':'#ffffff','text-halo-color':'#0b0b0b','text-halo-width':1.8,'text-halo-blur':0.3,'icon-opacity':faded,'text-opacity':faded}});
- return {version:8,glyphs,state:{editing:{default:false},gm:{default:false},travelRoutes:{default:[]},phase:{default:0},settledZoom:{default:0},mapLayers:{default:['places']}},sources:{
+ return {version:8,glyphs,state:{editing:{default:false},gm:{default:false},travelRoutes:{default:[]},settledZoom:{default:0},mapLayers:{default:['places']}},sources:{
   tapestry:{type:'raster',tiles:[tiles.tapestry],tileSize:sourceMap.tileSize,minzoom:0,maxzoom:sourceMap.detailZoom??sourceMap.nativeZoom,bounds:[b.west,b.south,b.east,b.north],attribution},
   ...(tiles.routes?{routes:{type:'geojson',data:tiles.routes}}:{}),
   places:{type:'geojson',data:empty},flash:{type:'geojson',data:empty},
@@ -88,10 +88,10 @@ export function sourceMapStyle({tiles,glyphs,sourceMap=SOURCE_MAP,attribution=''
  },layers:[
   {id:'background',type:'background',paint:{'background-color':'#171717'}},
   {id:'tapestry',type:'raster',source:'tapestry',paint:{'raster-fade-duration':0,'raster-resampling':'linear',...(night&&dim?{'raster-brightness-max':0.42,'raster-saturation':-0.35,'raster-contrast':0.05}:{})}},
-  // Night: settlements glow, sized to the settlement, each flickering on its own (seed).
+  // Night: settlements glow, sized to the settlement, each a little brighter or dimmer than the next (seed). Steady, not animated.
   ...(night&&mapLights?(()=>{
    const size=['match',['get','class'],'City',1,'Town',0.62,'Village',0.42,'Hamlet',0.3,['match',['get','kind'],'settlement',0.34,0.22]];
-   const flick=['+',0.78,['*',0.16,['sin',['+',['*',['global-state','phase'],1.7],['*',['get','seed'],5]]]],['*',0.08,['sin',['+',['*',['global-state','phase'],4.3],['get','seed']]]]];
+   const flick=['+',0.78,['*',0.16,['sin',['*',['get','seed'],5]]],['*',0.08,['sin',['get','seed']]]];
    const lit=['all',onLayer,crossingVisible,['!',['get','hidden']],['!=',['slice',['get','name'],0,5],'Ruins'],['!=',['get','symbol'],'ruin'],['any',['==',['get','kind'],'settlement'],['in',['get','class'],['literal',['Fortification','Keep','Fort','Castle','Temple','Inn']]]]];
    const r=(k)=>['interpolate',['exponential',1.6],['zoom'],3,['*',k*14,size],7,['*',k*44,size],10,['*',k*120,size],13,['*',k*320,size]];
    return [

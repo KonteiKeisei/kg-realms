@@ -1,5 +1,16 @@
 # KG Realms changelog
 
+## 0.95.5: static map lights, serialized saves, faster sea routing
+
+- Night lights, gold place glows and settlement lights are static. The realm map no longer redraws 10 times a second at night or with gold places.
+- Map search and street search highlights show without blinking, then clear after a few seconds.
+- Place, road and waterway saves run one at a time. A second save started before the first finished no longer overwrites it.
+- Sea routes between unconnected waters fail immediately instead of searching the whole map. Existing routes are unchanged.
+- Open cards and the GM's scene bar no longer redraw on travel position updates.
+- The primary GM answers each player's sync requests for a scene at most once every 2 seconds.
+- Removed the Watch background setting and its bundled video.
+- Carriage ride pictures are tracked in the repository; packaging stops if either is missing.
+
 ## 0.95.4: consistent local marker editing
 
 - Drag existing settlement and local-map places directly while the KG Realms Places editor is open, including from token mode. Preview locally and save only coordinates on release. Keep marker IDs, cards, scene links, gates, docks and export data. Double-click a marker to open its card.

@@ -1,6 +1,7 @@
 // Settlement lights at night, drawn as real light on Foundry's lighting layer, so they glow
 // through the scene's darkness (as a light source does) and sit under tokens. Each light is a
-// warm radial glow sized to the settlement, flickering on its own.
+// warm radial glow sized to the settlement, steady (not animated): each a little brighter or dimmer
+// than the next, from its id.
 import { latLonToScene } from "./geo.mjs";
 
 const SIZE = { City: 1, Town: 0.62, Village: 0.42, Hamlet: 0.3 };
@@ -20,7 +21,7 @@ function glow() {
 }
 
 export class NightLights {
-  constructor() { this.root = null; this.lights = []; this.tick = () => this.#update(); this.t0 = performance.now(); }
+  constructor() { this.root = null; this.lights = []; this.tick = () => this.#update(); }
 
   /** places: the region's places (edits applied); frame: the map's projection on the scene. */
   draw(places, frame) {
@@ -42,7 +43,8 @@ export class NightLights {
       s.anchor.set(0.5); s.position.set(at.x, at.y);
       s.blendMode = PIXI.BLEND_MODES.ADD;
       this.root.addChild(s);
-      this.lights.push({ s, size, seed: [...String(p.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 6283, 7) / 1000 });
+      const seed = [...String(p.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 6283, 7) / 1000;
+      this.lights.push({ s, size, bright: 0.82 + 0.12 * Math.sin(seed * 5) + 0.06 * Math.sin(seed) });
     }
     if (this.lights.length) canvas.app.ticker.add(this.tick);
     this.#update();
@@ -58,7 +60,7 @@ export class NightLights {
     const now = performance.now();
     if (now - (this.updatedAt ?? -Infinity) < 100) return;
     this.updatedAt = now;
-    const t = (now - this.t0) / 1000, zoom = canvas.stage.scale.x;
+    const zoom = canvas.stage.scale.x;
     const screen = canvas.app.renderer?.screen, transform = canvas.stage.worldTransform;
     const a = screen && transform?.applyInverse({x:0,y:0}), b = screen && transform?.applyInverse({x:screen.width,y:screen.height});
     // Real size on the map: a city glows about 6 miles across (the scene's grid is 100 px a
@@ -69,9 +71,10 @@ export class NightLights {
       const radius = Math.max(3, Math.min(60, 3.2 * pxPerMile * l.size * zoom)) / zoom;
       l.s.visible = !a || !b || (l.s.position.x+radius >= a.x && l.s.position.x-radius <= b.x && l.s.position.y+radius >= a.y && l.s.position.y-radius <= b.y);
       if (!l.s.visible) continue;
-      const f = 0.82 + 0.12 * Math.sin(t * 1.7 + l.seed * 5) + 0.06 * Math.sin(t * 4.3 + l.seed);
       if (l.radius !== radius) { l.s.width = l.s.height = radius * 2; l.radius = radius; }
-      l.s.alpha = on * f * 0.6;
+      // Only when dusk or dawn changes it: a steady light is not written again.
+      const alpha = on * l.bright * 0.6;
+      if (l.alpha !== alpha) { l.s.alpha = alpha; l.alpha = alpha; }
     }
   }
 

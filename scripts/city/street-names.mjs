@@ -203,11 +203,13 @@ export class StreetNames {
       const zoom = canvas.stage.scale.x || 1; g.clear();
       for (const [w, a] of [[16, 0.25], [7, 0.95]]) { g.lineStyle({ width: w / zoom, color: 0xffd36b, alpha: a, cap: "round", join: "round" }); for (const r of runs) { g.moveTo(...r.points[0]); for (const p of r.points.slice(1)) g.lineTo(...p); } }
     };
+    // Steady (not animated): shown for ms, then gone. Drawn again only when the zoom changes, so its lines keep their width on screen.
     const start = performance.now();
+    let drawnZoom = null;
     this.glowTick = () => {
-      const t = (performance.now() - start) / ms;
-      if (t >= 1 || g.destroyed) return this.#stopGlow();
-      draw(); g.alpha = (t < 0.75 ? 0.75 + 0.25 * Math.sin(t * Math.PI * 6) : (1 - t) / 0.25);
+      if (performance.now() - start >= ms || g.destroyed) return this.#stopGlow();
+      const zoom = canvas.stage.scale.x || 1;
+      if (zoom !== drawnZoom) { drawnZoom = zoom; draw(); }
     };
     canvas.app.ticker.add(this.glowTick);
   }
