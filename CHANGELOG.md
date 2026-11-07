@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.96.1-harvest-test: harvest rolls go to the players (test build, not released)
+
+- The harvest party is the party token's members and the player characters with a token on the scene, each once. Characters elsewhere are not listed.
+- Request rolls sends each player their checks in a Harvest checks panel: one button per check with their bonus (and the DC, when players may see it), or Roll all. The rolls are the system's own, with chat cards. Players who reload get theirs again.
+- The GM sees who still has to roll, can roll for anyone with no player online, and harvests once every roll is in. Cancel the rolls to change who harvests what.
+- Every part shows each roller's bonus and DC, and their roll once it is in.
+- A practice run still rolls quietly in the GM's window, without asking the players.
+- Appearance: a palette button before the lock on every panel header (the travel panel, the harvest window and the rest). It changes the window theme, glass opacity and blur on the spot, for your view, the same as the module settings.
+
 ## 0.96.0-harvest-test: creature harvesting (test build, not released)
 
 - Harvest: a downed creature's token HUD (0 hit points, dead or defeated) has a Harvest button for the GM. It opens the harvest window with every downed creature on the scene. Drop more from a compendium or the Actors sidebar.

@@ -1,12 +1,14 @@
 // The one panel shell (0.65): what every KG Realms panel shares, so they look and behave alike.
 //  - The header: an icon, an eyebrow (what this is), a title (which one), then the window controls,
-//    always in this order: lock, minimise, close (a panel shows only those it has).
+//    always in this order: lock, minimise, close (a panel shows only those it has). A panel with a
+//    lock also has Appearance just before it: the window theme, glass opacity and blur, there and then.
 //  - Tabs: one segmented style everywhere.
 //  - Placement: a panel opens in its usual spot; dragged by its header (while unlocked) it stays
 //    where it was put, per user; double-click the header to put it back. Minimised, only the header
 //    shows.
 // Each panel keeps its own buttons' actions: the shell only draws them.
 import { dragByHeader, clampTo } from "./float-panel.mjs";
+import { WINDOW_THEMES, applyWindowTheme, applyGlassOpacity, applyGlassBlur } from "./ui-theme.mjs";
 
 const ID = "kg-realms";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -18,7 +20,7 @@ const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
  */
 export function shellHead({ icon = "", eyebrow = "", title = "", lock = null, min = null, close = null, extra = "" } = {}) {
   const ctl = (c, fa, label, title) => c ? `<button type="button" ${c.attr} class="kgr-sh-ctl ${c.on ? "on" : ""}" title="${esc(c.title ?? title ?? label)}" aria-label="${esc(label)}"${c.on != null ? ` aria-pressed="${!!c.on}"` : ""}><i class="fa-solid ${fa}"></i></button>` : "";
-  return `<header class="kgr-sh">${icon ? `<span class="kgr-sh-icon" aria-hidden="true"><i class="fa-solid ${icon}"></i></span>` : ""}<div class="kgr-sh-text">${eyebrow ? `<div class="kgr-sh-eyebrow">${esc(eyebrow)}</div>` : ""}<div class="kgr-sh-title">${esc(title)}</div></div><div class="kgr-sh-ctls">${extra}${ctl(lock, lock?.on ? "fa-lock" : "fa-lock-open", lock?.on ? "Unlock position" : "Lock position", lock?.on ? "Locked in place: unlock to move it by its header" : "Drag the header to move it; lock to keep it there")}${ctl(min, min?.on ? "fa-chevron-down" : "fa-minus", min?.on ? "Restore" : "Minimise")}${ctl(close, "fa-xmark", "Close")}</div></header>`;
+  return `<header class="kgr-sh">${icon ? `<span class="kgr-sh-icon" aria-hidden="true"><i class="fa-solid ${icon}"></i></span>` : ""}<div class="kgr-sh-text">${eyebrow ? `<div class="kgr-sh-eyebrow">${esc(eyebrow)}</div>` : ""}<div class="kgr-sh-title">${esc(title)}</div></div><div class="kgr-sh-ctls">${extra}${lock ? LOOK_BUTTON : ""}${ctl(lock, lock?.on ? "fa-lock" : "fa-lock-open", lock?.on ? "Unlock position" : "Lock position", lock?.on ? "Locked in place: unlock to move it by its header" : "Drag the header to move it; lock to keep it there")}${ctl(min, min?.on ? "fa-chevron-down" : "fa-minus", min?.on ? "Restore" : "Minimise")}${ctl(close, "fa-xmark", "Close")}</div></header>`;
 }
 
 /** Tabs: [[key, label, iconOrNull, countOrNull]], the open one, and the attribute the panel listens for. */
@@ -37,11 +39,61 @@ export function shellSection(title, body, { count = null, open = true, key = "",
   return `<details class="kgr-sh-sec" ${open ? "open" : ""} ${key ? `data-sec="${esc(key)}"` : ""}><summary><span>${esc(title)}</span>${count != null ? `<small class="kgr-sh-count">${esc(count)}</small>` : ""}${action ? `<span class="kgr-sh-sp"></span>${action}` : ""}</summary><div class="kgr-sh-secbody">${body}</div></details>`;
 }
 
+/* ------------------------------------------------------------------ appearance */
+
+const LOOK_BUTTON = `<button type="button" data-kgr-look class="kgr-sh-ctl" title="Appearance: theme, opacity and blur" aria-label="Appearance"><i class="fa-solid fa-palette"></i></button>`;
+let lookEl = null;
+const closeLook = () => { lookEl?.remove(); lookEl = null; };
+const lookSetting = (k) => { try { return game.settings.get(ID, k); } catch { return undefined; } };
+
+/** The Appearance popover under a header's button: the same client settings as the module settings. */
+function openLook(button) {
+  if (lookEl) return closeLook();
+  const theme = lookSetting("windowTheme") ?? "slate", opacity = lookSetting("windowOpacity") ?? 75, blur = lookSetting("windowBlur") ?? 8;
+  lookEl = document.createElement("div");
+  lookEl.className = "kgr-ui kgr-panel kgr-look";
+  lookEl.setAttribute("role", "dialog");
+  lookEl.setAttribute("aria-label", "Appearance");
+  lookEl.innerHTML = `<div class="kgr-look-head"><b>Appearance</b><small>Your view only. Also in the module settings.</small></div>
+    <label>Window theme<select data-look="windowTheme">${Object.entries(WINDOW_THEMES).map(([k, v]) => `<option value="${k}" ${k === theme ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
+    <label>Glass opacity <output>${opacity}%</output><input type="range" data-look="windowOpacity" min="20" max="100" step="5" value="${opacity}"></label>
+    <label>Glass blur <output>${blur} px</output><input type="range" data-look="windowBlur" min="0" max="18" step="1" value="${blur}"></label>`;
+  document.body.append(lookEl);
+  const r = button.getBoundingClientRect(), w = lookEl.offsetWidth;
+  Object.assign(lookEl.style, { left: `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`, top: `${Math.min(window.innerHeight - lookEl.offsetHeight - 8, r.bottom + 6)}px` });
+  const live = { windowTheme: applyWindowTheme, windowOpacity: applyGlassOpacity, windowBlur: applyGlassBlur };
+  lookEl.addEventListener("input", (e) => {
+    const k = e.target.dataset.look;
+    if (!k) return;
+    live[k](e.target.value);
+    const out = e.target.closest("label")?.querySelector("output");
+    if (out) out.textContent = k === "windowBlur" ? `${e.target.value} px` : `${e.target.value}%`;
+  });
+  lookEl.addEventListener("change", (e) => {
+    const k = e.target.dataset.look;
+    if (!k) return;
+    const v = k === "windowTheme" ? e.target.value : Number(e.target.value);
+    game.settings.set(ID, k, v).catch((err) => { console.error("kg-realms | appearance:", err); ui.notifications.error(`KG Realms: the ${k === "windowTheme" ? "theme" : "setting"} could not be saved: ${err.message}`); });
+  });
+}
+
+function lookClicks(e) {
+  const b = e.target.closest?.("[data-kgr-look]");
+  if (b) { e.preventDefault(); e.stopPropagation(); return openLook(b); }
+  if (lookEl && !lookEl.contains(e.target)) closeLook();
+}
+
 /* ------------------------------------------------------------------ placement */
 
 /** The client setting holding every panel's place: { key: { x, y, locked, min } }. */
 export function registerShell() {
   game.settings.register(ID, "panelPlaces", { scope: "client", config: false, type: Object, default: {} });
+  // Any header's Appearance button, on any panel, now or later.
+  if (typeof document !== "undefined" && !registerShell.listening) {
+    registerShell.listening = true;
+    document.addEventListener("click", lookClicks, true);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && lookEl) closeLook(); });
+  }
 }
 const all = () => { try { return game.settings.get(ID, "panelPlaces") ?? {}; } catch { return {}; } };
 /** A panel's kept place and state. */

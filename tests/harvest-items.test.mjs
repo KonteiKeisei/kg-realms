@@ -65,6 +65,16 @@ test("spoilage: fresh meat older than 3 days goes off", async () => {
   assert.equal(a.items[0].system.quantity, 6);
 });
 
+test("the harvest party: the party token's members and the characters on the scene, each once, and nobody else", async () => {
+  const pc = (id) => ({ id, name: id, type: "character", hasPlayerOwner: true });
+  const [a, b, c, d] = ["pikle", "mara", "toth", "bryn"].map(pc);
+  globalThis.game.actors = Object.assign([a, b, c, d], { get: (id) => [a, b, c, d].find((x) => x.id === id) });
+  const group = { id: "party", type: "group", getFlag: () => null, system: { members: [{ actor: a }, { actor: b }] } };
+  const { harvestParty } = await import("../scripts/harvest/ui-harvest.mjs");
+  const names = harvestParty({ tokens: [{ actor: group }, { actor: b }, { actor: c }] }).map((x) => x.id);
+  assert.deepEqual(names, ["pikle", "mara", "toth"], "Mara once; Bryn has no token here and isn't in the party");
+});
+
 test("the harvest window is in the unified shell, with a practice run, and Provisioning is a camp task", () => {
   const ui = readFileSync(new URL("../scripts/harvest/ui-harvest.mjs", import.meta.url), "utf8");
   assert.ok(ui.includes("shellHead(") && ui.includes("shellTabs(") && ui.includes("kgr-sh-foot"));

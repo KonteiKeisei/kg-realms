@@ -2153,3 +2153,32 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-harvest .hv-run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .kgr-harvest .hv-run-head b { font-size: 14px; }
 .kgr-harvest .hv-run-head small { color: var(--kgr-muted); font-size: 12px; }
+/* Appearance popover (0.96): from any panel header's palette button. */
+.kgr-ui.kgr-look { z-index: 1000; width: 270px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--kgr-text); }
+.kgr-look .kgr-look-head { display: flex; flex-direction: column; gap: 2px; }
+.kgr-look .kgr-look-head b { font-size: 13px; }
+.kgr-look .kgr-look-head small { color: var(--kgr-muted); }
+.kgr-look label { display: flex; flex-direction: column; gap: 4px; margin: 0; color: var(--kgr-muted-2); }
+.kgr-look label output { float: right; color: var(--kgr-text); font-variant-numeric: tabular-nums; }
+.kgr-look select, .kgr-look input[type=range] { width: 100%; }
+/* Harvest: each roll with its bonus; who still has to roll; the players' checks panel. */
+.kgr-harvest .hv-pt { grid-template-columns: 16px minmax(0, 1fr) auto auto minmax(76px, auto); }
+.kgr-harvest .hv-rolls { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.kgr-harvest .hv-bon { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--kgr-text); font-variant-numeric: tabular-nums; }
+.kgr-harvest .hv-bon img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; border: 0; }
+.kgr-harvest .hv-bon small { color: var(--kgr-gold-text); font-weight: 700; }
+.kgr-ui .hv-rolled { font-variant-numeric: tabular-nums; font-weight: 700; }
+.kgr-harvest .hv-rolled.ok { color: var(--kgr-ok); } .kgr-harvest .hv-rolled.no { color: var(--kgr-danger); }
+.kgr-harvest .hv-wait, .kgr-harvest .hv-off { color: var(--kgr-muted); font-style: italic; }
+.kgr-harvest .hv-people { display: flex; flex-direction: column; gap: 4px; }
+.kgr-harvest .hv-person { display: grid; grid-template-columns: 22px auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.kgr-harvest .hv-person img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 0; }
+.kgr-harvest .hv-person small { color: var(--kgr-muted); }
+.kgr-harvest .hv-person.done small { color: var(--kgr-ok); }
+.kgr-ui.kgr-harvest-checks { width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 80px); padding: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--kgr-text); font-size: 13px; }
+.kgr-harvest-checks .hv-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.kgr-harvest-checks .hv-ask img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 0; }
+.kgr-harvest-checks .hv-ask > button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.kgr-harvest-checks .hv-pin { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-top: 2px solid var(--kgr-accent); background: rgba(0, 0, 0, .18); }
+.kgr-harvest-checks .hv-tell { margin: 0; font-size: 12px; }
+.kgr-harvest-checks .hv-pin > button { min-height: 36px; }
