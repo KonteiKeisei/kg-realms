@@ -83,7 +83,8 @@ import { BiomeEditor } from "./ui-biomes.mjs";
 import { biomeLookup, biomeTypes, biomeFlag, onlyBiomeFlagChanged, mergeBiomeConfig, biomeEdits } from "./biomes.mjs";
 import { hazardVisible, isRiverHazard, isHazard, hazardSubtype, HAZARD_TYPES } from "./river-hazards.mjs";
 import { EncounterBox } from "./ui-encounter-box.mjs";
-import { HarvestWindow, HarvestChecks, isDowned } from "./harvest/ui-harvest.mjs";
+import { HarvestWindow, isDowned } from "./harvest/ui-harvest.mjs";
+import { HarvestRun } from "./harvest/run.mjs";
 import { spoilFood } from "./harvest/items.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
 import { seasonOf, buildSea, automaticPort, terrainHarbours } from "./waterways.mjs";
@@ -746,9 +747,10 @@ const planner = { open: () => hud.toggle() };
 // On a scene an encounter links to: the encounter's small box (its assets, and back to the journey).
 // Harvesting (0.96): the GM's harvest window, from a downed creature's token HUD.
 const harvest = new HarvestWindow({ hud });
-const harvestChecks = new HarvestChecks();
-// A player who joins or reloads while the GM has harvest rolls out is sent theirs again.
-Hooks.once("ready", () => { if (!game.user.isGM) setTimeout(() => HarvestChecks.askAgain(), 1500); });
+// A player's view of a harvest under way (the GM's is the harvest window's).
+const harvestRun = new HarvestRun();
+// A player who joins or reloads during a harvest is sent it again.
+Hooks.once("ready", () => { if (!game.user.isGM) setTimeout(() => HarvestRun.askAgain(), 1500); });
 Hooks.on("renderTokenHUD", (app, html) => {
   const token = app.object ?? app.token, root = html instanceof HTMLElement ? html : html?.[0];
   if (!game.user.isGM || !root || !isDowned(token)) return;
@@ -1437,9 +1439,9 @@ const answerSync = requestCoalescer((userId, sceneId) => {
   if (isPrimaryGM() && user?.active && scene && regionOf(scene)) syncJourney(scene, { force: true });
 });
 Hooks.once("ready", () => game.socket.on(`module.${MODULE_ID}`, (m, userId) => {
-  // Harvest checks: the GM asks, each player rolls theirs and sends the total back.
+  // The harvest under way: the GM sends it, each player rolls theirs and sends the total back.
   if (typeof m?.type === "string" && m.type.startsWith("harvest-")) {
-    if (game.user.isGM) harvest.receive(m, userId); else harvestChecks.receive(m, userId);
+    if (game.user.isGM) harvest.receive(m, userId); else harvestRun.receive(m, userId);
     return;
   }
   if (m?.type === "request-sync") {

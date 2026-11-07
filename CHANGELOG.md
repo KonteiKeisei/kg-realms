@@ -1,5 +1,16 @@
 # KG Realms changelog
 
+## 0.96.2-harvest-test: the harvest runs like the camp's activities (test build, not released)
+
+- Start harvest opens the harvest's steps, in the same view as the camp's activities, on the GM's and the players' screens: a step for each creature, then Done.
+- On each creature the GM requests the rolls. Every part shows its people: face, Leader or Helping (success +1, failure -1), and their roll button with their bonus and the DC (when players may see it). Players roll their own; the GM rolls for anyone with no player online, or for anyone with Roll for them.
+- The GM can allow a reroll, or rule any part a success or failure with a reason (automatic before any roll), as with camp tasks. The total with help shows as the rolls come in.
+- Confirm results gives the leader that creature's parts and marks them on its token. Next moves to the next creature; Skip passes one by.
+- Done lists everything harvested; Finish moves the clock on by the longest share, posts the GM's card and writes the Harvests journal.
+- A practice run uses the same steps on the GM's screen only, rolled quietly, nothing kept.
+- The harvest window shows the harvest under way, with Show the harvest and Call off the harvest. Who harvests what is fixed until it ends.
+- The separate Harvest checks panel for players is gone: the steps replace it.
+
 ## 0.96.1-harvest-test: harvest rolls go to the players (test build, not released)
 
 - The harvest party is the party token's members and the player characters with a token on the scene, each once. Characters elsewhere are not listed.

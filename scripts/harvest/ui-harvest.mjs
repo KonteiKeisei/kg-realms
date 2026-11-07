@@ -1,22 +1,21 @@
-// The harvest window (0.96): one harvest session, for the GM. Every downed creature on the scene, and
-// any dropped in from a compendium; the party on the left (the party token's members and the
-// characters with tokens on the scene, each once), dragged onto creatures (the first leads, a second
-// helps by the leader rule). Each part is its own check.
+// The harvest window (0.96): setting up one harvest session, for the GM. Every downed creature on the
+// scene, and any dropped in from a compendium; the party on the left (the party token's members and
+// the characters with tokens on the scene, each once), dragged onto creatures (the first leads, a
+// second helps by the leader rule), and which parts to take.
 //
-// Request rolls sends each player their checks (their own Harvest checks panel, each roll with its
-// bonus); the GM rolls for anyone with no player online. With every roll in, Harvest gives the leader
-// the parts, moves the clock on by the longest share (the party stays put), and logs it in the window,
-// a chat card and the Harvests journal. A practice run rolls everything quietly here and changes
-// nothing. Closing the window ends the session.
+// Start harvest carries it out in the harvest run (run.mjs), the camp activities' step view, shared
+// with the players: one step for each creature, its rolls with each person's bonus, the GM's rerolls
+// and rulings, then Done, which moves the clock on and logs it in the Log tab, a chat card and the
+// Harvests journal. A practice run is the GM's alone, rolled quietly, nothing kept. Closing the window
+// ends the session.
 import { shellHead, shellTabs, movable, placeKept, isLocked, toggleLocked, applyMin } from "../ui-shell.mjs";
 import { uiBounds } from "../ui-editbar.mjs";
 import { ruleTooltip, ruleParagraphs } from "../travel-rules.mjs";
 import { sceneParties, groupMembers } from "../party-groups.mjs";
-import { creatureProfile, partsFor, dcFor, harvestCheck, harvestYield, rollAmount, diceText, coins, minutesText, workMinutes, tierOf, SIZES, PARTS, DEFAULT_DCS, HARVEST_SKILLS, TIERS } from "./catalog.mjs";
-import { giveYield } from "./items.mjs";
+import { creatureProfile, partsFor, dcFor, diceText, coins, minutesText, workMinutes, tierOf, SIZES, PARTS, DEFAULT_DCS, HARVEST_SKILLS, TIERS } from "./catalog.mjs";
+import { HarvestRun, outcomeText } from "./run.mjs";
 
 const MODULE_ID = "kg-realms";
-export const HARVEST_SOCKET = `module.${MODULE_ID}`;
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const rule = (t) => ruleTooltip(t);
 const setting = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
@@ -24,8 +23,6 @@ const skillMod = (actor, k) => Number(actor?.system?.skills?.[k]?.total ?? actor
 const signed = (n) => `${n >= 0 ? "+" : ""}${n}`;
 const first = (name) => String(name ?? "?").split(" ")[0];
 const SHORT = { sur: "Sur", med: "Med", slt: "Sle" };
-/** Whether players see the DCs of the checks they are asked for (the world's Show Perception DC). */
-const showDC = () => setting("showPerceptionDC") !== false;
 /** The players who would roll for an actor: active, not GMs, owners. */
 const playersOf = (actor) => Array.from(game.users ?? []).filter((u) => u.active && !u.isGM && actor?.testUserPermission?.(u, "OWNER"));
 
@@ -35,8 +32,8 @@ export const HARVEST_RULES = {
   dc: ruleParagraphs([["DC", "Base DC + half the creature's CR, rounded down + the part's difficulty."], ["Skill", "Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing."], ["GM", "The DCs tab changes the base DC, what each skill takes off, and every part's difficulty, for this world."]]),
   rarity: ruleParagraphs([["Rarity", "By the creature's CR. Common 0 to 1, uncommon 2 to 4, rare 5 to 10, very rare 11 to 16, legendary 17 or more."], ["Value", "Each rarity is worth more: ×1, ×2, ×5, ×15 and ×40. The world's Prices setting applies too."], ["Stacking", "Items are named by rarity and kind, never by the creature, so like stacks with like."]]),
   time: ruleParagraphs([["Time", "Each part takes time by the creature's size: Tiny 5 minutes, Small 10, Medium 20, Large 40, Huge 80, Gargantuan 120. Meat and hide take twice as long."], ["Together", "Players work at the same time, so the clock moves on by the longest share. A helper adds no time."], ["Travel", "The party stays where it is while it harvests."]]),
-  rolls: ruleParagraphs([["Request rolls", "Each player gets their checks in a Harvest checks panel, with their bonus on each roll. Their rolls post to the chat as usual."], ["No player online", "Roll for them here."], ["Harvest", "Once every roll is in. Nothing is given until then."]]),
-  practice: ruleParagraphs([["Practice run", "Rolls every check quietly here, without asking the players, and shows the results in the Log tab only."], ["Nothing changes", "No chat card, no items, no time passes, no parts marked as taken, and nothing in the journal."]])
+  run: ruleParagraphs([["The harvest", "Carried out like the camp's activities: a step for each creature, on everyone's screen. The GM requests the rolls; each player rolls their own, with their bonus on the button. The GM rolls for anyone with no player online."], ["GM", "Allow a reroll, or rule any part a success or failure with a reason. Confirm results gives the leader that creature's parts."], ["Done", "The clock moves on by the longest share and the harvest is logged."]]),
+  practice: ruleParagraphs([["Practice run", "The same steps, on your screen only. Every roll is quiet, without asking the players."], ["Nothing changes", "No chat card, no items, no time passes, no parts marked as taken, and nothing in the journal. The results show in the Log tab."]])
 };
 
 /** Whether a token's creature is down: 0 hit points, dead or defeated. NPCs only. */
@@ -58,29 +55,11 @@ export function harvestParty(scene) {
   return [...out.values()];
 }
 
-/**
- * A skill check with the system's own roll. chat: a chat card and the roll dialog, as any check
- * (dc on it when players may see it); else quiet. Returns the total, or null if the roller cancelled.
- */
-export async function systemRoll(actor, skill, { dc = null, flavor = "Harvest", chat = true } = {}) {
-  try {
-    if (foundry.utils.isNewerVersion(game.system.version, "3.99")) {
-      const r = await actor.rollSkill({ skill, ...(dc != null ? { target: dc } : {}) }, chat ? {} : { configure: false }, chat ? { data: { flavor } } : { create: false });
-      const roll = Array.isArray(r) ? r[0] : r;
-      return Number.isFinite(roll?.total) ? roll.total : null;
-    }
-    const roll = await actor.rollSkill(skill, chat ? { ...(dc != null ? { targetValue: dc } : {}), flavor } : { fastForward: true, chatMessage: false });
-    return Number.isFinite(roll?.total) ? roll.total : null;
-  } catch (err) {
-    console.warn(`${MODULE_ID} | harvest: the system's skill roll failed, rolling d20 + bonus instead:`, err);
-    const roll = await new Roll("1d20 + @mod", { mod: skillMod(actor, skill) }).evaluate();
-    if (chat) await roll.toMessage({ flavor, speaker: ChatMessage.getSpeaker({ actor }) });
-    return roll.total;
-  }
-}
-
 export class HarvestWindow {
-  constructor({ hud }) { this.hud = hud; this.el = null; }
+  constructor({ hud }) {
+    this.hud = hud; this.el = null;
+    this.runner = new HarvestRun({ hud, onFinished: (entries, seconds, practice) => this.#finished(entries, seconds, practice), onChange: () => this.render() });
+  }
 
   get dcs() {
     const s = setting("harvestDCs") ?? {};
@@ -88,6 +67,7 @@ export class HarvestWindow {
   }
   get people() { return !!setting("harvestHumanoidMeat"); }
   get priceScale() { return Number(this.hud?.priceScale) || 1; }
+  get running() { return !!this.runner.run; }
 
   /** Open (or bring up) the window; a token to open on, from its token HUD. */
   async open(token = null) {
@@ -100,7 +80,7 @@ export class HarvestWindow {
   }
 
   #start() {
-    this.creatures = []; this.log = []; this.runs = []; this.tab = "creatures"; this.openId = null; this.practice = false; this.busy = false; this.request = null;
+    this.creatures = []; this.log = []; this.runs = []; this.tab = "creatures"; this.openId = null; this.practice = false;
     this.sceneId = canvas.scene?.id ?? null;
     this.el = document.createElement("section");
     this.el.className = "kgr-ui kgr-panel kgr-harvest";
@@ -115,11 +95,14 @@ export class HarvestWindow {
     this.el.addEventListener("drop", (e) => this.#drop(e));
   }
 
-  /** Closing ends the session (and any roll request): a new one starts on the next open. */
+  /** Closing ends the session (and a harvest under way): a new one starts on the next open. */
   close() {
-    if (this.request) this.#endRequest();
+    if (this.running) this.runner.end();
     this.el?.remove(); this.el = null; this.creatures = []; this.log = []; this.runs = [];
   }
+
+  /** A player's roll for the harvest under way, or a player asking to be sent it again. */
+  receive(m, userId) { this.runner.receive(m, userId); }
 
   /** The party on this scene: its party tokens' members and its player characters, each once. */
   party() { return harvestParty(canvas.scene); }
@@ -143,7 +126,7 @@ export class HarvestWindow {
     return id;
   }
 
-  /** A creature's parts as they stand: each with whether it was already taken (on its token). */
+  /** A creature's parts as they stand: each with whether it was already taken (on its token, or earlier this session). */
   partsOf(c) {
     const taken = c.tokenId ? canvas.scene?.tokens.get(c.tokenId)?.getFlag(MODULE_ID, "harvested") ?? {} : {};
     const session = Object.fromEntries(this.log.filter((l) => !l.practice && l.creature === c.id).flatMap((l) => l.rows.filter((r) => r.outcome !== "nothing").map((r) => [r.part, r])));
@@ -153,26 +136,25 @@ export class HarvestWindow {
   workOf(c) { return this.partsOf(c).filter((p) => !p.taken && !c.skip.has(p.key)); }
   #ready() { return this.creatures.filter((c) => c.crew.leader && this.workOf(c).length); }
 
-  /**
-   * What a harvest would roll, fixed when the rolls are asked for: [{ cid, name, tokenId, lead: { id,
-   * skill }, help, parts: [part + dcLead, dcHelp] }], and each check [{ id, cid, key, actor, skill, dc,
-   * role, part, creature, total }].
-   */
-  #plan() {
-    const plan = this.#ready().map((c) => {
-      const lead = { ...c.crew.leader }, help = c.crew.helper ? { ...c.crew.helper } : null;
-      return { cid: c.id, name: c.name, tokenId: c.tokenId, lead, help, parts: this.workOf(c).map((p) => ({ ...p, dcLead: dcFor(p, lead.skill, this.dcs), dcHelp: help ? dcFor(p, help.skill, this.dcs) : null })) };
+  /** The harvest's steps, fixed as it starts: one for each creature with a leader and parts to take. */
+  #steps() {
+    return this.#ready().map((c) => {
+      const lead = game.actors.get(c.crew.leader.id), help = c.crew.helper ? game.actors.get(c.crew.helper.id) : null;
+      const ls = c.crew.leader.skill, hs = c.crew.helper?.skill, parts = this.workOf(c);
+      const who = (a, skill) => ({ id: a.id, name: a.name, img: a.img, skill });
+      return {
+        cid: c.id, name: c.name, img: c.img, tokenId: c.tokenId, minutes: workMinutes(parts),
+        desc: `${SIZES[c.profile.size]?.label ?? "Medium"} ${c.profile.type || "creature"} · CR ${c.profile.cr} · ${tierOf(c.profile.cr).label.toLowerCase()}`,
+        lead: who(lead, ls), help: help ? who(help, hs) : null,
+        parts: parts.map((p) => ({ key: p.key, name: p.name, kind: p.part, perLb: p.perLb, dice: p.dice, unitGp: p.unitGp, minutes: p.minutes, dcLead: dcFor(p, ls, this.dcs), dcHelp: help ? dcFor(p, hs, this.dcs) : null, amountText: this.#amount(p) }))
+      };
     });
-    const checks = plan.flatMap((c) => c.parts.flatMap((p) => [
-      { id: `${c.cid}|${p.key}|lead`, cid: c.cid, key: p.key, actor: c.lead.id, skill: c.lead.skill, dc: p.dcLead, role: "leads", part: p.name, creature: c.name, total: null },
-      ...(c.help ? [{ id: `${c.cid}|${p.key}|help`, cid: c.cid, key: p.key, actor: c.help.id, skill: c.help.skill, dc: p.dcHelp, role: "helps", part: p.name, creature: c.name, total: null }] : [])
-    ]));
-    return { plan, checks };
   }
-  /** Each leader's share of the time, in minutes, for a plan: { actorId: minutes }. */
-  #shares(plan) {
+  #amount(p) { return p.perLb ? `${diceText(p.dice)} lb` : p.max > 1 && p.dice[1] > 1 ? `${diceText(p.dice)}, max ${p.max}` : String(p.max); }
+  /** Each leader's share of the time, in minutes, for these steps: { actorId: minutes }. */
+  #shares(steps) {
     const out = {};
-    for (const c of plan) out[c.lead.id] = (out[c.lead.id] ?? 0) + workMinutes(c.parts);
+    for (const s of steps) out[s.lead.id] = (out[s.lead.id] ?? 0) + s.minutes;
     return out;
   }
 
@@ -197,8 +179,8 @@ export class HarvestWindow {
   }
 
   #creaturesTab() {
-    const party = this.party();
-    const pcs = party.map((a) => `<div class="hv-pc" draggable="${this.request ? "false" : "true"}" data-pc="${a.id}"><span class="hv-grip" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></span><img src="${esc(a.img)}" alt=""><div><b>${esc(a.name)}</b><small>${Object.keys(HARVEST_SKILLS).map((k) => `${SHORT[k]} ${signed(skillMod(a, k))}`).join(" · ")}</small>${playersOf(a).length ? "" : `<small class="hv-off">No player online: you roll</small>`}</div></div>`).join("")
+    const party = this.party(), locked = this.running;
+    const pcs = party.map((a) => `<div class="hv-pc" draggable="${locked ? "false" : "true"}" data-pc="${a.id}"><span class="hv-grip" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></span><img src="${esc(a.img)}" alt=""><div><b>${esc(a.name)}</b><small>${Object.keys(HARVEST_SKILLS).map((k) => `${SHORT[k]} ${signed(skillMod(a, k))}`).join(" · ")}</small>${playersOf(a).length ? "" : `<small class="hv-off">No player online: you roll</small>`}</div></div>`).join("")
       || `<p class="hint">No party on this scene. Put the party token, or the characters' tokens, on the scene.</p>`;
     const list = this.creatures.map((c) => this.#creature(c)).join("")
       || `<p class="hint">No downed creatures on this scene. A creature is downed at 0 hit points, or when it is dead or defeated.</p>`;
@@ -206,20 +188,12 @@ export class HarvestWindow {
       <div class="hv-left"><div class="hv-cap">Party<span class="sp"></span>${rule(HARVEST_RULES.who)}</div>${pcs}
         <span class="hint">Drag a player onto a creature. The first leads, a second can help. Players stay here, free for other creatures.</span></div>
       <div class="hv-right"><div class="hv-cap">Downed creatures<span class="sp"></span>${rule(HARVEST_RULES.harvest)}</div>${list}
-        ${this.request ? "" : `<div class="hv-drop" data-drop="compendium">Drop a creature from a compendium or the Actors sidebar here, for a kill off the map</div>`}</div>
+        ${locked ? "" : `<div class="hv-drop" data-drop="compendium">Drop a creature from a compendium or the Actors sidebar here, for a kill off the map</div>`}</div>
     </div>`;
   }
 
-  /** A check's state in the open request: its roll, or who it waits on. */
-  #checkState(id) {
-    const ch = this.request?.checks.find((x) => x.id === id);
-    if (!ch) return "";
-    if (ch.total != null) return `<b class="hv-rolled ${ch.total >= ch.dc ? "ok" : "no"}">${ch.total}</b>`;
-    return `<small class="hv-wait">waiting</small>`;
-  }
-
   #creature(c) {
-    const open = this.openId === c.id, parts = this.partsOf(c), work = this.workOf(c), tier = tierOf(c.profile.cr), locked = !!this.request;
+    const open = this.openId === c.id, parts = this.partsOf(c), work = this.workOf(c), tier = tierOf(c.profile.cr), locked = this.running;
     const lead = c.crew.leader ? game.actors.get(c.crew.leader.id) : null, help = c.crew.helper ? game.actors.get(c.crew.helper.id) : null;
     const size = SIZES[c.profile.size]?.label ?? "Medium";
     const right = !parts.length ? `<b>Nothing to take</b>` : !lead ? `<b>Nobody yet</b>drop a player` : work.length ? `<b>${work.length} part${work.length === 1 ? "" : "s"}</b>about ${minutesText(workMinutes(work))} · ${esc(first(lead.name))} leads` : `<b>All taken</b>`;
@@ -233,15 +207,14 @@ export class HarvestWindow {
     };
     const ls = c.crew.leader?.skill ?? "sur", hs = c.crew.helper?.skill;
     // Each roll with the roller's bonus for it, as on the watches.
-    const bonus = (who, skill, dc, id) => who ? `<span class="hv-bon" title="${esc(who.name)}: ${HARVEST_SKILLS[skill].label} ${signed(skillMod(who, skill))} against DC ${dc}"><img src="${esc(who.img)}" alt="">${SHORT[skill]} ${signed(skillMod(who, skill))} <small>DC ${dc}</small>${id ? this.#checkState(id) : ""}</span>` : "";
+    const bonus = (who, skill, dc) => `<span class="hv-bon" title="${esc(who.name)}: ${HARVEST_SKILLS[skill].label} ${signed(skillMod(who, skill))} against DC ${dc}"><img src="${esc(who.img)}" alt="">${SHORT[skill]} ${signed(skillMod(who, skill))} <small>DC ${dc}</small></span>`;
     const rows = parts.map((p) => {
-      const amount = p.perLb ? `${diceText(p.dice)} lb` : p.max > 1 && p.dice[1] > 1 ? `${diceText(p.dice)}, max ${p.max}` : String(p.max);
       const each = p.unitGp * this.priceScale, price = p.perLb ? `${coins(each)} a lb` : `${coins(each)} each`;
       const from = p.from ? `From ${esc(p.from)} · ` : "";
       const taken = p.taken ? `<small class="${p.taken.outcome === "ruined" ? "no" : "ok"}">${p.taken.outcome === "ruined" ? "Ruined" : `${p.taken.outcome === "mangled" ? "Mangled" : "Taken"}${p.taken.by ? ` by ${esc(p.taken.by)}` : ""}${p.taken.qty ? `: ${p.taken.qty}${p.perLb ? " lb" : ""}` : ""}`}</small>` : `<small>${from}${price}</small>`;
       const doing = !p.taken && !c.skip.has(p.key);
-      const rolls = doing && lead ? `<span class="hv-rolls">${bonus(lead, ls, dcFor(p, ls, this.dcs), locked && `${c.id}|${p.key}|lead`)}${help ? bonus(help, hs, dcFor(p, hs, this.dcs), locked && `${c.id}|${p.key}|help`) : ""}</span>` : `<span class="hv-dc">${p.taken ? "" : `DC ${dcFor(p, ls, this.dcs)}`}</span>`;
-      return `<label class="hv-pt"><input type="checkbox" data-act="pick" data-id="${c.id}" data-key="${esc(p.key)}" ${p.taken || locked ? "disabled" : ""} ${!p.taken && !c.skip.has(p.key) ? "checked" : ""} aria-label="${esc(p.name)}"><div>${esc(p.name)} ${taken}</div>${rolls}<span class="hv-tm">${p.taken ? "" : minutesText(p.minutes)}</span><span class="hv-amt">${p.taken ? "done" : amount}</span></label>`;
+      const rolls = doing && lead ? `<span class="hv-rolls">${bonus(lead, ls, dcFor(p, ls, this.dcs))}${help ? bonus(help, hs, dcFor(p, hs, this.dcs)) : ""}</span>` : `<span class="hv-dc">${p.taken ? "" : `DC ${dcFor(p, ls, this.dcs)}`}</span>`;
+      return `<label class="hv-pt"><input type="checkbox" data-act="pick" data-id="${c.id}" data-key="${esc(p.key)}" ${p.taken || locked ? "disabled" : ""} ${doing ? "checked" : ""} aria-label="${esc(p.name)}"><div>${esc(p.name)} ${taken}</div>${rolls}<span class="hv-tm">${p.taken ? "" : minutesText(p.minutes)}</span><span class="hv-amt">${p.taken ? "done" : this.#amount(p)}</span></label>`;
     }).join("") || `<p class="hint">This creature gives nothing to harvest${c.profile.type === "humanoid" || c.profile.type === "giant" ? ". Eating humanoids and giants is off in the module settings" : ""}.</p>`;
     return `<div class="hv-cr open ${lead && work.length ? "ready" : ""}" data-drop="creature" data-id="${c.id}">${head}
       <div class="hv-crew">${slot("leader", lead, c.crew.leader?.skill)}${slot("helper", help, c.crew.helper?.skill)}</div>
@@ -252,16 +225,9 @@ export class HarvestWindow {
   #logTab() {
     if (!this.runs.length) return `<p class="hint">Nothing harvested yet. Each harvest and practice run is logged here, for this session.</p>`;
     const one = (l) => `<div class="hv-cap">${esc(l.name)} · ${esc(l.leader)} leads${l.helper ? `, ${esc(l.helper)} helps` : ""}</div>
-      <table class="hv-table"><thead><tr><th>Part</th><th>Roll</th><th>DC</th><th>Got</th></tr></thead><tbody>${l.rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.roll}${r.helped ? ` (${r.helped > 0 ? "+1" : "−1"})` : ""}</td><td>${r.dc}</td><td class="${r.outcome === "got" ? "ok" : r.outcome === "ruined" ? "no" : ""}">${esc(this.#outcomeText(r))}</td></tr>`).join("")}</tbody></table>`;
+      <table class="hv-table"><thead><tr><th>Part</th><th>Roll</th><th>DC</th><th>Got</th></tr></thead><tbody>${l.rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.roll === "GM" ? `GM: ${r.ruling?.success ? "success" : "failure"}` : `${r.roll}${r.helped ? ` (${r.helped > 0 ? "+1" : "−1"})` : ""}`}</td><td>${r.dc}</td><td class="${r.outcome === "got" ? "ok" : r.outcome === "ruined" ? "no" : ""}">${esc(outcomeText(r))}${r.ruling?.reason ? `<small class="hv-why">${esc(r.ruling.reason)}</small>` : ""}</td></tr>`).join("")}</tbody></table>`;
     // Newest run first; its creatures in the order they were harvested.
     return [...this.runs].reverse().map((run) => `<div class="hv-run"><div class="hv-run-head">${run.practice ? `<span class="hv-practice">Practice run</span>` : `<b>Harvest</b>`}<small>${esc(run.when)} · took ${minutesText(run.minutes)}${run.practice ? " (no time passed)" : ""} · worth ${coins(run.gp)}</small></div>${run.entries.map(one).join("")}</div>`).join("");
-  }
-  #outcomeText(r) {
-    const unit = r.perLb ? " lb" : "";
-    if (r.outcome === "got") return `${r.qty}${unit}, ${coins(r.gp)}`;
-    if (r.outcome === "mangled") return `${r.cut}: ${r.qty}${unit}, cannot be sold`;
-    if (r.outcome === "ruined") return "Ruined";
-    return r.kind === "meat" || r.kind === "greens" ? "Too little left to keep" : `Failed by ${r.dc - r.roll}: nothing`;
   }
 
   #dcsTab() {
@@ -280,39 +246,28 @@ export class HarvestWindow {
 
   /** What happens now, and the one main button. */
   #pinned() {
-    if (this.tab === "dcs") return `<div class="hv-pin"><p class="hv-tell">Changes apply to every harvest in this world.</p><button type="button" class="primary" data-act="save-dcs" ${this.request ? "disabled" : ""}>Save DCs</button></div>`;
-    if (this.request) return this.#pinnedRequest();
-    const { plan, checks } = this.#plan(), shares = this.#shares(plan), names = Object.entries(shares).filter(([, m]) => m > 0).sort((a, b) => b[1] - a[1]);
-    const by = names.map(([id]) => first(game.actors.get(id)?.name));
+    if (this.tab === "dcs") return `<div class="hv-pin"><p class="hv-tell">Changes apply to every harvest in this world.</p><button type="button" class="primary" data-act="save-dcs" ${this.running ? "disabled" : ""}>Save DCs</button></div>`;
+    if (this.running) {
+      const r = this.runner.run, s = this.runner.step, done = r.steps.filter((x) => x.done).length;
+      return `<div class="hv-pin"><div class="hv-pos"><b>${r.practice ? "Practice run" : "Harvest"} under way</b><small>${s ? `${esc(s.name)} · step ${r.at + 1} of ${r.steps.length + 1}` : "done: finish it in the harvest"} · ${done} of ${r.steps.length} confirmed</small><span class="sp"></span>${rule(HARVEST_RULES.run)}</div>
+        <p class="hv-tell">Who harvests what is fixed until it ends. Carry it out in the harvest's steps.</p><button type="button" class="primary" data-act="show-run">Show the harvest</button></div>`;
+    }
+    const steps = this.#steps(), shares = this.#shares(steps), names = Object.entries(shares).filter(([, m]) => m > 0).sort((a, b) => b[1] - a[1]);
+    const by = names.map(([id]) => first(game.actors.get(id)?.name)), checks = steps.reduce((t, s) => t + s.parts.length * (s.help ? 2 : 1), 0);
     const practice = `<label class="hv-practice-box"><input type="checkbox" data-act="practice" ${this.practice ? "checked" : ""}> Practice run ${rule(HARVEST_RULES.practice)}</label>`;
-    if (!plan.length) {
-      return `<div class="hv-pin"><div class="hv-pos"><b>${this.runs.length ? "Harvest done" : "Nobody on a creature yet"}</b><span class="sp"></span>${practice}</div><p class="hv-tell">${this.runs.length ? "Closing the window ends this harvest. Drag players onto creatures to harvest more." : "Drag a player from the party onto a creature to lead its harvest."}</p><button type="button" class="primary" disabled>Request rolls</button></div>`;
+    if (!steps.length) {
+      return `<div class="hv-pin"><div class="hv-pos"><b>${this.runs.length ? "Harvest done" : "Nobody on a creature yet"}</b><span class="sp"></span>${practice}</div><p class="hv-tell">${this.runs.length ? "Closing the window ends this harvest. Drag players onto creatures to harvest more." : "Drag a player from the party onto a creature to lead its harvest."}</p><button type="button" class="primary" disabled>Start harvest</button></div>`;
     }
     const time = names.length ? `Takes about ${minutesText(names[0][1])}${by.length > 1 ? `, ${esc(by[0])}'s share` : ""}.` : "";
-    const tell = this.practice ? `${time} A practice run rolls here, quietly. The results show in the Log tab only. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.` : `${time} Each player rolls their own checks. The clock moves on and the party stays here. ${rule(HARVEST_RULES.time)}`;
-    const n = plan.length, label = this.practice ? `Practice run: ${n} creature${n === 1 ? "" : "s"}` : `Request ${checks.length} roll${checks.length === 1 ? "" : "s"}`;
-    return `<div class="hv-pin"><div class="hv-pos"><b>${n} creature${n === 1 ? "" : "s"} ready</b><small>${checks.length} check${checks.length === 1 ? "" : "s"}</small><span class="sp"></span>${practice}${this.practice ? "" : rule(HARVEST_RULES.rolls)}</div>
-      <p class="hv-tell">${tell}</p><button type="button" class="primary" data-act="${this.practice ? "practice-run" : "request"}" ${this.busy ? "disabled" : ""}>${this.busy ? "Rolling…" : label}</button></div>`;
-  }
-
-  /** While the players roll: who is still to roll, and Harvest once every roll is in. */
-  #pinnedRequest() {
-    const r = this.request, left = r.checks.filter((c) => c.total == null), n = r.plan.length;
-    const people = [...new Set(r.checks.map((c) => c.actor))].map((id) => {
-      const a = game.actors.get(id), mine = r.checks.filter((c) => c.actor === id), todo = mine.filter((c) => c.total == null).length;
-      const who = playersOf(a);
-      return `<span class="hv-person ${todo ? "" : "done"}"><img src="${esc(a?.img)}" alt=""><b>${esc(first(a?.name))}</b><small>${todo ? `${todo} of ${mine.length} to roll${who.length ? ` · ${esc(who.map((u) => u.name).join(", "))}` : " · no player online"}` : "all rolled"}</small>${todo ? `<button type="button" data-act="roll-for" data-actor="${id}">Roll for them</button>` : ""}</span>`;
-    }).join("");
-    const minutes = Math.max(0, ...Object.values(this.#shares(r.plan)));
-    return `<div class="hv-pin"><div class="hv-pos"><b>${left.length ? `Waiting for rolls: ${r.checks.length - left.length} of ${r.checks.length} in` : "Every roll is in"}</b><span class="sp"></span>${rule(HARVEST_RULES.rolls)}</div>
-      <div class="hv-people">${people}</div>
-      <p class="hv-tell">${left.length ? "Each player rolls from their Harvest checks panel. Roll for anyone who can't." : `Takes about ${minutesText(minutes)}. The clock moves on and the party stays here.`}</p>
-      <button type="button" class="primary" data-act="finish" ${left.length || this.busy ? "disabled" : ""}>${this.busy ? "Harvesting…" : `Harvest ${n} creature${n === 1 ? "" : "s"}`}</button></div>`;
+    const tell = this.practice ? `${time} A practice run: the same steps on your screen only, rolled quietly. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.` : `${time} Each player rolls their own checks, a creature at a time. The clock moves on at the end and the party stays here. ${rule(HARVEST_RULES.time)}`;
+    const n = steps.length;
+    return `<div class="hv-pin"><div class="hv-pos"><b>${n} creature${n === 1 ? "" : "s"} ready</b><small>${checks} check${checks === 1 ? "" : "s"}</small><span class="sp"></span>${practice}${rule(HARVEST_RULES.run)}</div>
+      <p class="hv-tell">${tell}</p><button type="button" class="primary" data-act="start">${this.practice ? "Start practice run" : "Start harvest"}: ${n} creature${n === 1 ? "" : "s"}</button></div>`;
   }
 
   #foot() {
-    if (this.tab === "dcs") return `<div class="kgr-sh-foot"><button type="button" data-act="reset-dcs" ${this.request ? "disabled" : ""}>Reset to defaults</button></div>`;
-    if (this.request) return `<div class="kgr-sh-foot"><button type="button" data-act="cancel-request">Cancel the rolls</button><span class="kgr-sh-sp"></span></div>`;
+    if (this.tab === "dcs") return `<div class="kgr-sh-foot"><button type="button" data-act="reset-dcs" ${this.running ? "disabled" : ""}>Reset to defaults</button></div>`;
+    if (this.running) return `<div class="kgr-sh-foot"><button type="button" data-act="call-off">Call off the harvest</button><span class="kgr-sh-sp"></span></div>`;
     const fresh = this.#newOnScene();
     return `<div class="kgr-sh-foot"><span class="kgr-sh-sp"></span><button type="button" data-act="scan" ${fresh ? "" : "disabled"}>Add downed creatures${fresh ? ` (${fresh} new)` : ""}</button></div>`;
   }
@@ -330,23 +285,21 @@ export class HarvestWindow {
     if (act === "lock") { await toggleLocked("harvest"); return this.render(); }
     if (act === "min") { this.min = !this.min; return this.render(); }
     if (act === "fold" && c) { this.openId = this.openId === c.id ? null : c.id; return this.render(); }
+    if (act === "show-run") { this.runner.min = false; return this.runner.render(); }
+    if (act === "call-off") { this.runner.end(); ui.notifications.info("KG Realms: the harvest was called off. Parts already confirmed were kept; no time passed."); return this.render(); }
     if (this.#lockedOut(act)) return;
     if (act === "unassign" && c) { if (b.dataset.role === "leader") { c.crew.leader = c.crew.helper; c.crew.helper = null; } else c.crew.helper = null; return this.render(); }
     if (act === "remove" && c) { this.creatures = this.creatures.filter((x) => x !== c); return this.render(); }
     if (act === "scan") { this.#scan(); return this.render(); }
-    if (act === "practice-run") return this.#practiceRun();
-    if (act === "request") return this.#request();
-    if (act === "roll-for") return this.#rollFor(b.dataset.actor);
-    if (act === "cancel-request") { this.#endRequest(); ui.notifications.info("KG Realms: the harvest rolls were called off. Nothing was harvested."); return this.render(); }
-    if (act === "finish") return this.#finish();
+    if (act === "start") return this.#begin();
     if (act === "save-dcs") return this.#saveDcs();
     if (act === "reset-dcs") { await game.settings.set(MODULE_ID, "harvestDCs", {}); ui.notifications.info("KG Realms: harvest DCs are back to their defaults."); return this.render(); }
   }
 
-  /** While the rolls are out, who harvests what is fixed. */
+  /** While a harvest is under way, who harvests what is fixed. */
   #lockedOut(act) {
-    if (!this.request || !["unassign", "remove", "skill", "pick", "assign", "add", "practice", "save-dcs", "reset-dcs"].includes(act)) return false;
-    ui.notifications.warn("KG Realms: the rolls are out. Cancel the rolls to change who harvests what.");
+    if (!this.running || !["unassign", "remove", "skill", "pick", "assign", "add", "practice", "start", "save-dcs", "reset-dcs"].includes(act)) return false;
+    ui.notifications.warn("KG Realms: a harvest is under way. Finish it or call it off to change who harvests what.");
     return true;
   }
 
@@ -405,130 +358,36 @@ export class HarvestWindow {
     ui.notifications.warn("KG Realms: drop a creature (an Actor) or a player from the party here.");
   }
 
-  /* ------------------------------------------------------------------ the rolls */
+  /* ------------------------------------------------------------------ the harvest */
 
-  /** Ask the players for their checks: each gets their own in a Harvest checks panel. */
-  async #request() {
-    const { plan, checks } = this.#plan();
-    if (!plan.length) return;
-    this.request = { session: foundry.utils.randomID(), plan, checks };
-    this.#emitAsk();
-    const offline = [...new Set(checks.map((c) => c.actor))].filter((id) => !playersOf(game.actors.get(id)).length).map((id) => first(game.actors.get(id)?.name));
-    ui.notifications.info(`KG Realms: harvest rolls sent to the players.${offline.length ? ` No player online for ${offline.join(", ")}: roll for them in the harvest window.` : ""}`);
-    this.render();
-  }
-  /** (Again, for a player who reloads: their panel comes back with what they still have to roll.) */
-  #emitAsk() {
-    const r = this.request;
-    if (!r) return;
-    const dc = showDC();
-    game.socket.emit(HARVEST_SOCKET, { type: "harvest-ask", session: r.session, gm: game.user.id, scene: game.scenes.get(this.sceneId)?.name ?? "", checks: r.checks.filter((c) => c.total == null).map((c) => ({ id: c.id, actor: c.actor, skill: c.skill, dc: dc ? c.dc : null, role: c.role, part: c.part, creature: c.creature })) });
-  }
-  #endRequest() {
-    if (this.request) game.socket.emit(HARVEST_SOCKET, { type: "harvest-close", session: this.request.session });
-    this.request = null;
+  /** Start the harvest (or a practice run) in the harvest's steps. */
+  #begin() {
+    const steps = this.#steps();
+    if (!steps.length) return;
+    this.runner.start({ steps, practice: this.practice, scene: game.scenes.get(this.sceneId)?.name ?? "" });
   }
 
-  /** A message from a player: a roll in this request (from a user who owns the actor), or a request to be asked again. */
-  receive(m, userId) {
-    const r = this.request;
-    if (!r) return;
-    if (m?.type === "harvest-again") return this.#emitAsk();
-    if (m?.type !== "harvest-roll" || m.session !== r.session) return;
-    const user = game.users.get(userId ?? m.user);
-    const ch = r.checks.find((c) => c.id === m.id), actor = ch ? game.actors.get(ch.actor) : null;
-    if (!ch || ch.total != null || !Number.isFinite(m.total) || !actor || !user || !actor.testUserPermission(user, "OWNER")) return;
-    ch.total = m.total;
-    this.render();
-  }
-
-  /** The GM rolls a player's remaining checks (no player online, or they can't), with the system's cards. */
-  async #rollFor(actorId) {
-    const r = this.request, actor = game.actors.get(actorId);
-    if (!r || !actor || this.busy) return;
-    this.busy = true; this.render();
-    try {
-      for (const ch of r.checks.filter((c) => c.actor === actorId && c.total == null)) {
-        const total = await systemRoll(actor, ch.skill, { dc: ch.dc, flavor: `Harvest: ${ch.part} (${ch.creature}), ${HARVEST_SKILLS[ch.skill].label}` });
-        if (total == null) break;
-        ch.total = total;
+  /** The harvest is done: log it; a real one also gets its card, its journal page and the clock moving on. */
+  async #finished(entries, seconds, practice) {
+    const when = this.hud?.dateText?.(game.time.worldTime) ?? "";
+    if (!practice && entries.length) {
+      const html = this.#report(entries, seconds);
+      await ChatMessage.create({ content: html, speaker: { alias: "Harvest" }, whisper: game.users.filter((u) => u.isGM).map((u) => u.id) });
+      await this.#journal(html).catch((err) => { console.warn(`${MODULE_ID} | harvest journal:`, err); ui.notifications.warn("KG Realms: the harvest is done, but the Harvests journal could not be written. See the console (F12)."); });
+      if (seconds > 0) {
+        await this.hud?.holdFor?.(seconds, "harvest");
+        await game.time.advance(seconds);
       }
-      game.socket.emit(HARVEST_SOCKET, { type: "harvest-rolled", session: r.session, done: r.checks.filter((c) => c.total != null).map((c) => c.id) });
-    } finally { this.busy = false; this.render(); }
-  }
-
-  /** Every roll in: the parts, the clock and the log. */
-  async #finish() {
-    const r = this.request;
-    if (!r || r.checks.some((c) => c.total == null) || this.busy) return;
-    this.busy = true; this.render();
-    try {
-      const totals = Object.fromEntries(r.checks.map((c) => [c.id, c.total]));
-      await this.#resolve(r.plan, (id) => totals[id], false);
-      this.#endRequest();
-      this.tab = "log";
-    } catch (err) {
-      console.error(`${MODULE_ID} | harvest failed:`, err);
-      ui.notifications.error(`KG Realms: the harvest failed: ${err.message}. See the console (F12).`);
-    } finally { this.busy = false; this.render(); }
-  }
-
-  /** A practice run: every check rolled quietly here, nothing applied. */
-  async #practiceRun() {
-    if (this.busy) return;
-    const { plan, checks } = this.#plan();
-    if (!plan.length) return;
-    this.busy = true; this.render();
-    try {
-      const totals = {};
-      for (const ch of checks) totals[ch.id] = await systemRoll(game.actors.get(ch.actor), ch.skill, { chat: false });
-      await this.#resolve(plan, (id) => totals[id], true);
-      this.tab = "log";
-    } catch (err) {
-      console.error(`${MODULE_ID} | practice harvest failed:`, err);
-      ui.notifications.error(`KG Realms: the practice run failed: ${err.message}. See the console (F12).`);
-    } finally { this.busy = false; this.render(); }
-  }
-
-  /** Work out a harvest from its rolls (totalOf(checkId)); a real one gives, marks, logs and moves the clock. */
-  async #resolve(plan, totalOf, practice) {
-    const at = game.time.worldTime, entries = [];
-    for (const c of plan) {
-      const lead = game.actors.get(c.lead.id), help = c.help ? game.actors.get(c.help.id) : null;
-      if (!lead) throw new Error(`${c.name}'s leader is no longer in the world`);
-      const rows = c.parts.map((p) => {
-        const helpRoll = help ? { total: totalOf(`${c.cid}|${p.key}|help`), dc: p.dcHelp } : null;
-        const check = harvestCheck(totalOf(`${c.cid}|${p.key}|lead`), helpRoll, p.dcLead), y = harvestYield(p, check, rollAmount(p.dice));
-        return { part: p.key, kind: p.part, name: p.name, perLb: p.perLb, roll: check.total, helped: check.helped, dc: p.dcLead, outcome: y.outcome, qty: y.qty, cut: y.name, gp: y.qty * y.unitGp * this.priceScale, yield: { ...y, part: p.part, unitGp: y.unitGp * this.priceScale, at }, by: lead.name };
-      });
-      entries.push({ creature: c.cid, tokenId: c.tokenId, name: c.name, leader: lead.name, helper: help?.name ?? null, leadActor: lead, rows, minutes: workMinutes(c.parts), practice });
     }
-    const seconds = Math.max(0, ...Object.values(this.#shares(plan))) * 60, when = this.hud?.dateText?.(at) ?? "";
-    if (!practice) await this.#apply(entries, seconds);
-    for (const e of entries) { delete e.leadActor; this.log.push(e); }
+    for (const e of entries) this.log.push(e);
     this.runs.push({ practice, when, minutes: seconds / 60, entries, gp: entries.reduce((s, e) => s + e.rows.reduce((t, r) => t + (r.outcome === "got" ? r.gp : 0), 0), 0) });
-  }
-
-  /** A real harvest: the parts to each leader, the parts marked on the tokens, the card, the journal, the clock. */
-  async #apply(entries, seconds) {
-    for (const e of entries) {
-      for (const r of e.rows) if (r.qty) await giveYield(e.leadActor, r.yield);
-      const token = e.tokenId ? canvas.scene?.tokens.get(e.tokenId) : null;
-      const marks = Object.fromEntries(e.rows.filter((r) => r.outcome !== "nothing").map((r) => [r.part, { outcome: r.outcome, qty: r.qty, by: r.by }]));
-      if (token && Object.keys(marks).length) await token.setFlag(MODULE_ID, "harvested", { ...(token.getFlag(MODULE_ID, "harvested") ?? {}), ...marks });
-    }
-    const html = this.#report(entries, seconds);
-    await ChatMessage.create({ content: html, speaker: { alias: "Harvest" }, whisper: game.users.filter((u) => u.isGM).map((u) => u.id) });
-    await this.#journal(html).catch((err) => { console.warn(`${MODULE_ID} | harvest journal:`, err); ui.notifications.warn("KG Realms: the harvest is done, but the Harvests journal could not be written. See the console (F12)."); });
-    if (seconds > 0) {
-      await this.hud?.holdFor?.(seconds, "harvest");
-      await game.time.advance(seconds);
-    }
+    this.tab = "log";
+    this.render();
   }
 
   #report(entries, seconds) {
     const total = entries.reduce((s, e) => s + e.rows.reduce((t, r) => t + (r.outcome === "got" ? r.gp : 0), 0), 0);
-    const one = (e) => `<p><b>${esc(e.name)}</b>: ${esc(e.leader)} leads${e.helper ? `, ${esc(e.helper)} helps` : ""}.</p><ul>${e.rows.map((r) => `<li>${esc(r.name)}: ${r.roll} against DC ${r.dc}. ${esc(this.#outcomeText(r))}.</li>`).join("")}</ul>`;
+    const one = (e) => `<p><b>${esc(e.name)}</b>: ${esc(e.leader)} leads${e.helper ? `, ${esc(e.helper)} helps` : ""}.</p><ul>${e.rows.map((r) => `<li>${esc(r.name)}: ${r.roll === "GM" ? `ruled a ${r.ruling?.success ? "success" : "failure"} by the GM${r.ruling?.reason ? ` (${esc(r.ruling.reason)})` : ""}` : `${r.roll} against DC ${r.dc}`}. ${esc(outcomeText(r))}.</li>`).join("")}</ul>`;
     return `<div class="kgr-harvest-card"><p><i class="fa-solid fa-scissors"></i> <b>Harvest</b>, ${esc(this.hud?.dateText?.(game.time.worldTime) ?? "")}. Took ${minutesText(seconds / 60)}, worth ${coins(total)}.</p>${entries.map(one).join("")}</div>`;
   }
 
@@ -541,103 +400,4 @@ export class HarvestWindow {
     if (page) return page.update({ "text.content": `${page.text?.content ?? ""}${html}` });
     return entry.createEmbeddedDocuments("JournalEntryPage", [{ name: day, type: "text", text: { content: html, format: 1 } }]);
   }
-}
-
-/**
- * A player's Harvest checks panel: the checks the GM asked of their characters, each with its bonus
- * (and DC, when players may see it). Each roll is the system's own, with its chat card; the total goes
- * to the GM. It closes when the GM harvests or calls the rolls off.
- */
-export class HarvestChecks {
-  constructor() { this.el = null; this.ask = null; }
-
-  receive(m, userId) {
-    if (game.user.isGM) return;
-    if (m?.type === "harvest-ask") {
-      const mine = (m.checks ?? []).filter((c) => game.actors.get(c.actor)?.isOwner);
-      if (!mine.length) return;
-      const kept = this.ask?.session === m.session ? this.ask.checks : [];
-      this.ask = { session: m.session, gm: userId ?? m.gm, scene: m.scene, checks: mine.map((c) => kept.find((k) => k.id === c.id) ?? { ...c, total: null }) };
-      if (!kept.length) ui.notifications.info("KG Realms: the GM asks for harvest checks.");
-      return this.render();
-    }
-    if (!this.ask || m?.session !== this.ask.session) return;
-    if (m.type === "harvest-close") return this.close();
-    // The GM rolled some for us.
-    if (m.type === "harvest-rolled") { for (const c of this.ask.checks) if (m.done?.includes(c.id) && c.total == null) c.total = "GM"; return this.render(); }
-  }
-
-  close() { this.el?.remove(); this.el = null; this.ask = null; }
-
-  render() {
-    if (!this.ask) return this.close();
-    if (!this.el) {
-      this.el = document.createElement("section");
-      this.el.className = "kgr-ui kgr-panel kgr-harvest-checks";
-      document.body.append(this.el);
-      movable(this.el, "harvest-checks", { redock: () => this.#place() });
-      this.el.addEventListener("click", (e) => this.#click(e));
-    }
-    const left = this.ask.checks.filter((c) => c.total == null);
-    const rows = this.ask.checks.map((c) => {
-      const a = game.actors.get(c.actor), bonus = skillMod(a, c.skill);
-      const done = c.total != null;
-      return `<div class="kgr-sh-row hv-ask ${done ? "on" : ""}"><img src="${esc(a?.img)}" alt=""><div class="kgr-sh-main"><b>${esc(c.part)}</b><small>${esc(first(a?.name))} ${esc(c.role)} · ${esc(c.creature)}</small></div>
-        ${done ? `<span class="hv-rolled">${c.total === "GM" ? "GM rolled" : `Rolled ${c.total}`}</span>` : `<button type="button" data-act="roll" data-id="${esc(c.id)}"><i class="fa-solid fa-dice-d20"></i> ${esc(HARVEST_SKILLS[c.skill]?.label ?? c.skill)} (${signed(bonus)})${c.dc != null ? ` · DC ${c.dc}` : ""}</button>`}</div>`;
-    }).join("");
-    this.el.innerHTML = shellHead({ icon: "fa-scissors", eyebrow: "Harvest checks", title: this.ask.scene || "Harvest", lock: { attr: 'data-act="lock"', on: isLocked("harvest-checks") } })
-      + `<div class="hv-body">${rows}</div><div class="hv-pin"><p class="hv-tell">${left.length ? `${left.length} check${left.length === 1 ? "" : "s"} to roll. Each one is the system's own roll, with its card in the chat.` : "All rolled. The GM finishes the harvest."}</p><button type="button" class="primary" data-act="roll-all" ${left.length && !this.busy ? "" : "disabled"}>${this.busy ? "Rolling…" : left.length ? `Roll all ${left.length}` : "Waiting for the GM"}</button></div>`;
-    this.el.classList.toggle("locked", isLocked("harvest-checks"));
-    this.#place();
-  }
-
-  #place() {
-    if (!this.el || placeKept(this.el, "harvest-checks")) return;
-    const b = uiBounds((el) => el === this.el || this.el.contains(el));
-    Object.assign(this.el.style, { left: `${b.left + 12}px`, top: `${b.top + 12}px` });
-  }
-
-  async #click(ev) {
-    const b = ev.target.closest("[data-act]");
-    if (!b || this.busy) return;
-    if (b.dataset.act === "lock") { await toggleLocked("harvest-checks"); return this.render(); }
-    if (b.dataset.act === "roll") return this.#roll([this.ask.checks.find((c) => c.id === b.dataset.id)], true);
-    if (b.dataset.act === "roll-all") return this.#roll(this.ask.checks.filter((c) => c.total == null), false);
-  }
-
-  /** Roll checks (dialog: the system's roll dialog for one; Roll all goes straight through) and send each total to the GM. */
-  async #roll(list, dialog) {
-    this.busy = true; this.render();
-    try {
-      for (const c of list) {
-        if (!c || c.total != null) continue;
-        const actor = game.actors.get(c.actor);
-        if (!actor?.isOwner) continue;
-        const flavor = `Harvest: ${c.part} (${c.creature}), ${HARVEST_SKILLS[c.skill]?.label ?? c.skill}`;
-        const total = dialog ? await systemRoll(actor, c.skill, { dc: c.dc, flavor }) : await fastRoll(actor, c.skill, c.dc, flavor);
-        if (total == null) break;
-        c.total = total;
-        game.socket.emit(HARVEST_SOCKET, { type: "harvest-roll", session: this.ask.session, id: c.id, total, user: game.user.id });
-      }
-    } catch (err) {
-      console.error(`${MODULE_ID} | harvest check:`, err);
-      ui.notifications.error(`KG Realms: the harvest check did not roll: ${err.message}`);
-    } finally { this.busy = false; this.render(); }
-  }
-
-  /** On joining (or reloading) while the GM has rolls out: ask to be sent them again. */
-  static askAgain() { game.socket.emit(HARVEST_SOCKET, { type: "harvest-again", session: null, user: game.user.id }); }
-}
-
-/** The system's roll with its chat card but no dialog (Roll all). */
-async function fastRoll(actor, skill, dc, flavor) {
-  try {
-    if (foundry.utils.isNewerVersion(game.system.version, "3.99")) {
-      const r = await actor.rollSkill({ skill, ...(dc != null ? { target: dc } : {}) }, { configure: false }, { data: { flavor } });
-      const roll = Array.isArray(r) ? r[0] : r;
-      return Number.isFinite(roll?.total) ? roll.total : null;
-    }
-    const roll = await actor.rollSkill(skill, { fastForward: true, ...(dc != null ? { targetValue: dc } : {}), flavor });
-    return Number.isFinite(roll?.total) ? roll.total : null;
-  } catch { return systemRoll(actor, skill, { dc, flavor }); }
 }
