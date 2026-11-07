@@ -1,8 +1,12 @@
 **Disclaimer, this module was coded entirely with AI**
+
 **The Ideas, UX/UI, functionality decisions, and testing however were all done by human ass hands**
+
 **Sub Disclaimer** - AI wont stop messing with my handwritten text however, no matter how hard i try. BAD MACHINE SPIRITS.
 
 # KG Realms
+
+<img width="1580" height="1136" alt="image" src="https://github.com/user-attachments/assets/c18f6c66-5c9e-49ad-93f5-5ff995b18993" />
 
 Travel maps for Foundry VTT v13 and v14 (D&D 5e). A realm map holds places, roads, rivers, sea lanes, areas and biomes. Parties plan and run journeys on it, with camps, watches, encounters, weather, day and night, seasons, and settlement maps they can walk or ride through.
 
