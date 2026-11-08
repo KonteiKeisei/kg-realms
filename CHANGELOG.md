@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.96.3: players draw the GM's route instead of working it out
+
+- During a journey, the GM's client works out the route (roads, sea passages, timing) and saves the finished plan with the journey, once, whenever it changes. Players' clients draw that plan instead of working out the whole route again themselves on every route or timing change. With no GM online, players work it out as before.
+- While a route change is on its way from the GM, players briefly see no route line instead of working it out.
+
 ## 0.96.2: skipping ahead moves the party at once
 
 - When the clock moves the journey on (skipping to the next camp or encounter, say), the party's tokens move first. The party members' biome flags, the scene's weather and a hazard found now run alongside the move instead of one round trip to the server after another, with the tokens waiting behind them all.

@@ -1579,7 +1579,7 @@ Hooks.on("updateScene", (scene, changes) => {
   const own=changes.flags?.[MODULE_ID]??{};
   if('partyFocus' in own && (scene===canvas.scene||scene.id===hud.scene?.id)){hud.mount();syncJourney(scene,{force:true});return;}
   if('partyJourneys' in own){
-    if((scene===canvas.scene||scene.id===hud.scene?.id)&&hud.el){const change=own.partyJourneys?.[hud.scene.partyId];if(change){if(needsRouteRefresh(change))hud.refresh();else if(Object.keys(change).some(k=>k!=='now'))hud.refreshProgress();else hud.tick();}else hud.render();}
+    if((scene===canvas.scene||scene.id===hud.scene?.id)&&hud.el){const change=own.partyJourneys?.[hud.scene.partyId];if(change){if(needsRouteRefresh(change)||(!game.user.isGM&&'sharedPlan' in change))hud.refresh();else if(Object.keys(change).some(k=>k!=='now'))hud.refreshProgress();else hud.tick();}else hud.render();}
     if(isPrimaryGM()&&Object.values(own.partyJourneys??{}).some(v=>Object.keys(v??{}).some(k=>k!=='now')))syncJourney(scene);
     refreshEncounterBox();return;
   }
@@ -1592,7 +1592,8 @@ Hooks.on("updateScene", (scene, changes) => {
   if ((scene === canvas.scene || scene.id===hud.scene?.id) && foundry.utils.hasProperty(changes, `flags.${MODULE_ID}.journey`)) {
     // The GM's progress note alone needs a redraw, not a new plan.
     const j = changes.flags[MODULE_ID].journey ?? {};
-    if (needsRouteRefresh(j)) return hud.refresh();
+    // A player picks up the route the GM's client saved (0.96.3).
+    if (needsRouteRefresh(j) || (!game.user.isGM && "sharedPlan" in j)) return hud.refresh();
     return Object.keys(j).some((k) => ["encounters", "trip", "rest"].includes(k)) ? hud.refreshProgress() : hud.tick();
   }
   if (scene === canvas.scene && flagsNeedRedraw(own)) drawRegion();

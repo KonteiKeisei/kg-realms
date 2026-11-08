@@ -383,7 +383,18 @@ export class TravelHud {
     let currentFeet, walking = null;
     // The last route stays in place while the new one is worked out (the travel log reads it meanwhile).
     let result = null;
-    if (this.stops().length > 1) {
+    // A player uses the route the GM's client worked out and saved with the journey (0.96.3), instead
+    // of working out roads, sea passages and timing again. Undefined: no GM online, work it out here.
+    const fromGM = this.stops().length > 1 ? this.#sharedPlan(s) : undefined;
+    if (fromGM !== undefined) {
+      const grid = await this.getTerrain();
+      if (generation !== this.refreshGeneration || this.scene !== scene || this.el !== element) return;
+      this.#buildSea(grid);
+      this.prepareBiomes(grid);
+      this.regionalSnapshot = null;
+      this.routeFeet = this.speed().feet;
+      result = fromGM;
+    } else if (this.stops().length > 1) {
       const routes = this.getRoutes();
       if (this.graphFor !== routes) {
         // Roads are named from the map's road and trail labels.
@@ -479,8 +490,18 @@ export class TravelHud {
       }
     }
     const r = this.result = result;
+    // The GM's client saves the finished route with the journey, once, for the players (0.96.3).
+    if (r && s.trip && fromGM === undefined && this.leader && !this.draft && this.canSync?.() !== false) {
+      const key = this.#planKey(s), json = JSON.stringify(r), had = s.sharedPlan;
+      if (had?.key !== key || had?.json !== json) {
+        // Best effort: if it can't be saved, players work the route out themselves as before.
+        try { await writeJourney(scene, () => ({ sharedPlan: { key, json } }), { trip: journeyKey(s), valid: () => this.scene === scene && generation === this.refreshGeneration && this.leader && !this.draft }); }
+        catch (err) { console.warn("kg-realms | sharing the route with the players:", err); }
+        if (generation !== this.refreshGeneration || this.scene !== scene) return;
+      }
+    }
     // Stops with no way between them: the panel says so, and still lists the stops.
-    this.noRoute = this.stops().length > 1 && !result;
+    this.noRoute = this.stops().length > 1 && !result && fromGM === undefined;
     this.resultTrip = journeyKey(this.state);
     this.appliedWalking = JSON.stringify(this.state.trip?.walking ?? null);
     this.appliedBiomeTravel = JSON.stringify(this.state.trip?.biomeTravel ?? null);
@@ -524,6 +545,22 @@ export class TravelHud {
     }
     await this.tick({ force: true });
     if (!this.leader && this.state.trip) this.onSyncNeeded?.(scene.id);
+  }
+
+  /** What a route plan was worked out for, as players can see it too: the journey and its route. */
+  #planKey(s) {
+    return JSON.stringify([journeyKey(s), this.stops().map((w) => [w.lon, w.lat]), s.waypoints, s.stays, s.legModes, s.legMethods, s.legVessels, s.legWays, s.method, s.methodMph, s.coachMph, s.pace, s.hours]);
+  }
+  /**
+   * A player's route from the GM's client (0.96.3): the saved plan when it was worked out for the
+   * route as it stands; null while a newer one is on its way from an online GM; undefined to work it
+   * out here (the GM's own client, or no GM online).
+   */
+  #sharedPlan(s) {
+    if (game.user.isGM || !s.trip || !Array.from(game.users ?? []).some((u) => u.active && u.isGM)) return undefined;
+    const shared = s.sharedPlan;
+    if (!shared?.json || shared.key !== this.#planKey(s)) return null;
+    try { return JSON.parse(shared.json); } catch { return undefined; }
   }
 
   /** Camp state changes reuse the route, graph, terrain and route sheet. */
