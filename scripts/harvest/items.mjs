@@ -99,6 +99,54 @@ export async function provision(actors, capacity, rationUuid) {
 /** Pounds of harvested food an actor carries. */
 export const foodOn = (actor) => actor.items.filter(isFood).reduce((s, i) => s + (Number(i.system?.quantity) || 0), 0);
 
+/** Whether an item is the world's ration item (by its source, or its name and type). src: the ration item or its index entry. */
+export const isRation = (item, uuid, src) => (!!uuid && (item._stats?.compendiumSource === uuid || item.getFlag?.("core", "sourceId") === uuid)) || (!!src && item.name === src.name && item.type === src.type);
+/** How many rations an actor carries. */
+export const rationsOn = (actor, uuid, src) => actor.items.filter((i) => isRation(i, uuid, src)).reduce((s, i) => s + (Number(i.system?.quantity) || 0), 0);
+/** Whether a character eats: Rest Recovery's "no food or water" trait (flags.dnd5e.noFoodWater) says they don't. */
+export const eats = (actor) => !foundry.utils.getProperty(actor ?? {}, "flags.dnd5e.noFoodWater");
+
+/**
+ * Even shares of everyone's rations: [{ id, n }] → { id: rations }. The total stays the same; what
+ * doesn't divide evenly goes one each to whoever had fewest (the list's order breaks ties).
+ */
+export function evenShares(list) {
+  const total = list.reduce((s, x) => s + (x.n || 0), 0), n = list.length;
+  if (!n) return {};
+  const base = Math.floor(total / n);
+  let extra = total - base * n;
+  return Object.fromEntries(list.map((x, i) => ({ ...x, i })).sort((a, b) => (a.n || 0) - (b.n || 0) || a.i - b.i).map((x) => [x.id, base + (extra-- > 0 ? 1 : 0)]));
+}
+
+/**
+ * Share the rations these actors carry equally among them (the GM runs it). Each ends with one stack
+ * of the world's ration item. Returns { total, people, moved, shares: [{ name, from, to }] }.
+ */
+export async function shareRations(actors, uuid) {
+  const src = uuid ? await fromUuid(uuid).catch(() => null) : null;
+  if (!src) throw new Error("the ration item is not set (Advanced watches settings)");
+  const list = actors.map((a) => ({ id: a.id, actor: a, n: rationsOn(a, uuid, src) }));
+  const shares = evenShares(list);
+  let moved = 0;
+  for (const x of list) {
+    const want = shares[x.id], items = x.actor.items.filter((i) => isRation(i, uuid, src));
+    if (want > x.n) moved += want - x.n;
+    if (want === x.n && items.length <= 1) continue;
+    if (!items.length) {
+      const data = src.toObject();
+      data.system = { ...(data.system ?? {}), quantity: want };
+      data._stats = { ...(data._stats ?? {}), compendiumSource: uuid };
+      await x.actor.createEmbeddedDocuments("Item", [data]);
+      continue;
+    }
+    const [first, ...rest] = items;
+    if (rest.length) await x.actor.deleteEmbeddedDocuments("Item", rest.map((i) => i.id));
+    if (want > 0) await first.update({ "system.quantity": want });
+    else await first.delete();
+  }
+  return { total: list.reduce((s, x) => s + x.n, 0), people: list.length, moved, shares: list.map((x) => ({ name: x.actor.name, from: x.n, to: shares[x.id] })) };
+}
+
 async function addRations(actor, src, uuid, n) {
   const have = actor.items.find((i) => i._stats?.compendiumSource === uuid || i.getFlag?.("core", "sourceId") === uuid || (i.name === src.name && i.type === src.type));
   if (have) return have.update({ "system.quantity": (Number(have.system?.quantity) || 0) + n });

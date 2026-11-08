@@ -1,5 +1,23 @@
 # KG Realms changelog
 
+## 0.96.7-harvest-test: route edits during a journey keep the way travelled, and wait until you're done (test build, not released)
+
+- The way the party has already travelled can't change. Adding a stop to the leg they're on (or moving or removing its end, or changing how that leg is travelled) first puts a stop where the party stands now, so the leg so far ends there as it was and the edit applies only to the way on. Before, the leg was worked out again from where it began, which could be days back, and the party's token moved onto the new line.
+- Edits to anything already behind the party are refused with a message, including clicking the route behind them.
+- While the GM edits the route (or the journey's encounters), the changes are worked out and drawn on the GM's screen only. The players get the finished route once, when editing ends, instead of on every click. Before, each click saved to the scene and every connected client worked out the whole route again, sea routes included, which made editing during play lag.
+- Setting off, or anything else that saves the journey, sends the edited route first.
+
+## 0.96.6-harvest-test: Rest Recovery asks for food; a downtime reminder (test build, not released)
+
+- A camp's rest is now always a new day for Rest Recovery, so its long rest asks each character for food and water and runs its daily recovery. Before, a rest that began and ended on one calendar date (05:04 to 13:04, say) was sent as no new day, and Rest Recovery skipped food and water.
+- Downtime reminder: when a camp reaches Setup camp, each player with a character in the party gets a small window, once per camp, to roll their downtime and say what they are doing. Tell the GM whispers it to the GM. A world setting, Camp: downtime reminder, turns it off.
+
+## 0.96.5-harvest-test: share Provisioning's rations equally (test build, not released)
+
+- After a Provisioning success, the camp step shows Share the rations: each party member with a checkbox and how many rations they carry, and one button, Share rations equally. Any player with a character in the party can press it or change the ticks; the GM's client does the sharing.
+- Everyone ticked ends with an equal share of the rations they carry between them. What doesn't divide evenly goes one each to whoever had fewest.
+- Anyone who doesn't eat (Rest Recovery's no food or water trait, `flags.dnd5e.noFoodWater`) starts unticked. Any member can be ticked or unticked by hand.
+
 ## 0.96.4-harvest-test: the party sets up each creature; the harvest window moves (test build, not released)
 
 - Each creature's step in the harvest now has Who and what: who leads, who helps, each one's skill, and which parts to take. The GM or any player with a character in the party can change it, on everyone's screen, until the GM requests that creature's rolls. The next creature can be set up differently.

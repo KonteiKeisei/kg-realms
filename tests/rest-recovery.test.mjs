@@ -9,12 +9,16 @@ test("a completed camp requests one party rest without advancing time or changin
     activeProfile: "Wilderness",
     promptRest(ids, longRest, newDay) { calls.push({ ids, longRest, newDay }); return true; }
   };
-  const calendar = { timeToComponents: (time) => ({ year: 1492, month: 3, dayOfMonth: time < 8 ? 12 : 13 }) };
-  assert.equal(promptCompletedCampRest(api, [{ id: "a" }, { id: "b" }, { id: "a" }], { start: 2, end: 10, calendar }), true);
+  assert.equal(promptCompletedCampRest(api, [{ id: "a" }, { id: "b" }, { id: "a" }]), true);
   assert.deepEqual(calls, [{ ids: ["a", "b"], longRest: true, newDay: true }]);
   assert.equal(api.activeProfile, "Wilderness");
-  assert.equal(promptCompletedCampRest(api, [{ id: "a" }], { start: 2, end: 5, calendar }), true);
-  assert.equal(calls[1].newDay, false);
+});
+
+test("a camp rest within one calendar date is still a new day, so Rest Recovery asks for food and water", () => {
+  const calls = [];
+  const api = { promptRest(ids, longRest, newDay) { calls.push(newDay); return true; } };
+  promptCompletedCampRest(api, [{ id: "a" }], { start: 2, end: 5 });
+  assert.deepEqual(calls, [true]);
 });
 
 test("an unavailable Rest Recovery API or empty party does not request a rest", () => {

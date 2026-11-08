@@ -28,6 +28,7 @@ import { journeyKey, progressKey, snapshotNeeded } from "./journey-state.mjs";
 import { captureScroll, restoreScroll } from "./panel-scroll.mjs";
 import { shellHead, foldCaret } from "./ui-shell.mjs";
 import { writeJourney } from "./journey-write.mjs";
+import { keepTravelled } from "./route-pin.mjs";
 import { walkingHistory, retimeWalking, baseTravelHour } from "./walking-timing.mjs";
 import { biomeLookup, biomeFlag, syncPartyBiome, freezeBiomeTravel, biomeTypes } from "./biomes.mjs";
 import { partyFavoredBiomes } from "./favored-terrain.mjs";
@@ -127,7 +128,8 @@ export class TravelHud {
     if (!on && this.refreshPending) return this.refresh();
   }
   get scene() { return this.getScene?.() ?? canvas.scene; }
-  get state() { return { ...DEFAULT, ...(this.scene?.getFlag(MODULE_ID, "journey") ?? {}), ...(this.scene?.partyId?{partyId:this.scene.partyId}:{}) }; }
+  // The GM's route edits in progress (0.96.7) sit on top of the saved journey on this client only.
+  get state() { const scene = this.scene; return { ...DEFAULT, ...(scene?.getFlag(MODULE_ID, "journey") ?? {}), ...(this.draft && this.draftScene === scene ? this.draft : {}), ...(scene?.partyId?{partyId:scene.partyId}:{}) }; }
   get clock() { return game.time.worldTime; }
   /** The GM who moves the tokens and asks the questions (one, when several are on). */
   get leader() { return isPrimaryGM(); }
@@ -146,8 +148,25 @@ export class TravelHud {
 
   async save(changes, { undoable = true, scene = this.scene, expectedTrip = journeyKey(this.state), expectedCamp = undefined } = {}) {
     if (!this.leader || !scene) return;
-    const state = { ...DEFAULT, ...(scene.getFlag(MODULE_ID, "journey") ?? {}) };
+    const routeOnly = Object.keys(changes).every((k) => ROUTE_KEYS.includes(k));
+    // Anything else (setting off, ending the journey) goes out with the route as edited so far.
+    if (this.draft && !routeOnly) await this.#publishDraft();
+    const state = scene === this.scene ? this.state : { ...DEFAULT, ...(scene.getFlag(MODULE_ID, "journey") ?? {}) };
     if (expectedTrip !== undefined && journeyKey(state) !== expectedTrip) return;
+    // During a journey, the way already travelled can't change (0.96.7).
+    if (scene === this.scene && state.trip && !("trip" in changes) && !("start" in changes) && ["waypoints", ...LEG_KEYS].some((k) => k in changes)) {
+      const where = this.#whereNow();
+      if (where) {
+        const kept = keepTravelled(state, changes, where);
+        if (kept.refused) { ui.notifications.warn("KG Realms: the party has already travelled that part of the route. Only the way ahead can change."); this.draw?.(); this.render?.(); return; }
+        if (kept.pinned) {
+          changes = kept.changes;
+          if (this.selected != null && this.selected >= where.cur) this.selected += 1;
+          if (this.drag && this.drag.i >= where.cur) this.drag.i += 1;
+          ui.notifications.info("KG Realms: a stop now marks where the party is, so the way already travelled stays as it was.");
+        }
+      }
+    }
     // Route edits (stops, legs, stays, the journey's encounters) can be stepped back with Ctrl+Z.
     if (undoable && ROUTE_KEYS.some((k) => k in changes)) {
       const before = Object.fromEntries(ROUTE_KEYS.map((k) => [k, foundry.utils.deepClone(this.state[k] ?? null)]));
@@ -156,7 +175,39 @@ export class TravelHud {
         if (this.history.length > 40) this.history.shift();
       }
     }
+    // While the GM edits the route, the changes stay on this client (worked out and drawn here); the
+    // players get the finished route once, when editing ends, instead of every click (0.96.7).
+    if (this.mode && routeOnly && scene === this.scene) {
+      this.draft = { ...(this.draft ?? {}), ...changes };
+      this.draftScene = scene; this.draftTrip = expectedTrip;
+      return this.refresh();
+    }
     await writeJourney(scene, () => changes, { trip: expectedTrip, campId: expectedCamp });
+  }
+
+  /** Send the route edits held on this client to the scene, for everyone. */
+  async #publishDraft() {
+    const draft = this.draft, scene = this.draftScene, trip = this.draftTrip;
+    this.draft = this.draftScene = this.draftTrip = null;
+    if (!draft || !scene) return;
+    try { await writeJourney(scene, () => draft, { trip }); }
+    catch (err) { console.error("kg-realms | saving the route:", err); ui.notifications.error(`KG Realms: the route edits were not saved: ${err.message}`); }
+  }
+
+  /**
+   * Where the party is on the route now, for a route edit during a journey: on leg `cur` (which ends at
+   * waypoint cur), partway along it (`mid`, with a stop to put there) or at its start. Null before
+   * setting off, after arriving, or with no route worked out.
+   */
+  #whereNow() {
+    const p = this.progress(), ends = this.result?.legEnds ?? [];
+    if (!p || p.status === "arrived" || !ends.length) return null;
+    const hour = p.hour ?? 0, cur = ends.findIndex((h) => h > hour + 1e-6);
+    if (cur < 0) return null;
+    const mid = hour > (cur ? ends[cur - 1] : 0) + 1e-6, here = mid ? this.#at(hour) : null;
+    if (!here) return { cur, mid: false, pin: null };
+    const [lon, lat] = this.toLonLat(here[0], here[1]);
+    return { cur, mid: true, pin: { lon, lat, name: this.placeName(lon, lat), stop: true, pinned: true } };
   }
 
   /** Step the route back one edit. */
@@ -373,7 +424,8 @@ export class TravelHud {
       result = frozen?.key===regionalKey ? structuredClone(frozen.result) : itinerary(this.graph, pts, { segments:network?.segments, stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph });
       this.regionalSnapshot=result&&(network||frozen)?{key:regionalKey,result:JSON.parse(JSON.stringify(result))}:null;
       // A route edit deliberately replans the remaining itinerary; map edits alone use the snapshot.
-      if(s.trip&&frozen&&frozen.key!==regionalKey&&this.leader&&result){
+      // (Not while route edits are held on this client: it is written with the finished route.)
+      if(s.trip&&frozen&&frozen.key!==regionalKey&&this.leader&&result&&!this.draft){
         await writeJourney(scene,()=>({"trip.regionalPlan":this.regionalSnapshot??{key:regionalKey,result:JSON.parse(JSON.stringify(result))}}),{trip:journeyKey(s),valid:()=>this.scene===scene&&generation===this.refreshGeneration});
         if(generation!==this.refreshGeneration||this.scene!==scene)return;
       }
@@ -1883,6 +1935,8 @@ export class TravelHud {
       document.removeEventListener("keydown", this.onKey, { capture: true });
       this.selected = null;
       this.draw();
+      // Editing done: the players get the route now.
+      if (this.draft) this.#publishDraft();
     }
     if (mode) editBar.show(this, this.#barState());
     else editBar.hide(this);
@@ -2128,7 +2182,7 @@ export class TravelHud {
     let best = null, bd = px;
     for (const q of track) {
       const ll = this.toLonLat(q.at[0], q.at[1]), s = layer.toScreen(ll[0], ll[1]), d = Math.hypot(s[0] - g[0], s[1] - g[1]);
-      if (d < bd) { bd = d; best = { at: ll, leg: q.leg }; }
+      if (d < bd) { bd = d; best = { at: ll, leg: q.leg, hour: q.hour }; }
     }
     return best;
   }
@@ -2165,6 +2219,9 @@ export class TravelHud {
     this.#stop(e);
     if (i >= 0) { this.selected = i; this.drag = { i, moved: false }; this.draw(); this.render(); return; }
     const hit = this.#onRoute(g, 10);
+    // Not on the way already travelled (0.96.7).
+    const nowHour = s.trip ? this.progress()?.hour : null;
+    if (hit && nowHour != null && Number.isFinite(hit.hour) && hit.hour <= nowHour + 1e-6) return ui.notifications.warn("KG Realms: the party has already travelled that part of the route. Click the route ahead of them.");
     if (hit) {
       const at = hit.leg, cut = (a, v) => { const x = [...(a ?? [])]; while (x.length < at) x.push(null); x.splice(at, 0, v); return x; };
       this.selected = at;

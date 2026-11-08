@@ -23,7 +23,7 @@ import { ruleTooltip } from "./travel-rules.mjs";
 // Players' changes use their User document; the primary GM validates and writes the journey.
 import { SLEEP, FORAGE, WATCH_HOURS, sleepOf, planWatches, awakeAt, campPhases, campSchedule } from "./camp.mjs";
 import { TASKS, WORK, ALARM_DC, SHIFT_BONUS, leaderWithHelp, concealed, setupWork, pastTaskSummary, provisionPounds } from "./camp-tasks.mjs";
-import { provision, foodOn } from "./harvest/items.mjs";
+import { provision, foodOn, shareRations, rationsOn, eats } from "./harvest/items.mjs";
 import { promptCompletedCampRest } from "./rest-recovery.mjs";
 import { isPrimaryGM } from "./authority.mjs";
 import { journeyKey } from "./journey-state.mjs";
@@ -394,6 +394,13 @@ export class CampPanel {
     if (m.taskSet) {
       const user = sender, actor = game.actors.get(m.taskSet.id);
       if (ids.has(m.taskSet.id) && actor?.testUserPermission?.(user, "OWNER") && this.taskOn(m.taskSet.task)) await put({ tasks: { ...(w.tasks ?? {}), [m.taskSet.id]: m.taskSet.task } });
+      return;
+    }
+    // Sharing Provisioning's rations (0.96.5): anyone with a character in the party, on this camp.
+    if (m.rationShare) {
+      if (scene !== this.hud.scene || !members.some((a) => a.testUserPermission?.(sender, "OWNER"))) return;
+      if (m.rationShare.go) return this.#shareRations();
+      if (ids.has(m.rationShare.id)) return this.#shareWho(m.rationShare.id, !!m.rationShare.on);
       return;
     }
     if (w.gmLock) return;
@@ -1027,6 +1034,8 @@ export class CampPanel {
     // A check asked of this user (or of a character no player is here for, the GM).
     if (act === "roll") return this.#roll(btn.dataset.key);
     if (act === "task-roll") return this.#taskRoll(btn.dataset.key, btn.dataset.id, btn.dataset.skill);
+    // Provisioning's rations shared equally: anyone in the party may press it; the GM's client does it.
+    if (act === "ration-share") return game.user.isGM ? this.#shareRations() : this.request({ rationShare: { go: true } });
     if (!game.user.isGM || (!this.practice && !isPrimaryGM())) return;
     const night = this.prog()?.night, key = btn.dataset.key;
     if (act === "practice-end") return this.endPractice();
@@ -1117,6 +1126,8 @@ export class CampPanel {
       if (actor?.isOwner) return this.request({ taskSet: { id, task: el.value } });
       return;
     }
+    // Who shares Provisioning's rations: anyone in the party may tick or untick.
+    if (act === "ration-share-who") return game.user.isGM ? this.#shareWho(el.dataset.id, el.checked) : this.request({ rationShare: { id: el.dataset.id, on: el.checked } });
     if (!game.user.isGM || (!this.practice && !isPrimaryGM())) return;
     // The practice camp's hours (its clock follows: the first watch on the next hour).
     if (act === "practice-rest") {
@@ -1226,6 +1237,50 @@ export class CampPanel {
       ui.notifications.error(`KG Realms: Provisioning made no rations: ${err.message}.`);
       return { lb: 0, rations: 0, note: `Nothing was preserved: ${err.message}.` };
     }
+  }
+
+  /** Whether a member shares Provisioning's rations: ticked, or by default whoever eats (Rest Recovery's no food or water trait). */
+  #sharesIn(m, c) { const set = c?.shareWho?.[m.id]; return set ?? eats(m.actor); }
+
+  /** Tick or untick a member for sharing the rations (GM). */
+  async #shareWho(id, on) {
+    if (this.practice || (!isPrimaryGM())) return;
+    const night = this.prog()?.night, all = this.#checks(night), c = all.provision;
+    if (!c?.done || !this.members().some((m) => m.id === id)) return;
+    return this.write({ checks: { ...all, provision: { ...c, shareWho: { ...(c.shareWho ?? {}), [id]: on } } } });
+  }
+
+  /** Share the rations of everyone ticked equally among them, fewest first (GM). */
+  async #shareRations() {
+    if (this.practice || !isPrimaryGM()) return;
+    const night = this.prog()?.night, all = this.#checks(night), c = all.provision;
+    if (!c?.done || !(c.result?.rations > 0)) return;
+    const actors = this.members().filter((m) => m.actor && this.#sharesIn(m, c)).map((m) => m.actor);
+    if (actors.length < 2) return ui.notifications.warn("KG Realms: tick at least two people to share the rations.");
+    try {
+      const r = await shareRations(actors, this.#setting("rationItem"));
+      await this.write({ checks: { ...this.#checks(night), provision: { ...c, shared: { ...r, at: this.now } } } });
+      ui.notifications.info(`KG Realms: ${r.total} rations shared among ${r.people}.`);
+    } catch (err) {
+      console.error("kg-realms | sharing rations:", err);
+      ui.notifications.error(`KG Realms: the rations were not shared: ${err.message}.`);
+    }
+  }
+
+  /** After a Provisioning success: who shares, how many each carries, and the one button. */
+  #shareBox(c) {
+    const members = this.members().filter((m) => m.actor), uuid = this.#setting("rationItem");
+    let src = null;
+    try { src = uuid ? fromUuidSync(uuid) : null; } catch { src = null; }
+    const can = game.user.isGM ? isPrimaryGM() : members.some((m) => m.actor.isOwner);
+    const sharing = members.filter((m) => this.#sharesIn(m, c));
+    const rows = members.map((m) => {
+      const on = this.#sharesIn(m, c), noEat = !eats(m.actor), n = rationsOn(m.actor, uuid, src);
+      return `<label class="cs-share-row"><input type="checkbox" data-camp="ration-share-who" data-id="${esc(m.id)}" ${on ? "checked" : ""} ${can ? "" : "disabled"} aria-label="${esc(m.name)} shares the rations">${this.#face(m, 26)}<span class="grow">${esc(m.name)}</span><span class="cs-meta">${noEat ? "Doesn't eat · " : ""}${n} ration${n === 1 ? "" : "s"}</span></label>`;
+    }).join("");
+    const s = c.shared, done = s ? `<p class="cs-sum">Shared ${s.total} ration${s.total === 1 ? "" : "s"} among ${s.people}: ${s.shares.map((x) => `${esc(x.name.split(" ")[0])} ${x.to}`).join(", ")}.</p>` : "";
+    return `<section class="cs-share"><div class="cs-share-head"><b>Share the rations</b><span class="cs-meta">Equal shares among those ticked; any left over go to whoever has fewest. Unticked by default: anyone who doesn't eat.</span></div>${rows}${done}
+      <div class="cs-actions"><button data-camp="ration-share" class="primary" ${can && sharing.length > 1 ? "" : "disabled"}><i class="fa-solid fa-scale-balanced"></i> Share rations equally (${sharing.length})</button></div></section>`;
   }
 
   /** One ration (the module's ration item) for each character. Returns how many were given. */
@@ -1413,8 +1468,7 @@ export class CampPanel {
       await this.write({ setup: null, scene: { ...(this.watch.scene ?? {}), step: "done", hold: false } });
       if (step === "dawn" && !practice && game.modules.get("rest-recovery")?.active) {
         const api = game.restrecovery;
-        const requested = promptCompletedCampRest(api, actors,
-          { start: p?.since, end: p?.until, calendar: game.time.calendar });
+        const requested = promptCompletedCampRest(api, actors);
         if (!requested) ui.notifications.warn("KG Realms: Rest Recovery could not request the party's rest. World time is already at the end of the rest. Check Rest Recovery before prompting a rest manually, since its regular prompt may advance time again.");
       }
     } finally { this.breakingCamp = false; }
@@ -1432,7 +1486,7 @@ export class CampPanel {
       await this.write({ recovery: { campId, state: "requesting", at: this.now, done: false } });
       if (this.commandContext && !this.commandContext.valid()) return;
       try {
-        const result = await promptCompletedCampRest(game.restrecovery, this.members().map((m) => m.actor), { start: s.started, end: s.restEnd, calendar: game.time.calendar });
+        const result = await promptCompletedCampRest(game.restrecovery, this.members().map((m) => m.actor));
         if (!result) throw new Error("Rest Recovery did not accept the party request.");
       } catch (err) {
         await this.write({ recovery: { campId, state: "failed", done: false } });
@@ -1495,6 +1549,7 @@ export class CampPanel {
       return;
     }
     this.followClock(p);
+    this.#downtimeReminder(sc);
     if (!el) {
       el = document.createElement("div");
       el.className = "kgr-ui kgr-camp-scene";
@@ -1534,6 +1589,39 @@ export class CampPanel {
       restoreScroll(el, scroll.filter((s) => s.selector !== ".cs-chips"));
     }
     this.placeScene();
+  }
+
+  /**
+   * The downtime reminder (0.96.6): once a camp reaches Setup camp, each player with a character in
+   * the party gets a small window, once per camp: roll your downtime and tell the GM what you're
+   * doing. Their answer goes to the GM as a whisper. The world setting turns it off.
+   */
+  #downtimeReminder(sc) {
+    const campId = this.watch.campId;
+    if (game.user.isGM || this.practice || sc?.step !== "camp" || !campId || this.#setting("downtimeReminder") === false) return;
+    const mine = this.members().filter((m) => m.actor?.isOwner);
+    if (!mine.length) return;
+    const key = `kgr-downtime-${campId}-${game.user.id}`;
+    if (this.downtimeAsked?.has(key)) return;
+    (this.downtimeAsked ??= new Set()).add(key);
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch { /* storage unavailable: once per session */ }
+    const names = mine.map((m) => m.name.split(" ")[0]).join(" and ");
+    const DialogV2 = foundry.applications?.api?.DialogV2;
+    if (!DialogV2) return ui.notifications.info(`KG Realms: camp is being set up. Roll your downtime and tell the GM what ${names} is doing.`);
+    DialogV2.prompt({
+      window: { title: "Downtime", icon: "fa-solid fa-campground" },
+      position: { width: 380 },
+      content: `<p><b>Camp is being set up.</b> Roll your downtime now, and tell the GM what ${esc(names)} ${mine.length > 1 ? "are" : "is"} doing.</p>
+        <label style="display:flex;flex-direction:column;gap:4px">What are you doing?<input type="text" name="what" maxlength="300" placeholder="For example: crafting arrows, studying a spellbook" autofocus></label>`,
+      ok: {
+        label: "Tell the GM", icon: "fa-solid fa-paper-plane",
+        callback: (event, button) => {
+          const what = String(button.form?.elements?.what?.value ?? "").trim();
+          ChatMessage.create({ content: `<p><i class="fa-solid fa-campground"></i> <b>Downtime</b>: ${esc(names)}${what ? `: ${esc(what)}` : " is on it."}</p>`, speaker: ChatMessage.getSpeaker({ actor: mine[0].actor }), whisper: game.users.filter((u) => u.isGM).map((u) => u.id) });
+        }
+      },
+      rejectClose: false
+    }).catch((err) => console.warn("kg-realms | downtime reminder:", err));
   }
 
   placeScene() {
@@ -1723,7 +1811,7 @@ export class CampPanel {
       if (rolled) sum = `${concealed(c.rolls, dc)} of ${rolled} checks succeeded.`;
     }
     const spend = tenacity() ? "Use the roll's chat card to spend Tenacity. " : "";
-    const done = c.done ? `<div class="cs-result">${this.#taskResult(key, c, who)}</div>` : "";
+    const done = c.done ? `<div class="cs-result">${this.#taskResult(key, c, who)}</div>${key === "provision" && c.result?.rations > 0 && !this.practice ? this.#shareBox(c) : ""}` : "";
     const ready = T.help ? c.rolls?.[leader]?.total != null : Object.values(c.rolls ?? {}).some((r) => r?.total != null);
     const confirm = gm && !c.done && c.asked ? `<button data-camp="task-confirm" data-key="${key}" class="primary" ${ready ? "" : "disabled"}><i class="fa-solid fa-check"></i> Confirm result</button>` : "";
     const R = this.hud.ruleText(), tip = { forage: R.forage, conceal: R.conceal, alarm: R.alarm, provision: R.provision }[key];

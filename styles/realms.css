@@ -1029,6 +1029,14 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 :is(.kgr-travel, .kgr-camp-box) .camp-duty input { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; }
 .kgr-camp-scene .cs-result .camp-result { font-size: 13px; }
 .kgr-camp-scene .cs-result .camp-result b { font: inherit; font-weight: 600; }
+/* Provisioning's Share the rations (0.96.5). */
+.kgr-camp-scene .cs-share { display: flex; flex-direction: column; gap: 6px; max-width: 640px; padding: 10px 12px; border: 1px solid var(--kgr-line-2); border-radius: 8px; background: var(--kgr-surface); text-align: left; }
+.kgr-camp-scene .cs-share-head { display: flex; flex-direction: column; gap: 2px; }
+.kgr-camp-scene .cs-share-head b { font-size: 14px; }
+.kgr-camp-scene .cs-share-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+.kgr-camp-scene .cs-share-row input { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; }
+.kgr-camp-scene .cs-share-row .grow { flex: 1; min-width: 0; }
+.kgr-camp-scene .cs-share .cs-actions { justify-content: flex-start; }
 .cs-skill-options { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .kgr-camp-scene .cs-person .cs-skill-options { min-width: 0; max-width: 100%; }
 .kgr-camp-scene .cs-person .cs-skill-options > button { min-height: 44px; height: auto; max-width: 100%; padding: 8px 12px; line-height: 1.35; white-space: normal; }
