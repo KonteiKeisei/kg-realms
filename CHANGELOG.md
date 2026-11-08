@@ -1,70 +1,40 @@
 # KG Realms changelog
 
-## 0.96.7-harvest-test: route edits during a journey keep the way travelled, and wait until you're done (test build, not released)
+## 0.96.0: creature harvesting, Provisioning, ration sharing and safer route edits
 
-- The way the party has already travelled can't change. Adding a stop to the leg they're on (or moving or removing its end, or changing how that leg is travelled) first puts a stop where the party stands now, so the leg so far ends there as it was and the edit applies only to the way on. Before, the leg was worked out again from where it began, which could be days back, and the party's token moved onto the new line.
-- Edits to anything already behind the party are refused with a message, including clicking the route behind them.
-- While the GM edits the route (or the journey's encounters), the changes are worked out and drawn on the GM's screen only. The players get the finished route once, when editing ends, instead of on every click. Before, each click saved to the scene and every connected client worked out the whole route again, sea routes included, which made editing during play lag.
-- Setting off, or anything else that saves the journey, sends the edited route first.
+Includes 0.95.5, which was never published on GitHub.
 
-## 0.96.6-harvest-test: Rest Recovery asks for food; a downtime reminder (test build, not released)
+### Harvesting
 
-- A camp's rest is now always a new day for Rest Recovery, so its long rest asks each character for food and water and runs its daily recovery. Before, a rest that began and ended on one calendar date (05:04 to 13:04, say) was sent as no new day, and Rest Recovery skipped food and water.
-- Downtime reminder: when a camp reaches Setup camp, each player with a character in the party gets a small window, once per camp, to roll their downtime and say what they are doing. Tell the GM whispers it to the GM. A world setting, Camp: downtime reminder, turns it off.
-
-## 0.96.5-harvest-test: share Provisioning's rations equally (test build, not released)
-
-- After a Provisioning success, the camp step shows Share the rations: each party member with a checkbox and how many rations they carry, and one button, Share rations equally. Any player with a character in the party can press it or change the ticks; the GM's client does the sharing.
-- Everyone ticked ends with an equal share of the rations they carry between them. What doesn't divide evenly goes one each to whoever had fewest.
-- Anyone who doesn't eat (Rest Recovery's no food or water trait, `flags.dnd5e.noFoodWater`) starts unticked. Any member can be ticked or unticked by hand.
-
-## 0.96.4-harvest-test: the party sets up each creature; the harvest window moves (test build, not released)
-
-- Each creature's step in the harvest now has Who and what: who leads, who helps, each one's skill, and which parts to take. The GM or any player with a character in the party can change it, on everyone's screen, until the GM requests that creature's rolls. The next creature can be set up differently.
-- Start harvest no longer needs anyone dragged onto a creature first: every downed creature with parts left gets a step. What the harvest window sets (including right-click primary and secondary) is only where each step starts. A creature nobody leads can be skipped.
-- The harvest's step view is a window like the others: drag it by its header (double-click the header to put it back). It now sits below Foundry's windows, so roll dialogs open on top of it instead of behind it.
-- A roll waiting on its dialog holds only its own button. Before, one roll dialog hidden behind the harvest greyed out Confirm results and Finish until Skip was used.
-- Confirm results gives the parts and goes straight on to the next creature, or to Done after the last. Skip names where it goes.
-
-## 0.96.3-harvest-test: primary and secondary for every creature (test build, not released)
-
-- Right-click a player in the harvest window's party list: Set as primary (leads every creature with parts to take), Set as secondary (helps on every one), or Take off every creature.
-- Whoever they replace swaps into the other slot when it is free, so nobody is lost.
-
-## 0.96.2-harvest-test: the harvest runs like the camp's activities (test build, not released)
-
-- Start harvest opens the harvest's steps, in the same view as the camp's activities, on the GM's and the players' screens: a step for each creature, then Done.
-- On each creature the GM requests the rolls. Every part shows its people: face, Leader or Helping (success +1, failure -1), and their roll button with their bonus and the DC (when players may see it). Players roll their own; the GM rolls for anyone with no player online, or for anyone with Roll for them.
-- The GM can allow a reroll, or rule any part a success or failure with a reason (automatic before any roll), as with camp tasks. The total with help shows as the rolls come in.
-- Confirm results gives the leader that creature's parts and marks them on its token. Next moves to the next creature; Skip passes one by.
-- Done lists everything harvested; Finish moves the clock on by the longest share, posts the GM's card and writes the Harvests journal.
-- A practice run uses the same steps on the GM's screen only, rolled quietly, nothing kept.
-- The harvest window shows the harvest under way, with Show the harvest and Call off the harvest. Who harvests what is fixed until it ends.
-- The separate Harvest checks panel for players is gone: the steps replace it.
-
-## 0.96.1-harvest-test: harvest rolls go to the players (test build, not released)
-
-- The harvest party is the party token's members and the player characters with a token on the scene, each once. Characters elsewhere are not listed.
-- Request rolls sends each player their checks in a Harvest checks panel: one button per check with their bonus (and the DC, when players may see it), or Roll all. The rolls are the system's own, with chat cards. Players who reload get theirs again.
-- The GM sees who still has to roll, can roll for anyone with no player online, and harvests once every roll is in. Cancel the rolls to change who harvests what.
-- Every part shows each roller's bonus and DC, and their roll once it is in.
-- A practice run still rolls quietly in the GM's window, without asking the players.
-- Appearance: a palette button before the lock on every panel header (the travel panel, the harvest window and the rest). It changes the window theme, glass opacity and blur on the spot, for your view, the same as the module settings.
-
-## 0.96.0-harvest-test: creature harvesting (test build, not released)
-
-- Harvest: a downed creature's token HUD (0 hit points, dead or defeated) has a Harvest button for the GM. It opens the harvest window with every downed creature on the scene. Drop more from a compendium or the Actors sidebar.
-- Parts come from the creature's own sheet: its type, size, CR, attacks and damage types, senses, flying speed, traits, spellcasting and legendary actions. Any creature works, homebrew included.
-- Drag players onto creatures. The first leads and makes every check (Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing). One more can help: a success is +1, a failure -1.
-- Each part is its own check. Failing by 5 or more ruins it. A failed meat check still gives a quarter, as mangled meat: edible and good for rations, but nobody buys it.
-- Items are made on the spot, no compendium. They are named by rarity and kind ("Rare red dragon scales", "Uncommon edible meat"), so like stacks with like. Values follow the rarity and the world's Prices setting.
-- The clock moves on by the longest player's share. A moving party halts for that long.
-- Results go to the window's Log tab, a GM chat card, and a Harvests journal with a page a day. Harvested parts are marked on the token.
-- Practice run: a checkbox in the window. Rolls every check quietly and shows the results in the Log tab only. Nothing is given or marked, nothing goes in the chat or the journal, and no time passes.
+- A downed creature's token HUD (0 hit points, dead or defeated) has a Harvest button for the GM. It opens the harvest window with every downed creature on the scene; more can be dropped in from a compendium or the Actors sidebar.
+- Parts come from the creature's own sheet: type, size, CR, attacks and damage types, senses, flying speed, traits, spellcasting and legendary actions. Any creature works, homebrew included.
+- The party is the party token's members and the player characters with a token on the scene, each once.
+- Start harvest opens the harvest's steps on the GM's and the players' screens: a step for each creature, then Done. Each step has Who and what: who leads, who helps, each one's skill (Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing) and which parts to take. The GM or any player with a character in the party can change it until the GM requests that creature's rolls, so each creature can be set up differently. In the window, drag players onto creatures, or right-click a player to set them as primary or secondary on every creature, to set where each step starts.
+- Each part is its own check. A helper's success adds 1, a failure takes 1 off. Failing by 5 or more ruins the part. A failed meat check still gives a quarter, as mangled meat: edible and good for rations, but nobody buys it.
+- Players roll their own checks with their bonus on the button; the GM rolls for anyone with no player online. The GM can allow a reroll, or rule any part a success or failure with a reason. Confirm results gives the leader the parts, marks them on the token and goes straight on to the next creature.
+- Items are made on the spot, named by rarity and kind ("Uncommon edible meat"), so like stacks with like. Values follow the rarity and the world's Prices setting.
+- Finish moves the clock on by the longest share (a moving party halts for that long) and logs the harvest in the window's Log tab, a GM chat card and a Harvests journal with a page a day.
+- The harvest's step view is a window like the others: drag it by its header, double-click the header to put it back. It sits below Foundry's windows, so roll dialogs open on top of it.
+- Practice run: the same steps on the GM's screen only, rolled quietly. Nothing is given, marked, posted or logged, and no time passes.
 - DCs tab: the GM changes the base DC, what Survival and Medicine take off, and each part's difficulty.
-- Provisioning: a new Advanced watches camp task. Survival DC 10 for each character on it. A success preserves up to 20 lb of harvested meat, a failure 10 lb. Every 3 lb makes 1 ration.
 - New settings: eat humanoids and giants (off), and meat spoils 3 days after the kill (off).
 
+### Camp
+
+- Provisioning: a new Advanced watches camp task. Survival DC 10 for each character on it. A success preserves up to 20 lb of harvested meat, a failure 10 lb. Every 3 lb makes 1 ration.
+- After a Provisioning success, Share the rations lists each party member with a checkbox and how many rations they carry, and one button, Share rations equally. Everyone ticked ends with an equal share; what doesn't divide evenly goes to whoever had fewest. Anyone with Rest Recovery's no food or water trait (`flags.dnd5e.noFoodWater`) starts unticked. Any player in the party can press it; the GM's client does the sharing.
+- A camp's rest is always a new day for Rest Recovery, so its long rest asks each character for food and water and runs its daily recovery. Before, a rest that began and ended on one calendar date was sent as no new day, and food and water were skipped.
+- Downtime reminder: when a camp reaches Setup camp, each player with a character in the party gets a small window, once per camp, to roll their downtime and say what they are doing, whispered to the GM. A world setting, Camp: downtime reminder, turns it off.
+
+### Routes during a journey
+
+- The way the party has already travelled can't change. An edit to the leg they're on first puts a stop where the party stands now, so the leg so far stays as it was and the edit applies only to the way on. Before, the leg was worked out again from where it began and the party's token moved onto the new line.
+- Edits to anything already behind the party are refused with a message, including clicking the route behind them.
+- While the GM edits the route or the journey's encounters, changes are worked out and drawn on the GM's screen only. The players get the finished route once, when editing ends, instead of every client working out the whole route again on each click.
+
+### Panels
+
+- Appearance: a palette button before the lock on every panel header changes the window theme, glass opacity and blur on the spot, for your view.
 ## 0.95.5: static map lights, serialized saves, faster sea routing
 
 - Night lights, gold place glows and settlement lights are static. The realm map no longer redraws 10 times a second at night or with gold places.
