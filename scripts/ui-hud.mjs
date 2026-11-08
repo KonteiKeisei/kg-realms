@@ -951,27 +951,30 @@ export class TravelHud {
     if(this.unfocused&&p.status==='encounter')this.onBackgroundEncounter?.(this,p);
     const valid = () => this.scene === scene && this.lifecycleEpoch === epoch && this.refreshGeneration === generation && this.result === result && this.leader && this.canSync?.() !== false && journeyKey(scene.getFlag(MODULE_ID, "journey")) === trip;
     if (!valid()) return;
-    await this.syncBiome();if(!valid())return;
-    if(p.status==="encounter"&&isHazard(p.encounter)&&p.encounter.autoDiscover!==false&&(p.encounter.visibility??"hidden")==="hidden"){
-      await this.discoverHazard?.(p.encounter.sourceId??p.encounter.id);if(!valid())return;
-    }
     const force = this.forceSnapshot; this.forceSnapshot = false;
     const at = this.#at(p.hour);
-    // The party's tokens go to everyone, so while the party is on the move they are sent at most every
+    // The party's tokens go first, and the rest of the work runs alongside instead of one round trip to
+    // the server after another (0.96.2): the party's biome flags and the scene's weather, and a hazard
+    // found. Before, the tokens waited behind all of them, which made skipping ahead freeze.
+    // The tokens go to everyone, so while the party is on the move they are sent at most every
     // TOKEN_MOVE_MS of real time, gliding for as long; a stop, a camp, an encounter, arriving, a forced
     // update or a big jump in the clock moves them at once. A move held back is made when it falls due,
     // even if the clock stops in between (0.96.1).
+    const work = [];
     if (at) {
       const t = performance.now(), jump = Math.abs(p.hour - (s.now?.hour ?? p.hour)) > .5;
       const due = tokenMoveDue({ force: force || jump || this.motionDuration != null, status: p.status, lastStatus: this.lastMoveStatus, since: t - (this.lastTokenMove ?? -Infinity) });
       if (due) {
         clearTimeout(this.tokenMoveTimer); this.tokenMoveTimer = null;
         this.lastTokenMove = t; this.lastMoveStatus = p.status;
-        await this.#moveTo(at, { scene, duration: this.motionDuration ?? (jump ? 8000 : p.status === "moving" ? TOKEN_MOVE_MS : 800) });
+        work.push(this.#moveTo(at, { scene, duration: this.motionDuration ?? (jump ? 8000 : p.status === "moving" ? TOKEN_MOVE_MS : 800) }));
       } else if (!this.tokenMoveTimer) {
         this.tokenMoveTimer = setTimeout(() => { this.tokenMoveTimer = null; if (this.leader) this.#sync().catch((err) => console.warn("kg-realms | journey sync:", err)); }, Math.max(50, TOKEN_MOVE_MS - (t - this.lastTokenMove)));
       }
     }
+    work.push(this.syncBiome());
+    if(p.status==="encounter"&&isHazard(p.encounter)&&p.encounter.autoDiscover!==false&&(p.encounter.visibility??"hidden")==="hidden")work.push(this.discoverHazard?.(p.encounter.sourceId??p.encounter.id));
+    for (const r of await Promise.allSettled(work)) if (r.status === "rejected") console.warn("kg-realms | journey sync:", r.reason);
     if (!valid()) return;
     // Each stop is announced once (chat, Perception rolls, the questions). What was announced is kept
     // with the journey, so reloading Foundry does not ask again. A journey from before 0.42.1 has no

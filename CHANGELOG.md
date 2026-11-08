@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.96.2: skipping ahead moves the party at once
+
+- When the clock moves the journey on (skipping to the next camp or encounter, say), the party's tokens move first. The party members' biome flags, the scene's weather and a hazard found now run alongside the move instead of one round trip to the server after another, with the tokens waiting behind them all.
+
 ## 0.96.1: far less server and network load in play; the camp keeps its view on its own scene
 
 - A world's road file is downloaded once per browser. With regional maps linked, it was downloaded again on every journey sync (each clock tick), every route plan and every map draw, by every connected client, which slowed the server for everyone (in one session, 24 downloads in 8 minutes, each waiting up to 2 seconds on the server).
