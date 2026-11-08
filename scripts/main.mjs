@@ -115,12 +115,20 @@ const setting = (key) => game.settings.get(MODULE_ID, key);
 const regionOf = (scene) => (scene?.getFlag(MODULE_ID, "world") ? scene.flags[MODULE_ID] : null);
 let current = null; // { scene, region, world (the index), places (edits applied) }
 
+// A world's road file, fetched once per browser (0.96.1). It was fetched again on every journey sync
+// (each clock tick), every route plan and every map draw, on every connected client, which buried
+// the server. The file only changes with a module update; route edits are kept apart and applied after.
+const roadFiles = new Map();
+function roadFile(url) {
+  if (!roadFiles.has(url)) roadFiles.set(url, fetch(url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).catch((e) => { roadFiles.delete(url); throw e; }));
+  return roadFiles.get(url);
+}
 const regional = new RegionalMaps({
   loadWorld, getLayer:()=>layer, onPlacementStart:()=>{if(editor.active)editor.onClose();hud.suspend(true);}, onPlacementEnd:()=>hud.suspend(false), getEdits:id=>editsOf(id),
   rawPlaces:(id,places)=>applyEdits(places,editsOf(id),"surface"),
   getTerrain:async(id,data)=>{await loadShippedWaterways(id);await loadShippedBiomes(id);return terrainFor(id,data);},
   getBiomes:id=>biomesOf(id),
-  getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const response=await fetch(worldUrl(id,data.routes));if(!response.ok)throw Error(`${id} roads: HTTP ${response.status}`);const routes=regional.followRoutes(id,applyRouteEdits(await response.json(),routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
+  getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const file=await roadFile(worldUrl(id,data.routes)).catch(e=>{throw Error(`${id} roads: ${e.message}`);});const routes=regional.followRoutes(id,applyRouteEdits(file,routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
   revision:()=>[setting("placeEdits"),setting("routeEdits"),setting("biomes"),setting("waterways")],
   onChange:()=>{backgroundJourneys.clear();if(canvas.ready){localMaps.refreshNavigation();drawRegion();}}
 });
@@ -634,7 +642,7 @@ const hud = new TravelHud({
 });
 // No timer: off-map progress is computed only for an observed journey or an explicit request.
 // Cached headless planners share terrain bytes, never build a map, and never render a HUD.
-const backgroundJourneys = new Map(), routeLoads = new Map();
+const backgroundJourneys = new Map();
 async function syncJourney(scene, { force = false } = {}) {
  if(!scene?.partyId){const views=journeyScenes(scene);if(views.some(s=>s?.partyId))return Promise.all(views.map(s=>syncJourney(s,{force})));}
   if (!isPrimaryGM() || !regionOf(scene) || !scene.getFlag(MODULE_ID, "journey")?.trip) return;
@@ -655,8 +663,7 @@ async function syncJourney(scene, { force = false } = {}) {
       await loadShippedWaterways(region.world);
       await loadShippedBiomes(region.world);
       if (!isPrimaryGM()) return;
-      if (!routeLoads.has(region.world)) routeLoads.set(region.world, fetch(worldUrl(region.world, world.routes)).then((r) => { if (!r.ok) throw new Error(`Routes: HTTP ${r.status}`); return r.json(); }).catch((e) => { routeLoads.delete(region.world); throw e; }));
-      const base = await routeLoads.get(region.world);
+      const base = await roadFile(worldUrl(region.world, world.routes)).catch((e) => { throw new Error(`Routes: ${e.message}`); });
       const worldKey = JSON.stringify([region.world, sourceMap]);
       if (entry.worldKey !== worldKey) { entry.hud = null; entry.key = null; entry.worldKey = worldKey; }
       if (!entry.hud) {
@@ -720,6 +727,45 @@ function syncViewedJourneys() {
   for(const scene of game.scenes)if(scene.getFlag(MODULE_ID,'partyJourneys')&&journeyScenes(scene).some(s=>s.getFlag(MODULE_ID,'journey')?.trip))viewed.add(scene.id);
   for(const id of [...viewed]){const owner=regional.rootScene(game.scenes.get(id));if(owner)viewed.add(owner.id);}
   for (const id of viewed) { const scene = game.scenes.get(id); if (scene && (scene !== canvas.scene || scene.getFlag(MODULE_ID,'partyJourneys'))) syncJourney(scene); }
+}
+
+/*
+ * The camp's own scene (0.96.2): a camp can be given a scene (Go to <scene> in the camp). On that
+ * scene the camp and watch view stays up for everyone, run by the journey on its realm map: the
+ * primary GM's background journey, or for players (and other GMs) a quiet copy that reads where the
+ * journey stands from the scene. It folds to its bar for an encounter or a combat, and has the GM's
+ * way back to the realm map.
+ */
+const awayCamp = { worker: null, key: null, busy: false, again: false };
+/** The journey (a realm scene, or a party's view of one) whose camp has this scene as its own. */
+function campJourneyFor(scene) {
+  if (!scene || regionOf(scene)) return null;
+  for (const s of game.scenes) {
+    if (!regionOf(s)) continue;
+    for (const v of journeyScenes(s)) {
+      const j = v.getFlag(MODULE_ID, "journey");
+      if (j?.trip && Object.values(j.watch?.scenes ?? {}).includes(scene.id)) return v;
+    }
+  }
+  return null;
+}
+async function refreshAwayCamp() {
+  if (awayCamp.busy) { awayCamp.again = true; return; }
+  awayCamp.busy = true;
+  try {
+    do {
+      awayCamp.again = false;
+      const journey = campJourneyFor(canvas.scene), key = journey ? `${journey.id}:${journey.partyId ?? ""}` : null;
+      if (!journey) { awayCamp.worker?.camp.renderScene(null); awayCamp.worker = null; awayCamp.key = null; continue; }
+      let worker;
+      if (isPrimaryGM()) { await syncJourney(journey); worker = backgroundJourneys.get(key)?.hud ?? null; }
+      else { if (awayCamp.key !== key || !awayCamp.own) awayCamp.own = new TravelHud({ headless: true, getScene: () => journey }); worker = awayCamp.own; }
+      if (awayCamp.worker && awayCamp.worker !== worker) awayCamp.worker.camp.renderScene(null);
+      awayCamp.worker = worker; awayCamp.key = key;
+      if (worker && campJourneyFor(canvas.scene) === journey) worker.camp.renderScene(worker.progress());
+    } while (awayCamp.again);
+  } catch (err) { console.warn("kg-realms | camp on its own scene:", err); }
+  finally { awayCamp.busy = false; }
 }
 
 function campWorkEnded(scene) {
@@ -1328,7 +1374,7 @@ async function drawRegion() {
   layer.areas = areasGeoJSON(current.places, world.regions);
   layer.mapLayers = chosenLayers();
   if (world.routes) {
-    current.routesBase = await fetch(worldUrl(region.world, world.routes)).then((r) => r.json()).catch(() => null);
+    current.routesBase = await roadFile(worldUrl(region.world, world.routes)).catch(() => null);
     if (current?.scene !== scene) return;
     current.routes = current.routesBase ? regional.followRoutes(region.world,applyRouteEdits(current.routesBase, routeEditsOf(region.world))) : null;
     current.drawn = curved(current.routes);
@@ -1429,7 +1475,10 @@ function teardown() {
   current = null;
 }
 
-Hooks.on("canvasReady", () => { drawRegion(); enforceWeatherFilter(regionOf); refreshEncounterBox(); });
+Hooks.on("canvasReady", () => { drawRegion(); enforceWeatherFilter(regionOf); refreshEncounterBox(); refreshAwayCamp(); });
+// The camp's own scene follows its journey; the encounter box and the camp view fold for combat.
+Hooks.on("updateScene", (scene, changes) => { const own = changes.flags?.[MODULE_ID]; if (own && ("journey" in own || "partyJourneys" in own) && !regionOf(canvas.scene)) refreshAwayCamp(); });
+for (const name of ["combatStart", "updateCombat", "deleteCombat"]) Hooks.on(name, (combat, changes) => { if (name === "updateCombat" && !("started" in (changes ?? {})) && !("round" in (changes ?? {}))) return; refreshEncounterBox(); if (awayCamp.worker) refreshAwayCamp(); });
 Hooks.once("ready", () => installWeatherFilter(regionOf));
 Hooks.on("updateUser", (user, changes, _options, userId) => receiveCampMessage(user, changes, userId, (message, sender) => hud.camp.onMessage(message, sender)));
 // Explicit journey sync requests are read-only requests; only the primary GM writes state.
@@ -1562,6 +1611,8 @@ Hooks.on("updateWorldTime", () => {
   // The party travels with the clock.
   if (current && hud.el && (!isPrimaryGM()||!current.scene.getFlag(MODULE_ID,'partyJourneys'))) hud.tick();
   if (isPrimaryGM()) syncViewedJourneys();
+  // The camp view on the camp's own scene follows the clock.
+  if (awayCamp.worker) refreshAwayCamp();
   // Harvested meat spoils with the days, when the world's setting says so.
   checkSpoilage();
 });

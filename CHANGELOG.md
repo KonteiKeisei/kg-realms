@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.96.1: far less server and network load in play; the camp keeps its view on its own scene
+
+- A world's road file is downloaded once per browser. With regional maps linked, it was downloaded again on every journey sync (each clock tick), every route plan and every map draw, by every connected client, which slowed the server for everyone (in one session, 24 downloads in 8 minutes, each waiting up to 2 seconds on the server).
+- While the party is on the move, its tokens' positions (and the regional map's party token) go to every connected client at most every 2 seconds of real time, gliding between updates. Before, they went out on every change of the world clock. Stops, camps, encounters, arriving, a big jump in the clock and the GM's own clock advances still move the tokens at once, and a move held back is made when it falls due even if the clock stops.
+- A camp's own scene (Go to the scene from the camp) keeps the camp and watch view for everyone, run by the journey on its realm map. It folds to its bar only for an encounter or while combat runs there. Before, going to the scene closed the camp view.
+- On the camp's own scene, the GM has the way back to the realm map in the camp view's header and bar: everyone back to the map, or view it alone.
+- The encounter box keeps Conclude Encounter and Back to the map visible even when folded, and folds itself to its header while combat runs on the scene (its fold button still opens it).
+
 ## 0.96.0: creature harvesting, Provisioning, ration sharing and safer route edits
 
 Includes 0.95.5, which was never published on GitHub.

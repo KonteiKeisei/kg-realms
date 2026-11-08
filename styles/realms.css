@@ -973,6 +973,10 @@ body.kgr-theme-holy .kgr-ui {
 .kgr-camp-scene .cs-carousel-head b { color: var(--kgr-text); font-size: 16px; }
 .kgr-camp-scene .cs-carousel-head b span { color: var(--kgr-muted-2); font-size: 12px; font-weight: 400; }
 .kgr-camp-scene .cs-carousel-head button { flex: 0 0 auto; width: 30px; height: 30px; margin: 0; padding: 0; color: var(--kgr-text); background: var(--kgr-surface); border: 1px solid var(--kgr-line-2); }
+/* The way back to the realm map, on the camp's own scene (0.96.2). */
+.kgr-camp-scene .cs-head-ctl, .kgr-camp-scene .cs-realm-nav { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.kgr-camp-scene .cs-carousel-head .cs-realm-nav button:first-child { width: auto; padding: 0 10px; gap: 6px; display: inline-flex; align-items: center; }
+.kgr-camp-scene .cs-bar .cs-realm-nav button { width: auto; padding: 4px 8px; }
 .kgr-camp-scene .cs-chips { position: static; justify-content: flex-start; flex-wrap: wrap; overflow: visible; padding-bottom: 4px; }
 .kgr-camp-scene .cs-chip { flex: 0 0 auto; background: var(--kgr-surface); }
 .kgr-camp-scene .cs-chip.done { border-color: var(--kgr-ok); }

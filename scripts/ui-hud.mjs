@@ -71,6 +71,12 @@ const DEFAULT = { name: "", waypoints: [], stays: [], legModes: [], legMethods: 
   method: "foot", methodMph: 8, fares: { ship: 1, coach: 3, wagon: 2 }, shipSkip: [] };
 const SNAP_PX = 14, HIT_PX = 10, ENCOUNTER_MI = 2;
 /** The parts of a journey that route edits change (and Ctrl+Z puts back). */
+/** While the party is on the move, the least real time between sending its tokens' positions (ms). */
+const TOKEN_MOVE_MS = 2000;
+/** Whether the party's tokens are sent now: at once unless it is simply on the move, then every TOKEN_MOVE_MS. */
+export function tokenMoveDue({ force = false, status, lastStatus, since }) {
+  return force || status !== "moving" || lastStatus !== status || since >= TOKEN_MOVE_MS;
+}
 const ROUTE_KEYS = ["waypoints", "stays", "legModes", "legMethods", "legVessels", "legFares", "legWays", "encounters", "name"];
 /** Lists kept per waypoint, which move with it. */
 const LEG_KEYS = ["stays", "legModes", "legMethods", "legVessels", "legFares", "legWays"];
@@ -334,6 +340,7 @@ export class TravelHud {
     this.lifecycleEpoch = (this.lifecycleEpoch ?? 0) + 1;
     this.panelHtml = null;
     this.refreshGeneration = (this.refreshGeneration ?? 0) + 1;
+    clearTimeout(this.tokenMoveTimer); this.tokenMoveTimer = null;
     this.#setMode(null);
     if (this.onResize) window.removeEventListener("resize", this.onResize);
     this.el?.remove();
@@ -950,7 +957,21 @@ export class TravelHud {
     }
     const force = this.forceSnapshot; this.forceSnapshot = false;
     const at = this.#at(p.hour);
-    if (at) await this.#moveTo(at, { scene, duration: this.motionDuration ?? (Math.abs(p.hour - (s.now?.hour ?? p.hour)) > .5 ? 8000 : 800) });
+    // The party's tokens go to everyone, so while the party is on the move they are sent at most every
+    // TOKEN_MOVE_MS of real time, gliding for as long; a stop, a camp, an encounter, arriving, a forced
+    // update or a big jump in the clock moves them at once. A move held back is made when it falls due,
+    // even if the clock stops in between (0.96.1).
+    if (at) {
+      const t = performance.now(), jump = Math.abs(p.hour - (s.now?.hour ?? p.hour)) > .5;
+      const due = tokenMoveDue({ force: force || jump || this.motionDuration != null, status: p.status, lastStatus: this.lastMoveStatus, since: t - (this.lastTokenMove ?? -Infinity) });
+      if (due) {
+        clearTimeout(this.tokenMoveTimer); this.tokenMoveTimer = null;
+        this.lastTokenMove = t; this.lastMoveStatus = p.status;
+        await this.#moveTo(at, { scene, duration: this.motionDuration ?? (jump ? 8000 : p.status === "moving" ? TOKEN_MOVE_MS : 800) });
+      } else if (!this.tokenMoveTimer) {
+        this.tokenMoveTimer = setTimeout(() => { this.tokenMoveTimer = null; if (this.leader) this.#sync().catch((err) => console.warn("kg-realms | journey sync:", err)); }, Math.max(50, TOKEN_MOVE_MS - (t - this.lastTokenMove)));
+      }
+    }
     if (!valid()) return;
     // Each stop is announced once (chat, Perception rolls, the questions). What was announced is kept
     // with the journey, so reloading Foundry does not ask again. A journey from before 0.42.1 has no

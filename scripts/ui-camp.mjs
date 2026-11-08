@@ -1036,6 +1036,8 @@ export class CampPanel {
     if (act === "task-roll") return this.#taskRoll(btn.dataset.key, btn.dataset.id, btn.dataset.skill);
     // Provisioning's rations shared equally: anyone in the party may press it; the GM's client does it.
     if (act === "ration-share") return game.user.isGM ? this.#shareRations() : this.request({ rationShare: { go: true } });
+    // Back to the realm map from the camp's own scene (any GM).
+    if (act === "realm-go" || act === "realm-view") { const realm = this.#realmAway(); if (!realm || !game.user.isGM) return; return act === "realm-go" ? realm.activate() : realm.view(); }
     if (!game.user.isGM || (!this.practice && !isPrimaryGM())) return;
     const night = this.prog()?.night, key = btn.dataset.key;
     if (act === "practice-end") return this.endPractice();
@@ -1541,6 +1543,8 @@ export class CampPanel {
     if (this.practice) p = this.prog();
     const sc = p ? this.sceneNow(p) : null;
     let el = document.querySelector(".kgr-camp-scene");
+    // One camp view at a time, answering the panel that drew it (the realm map's, or the camp scene's).
+    if (el && el.kgrOwner && el.kgrOwner !== this) { if (!sc) return; el.kgrOwner.sceneDock?.(); el.kgrOwner.sceneDock = null; el.remove(); el = null; }
     if (!sc) { this.sceneDock?.(); this.sceneDock = null; el?.remove(); this.sceneHtmlNow = null; this.sceneStage = null; this.sceneHeld = false; return; }
     const commandKey = `${this.hud.scene?.id}|${this.hud.scene?.partyId??''}|${journeyKey(this.st)}`;
     if (isPrimaryGM() && !this.watch.campId && !this.identifying && !commands.has(commandKey)) {
@@ -1553,6 +1557,7 @@ export class CampPanel {
     if (!el) {
       el = document.createElement("div");
       el.className = "kgr-ui kgr-camp-scene";
+      el.kgrOwner = this;
       el.setAttribute("role", "region");
       el.setAttribute("aria-label", "Camp watch");
       el.innerHTML = `<div class="cs-body"></div>`;
@@ -1575,7 +1580,9 @@ export class CampPanel {
     }
     this.sceneStage = stage;
     this.sceneHeld = false;
-    const held = !!(sc.hold && p.status === "encounter"), min = !!this.sceneMin && !held;
+    // Folded to its bar while combat runs on the scene being viewed (0.96.2).
+    const combat = !!game.combat?.started && game.combat.scene?.id === canvas.scene?.id;
+    const held = !!(sc.hold && p.status === "encounter"), min = (!!this.sceneMin || combat) && !held;
     el.classList.toggle("held", held);
     el.classList.toggle("min", min);
     // Only when it changed (the clock redraws the panel often: a die would spin again each time).
@@ -1630,7 +1637,19 @@ export class CampPanel {
   }
 
   #sceneMinBar(sc) {
-    return `<div class="cs-bar"><i class="fa-solid fa-campground"></i><span class="grow">The camp · ${esc(this.#stepLabel(sc.step))}</span><button data-camp="scene-show" class="primary">Show</button></div>`;
+    return `<div class="cs-bar"><i class="fa-solid fa-campground"></i><span class="grow">The camp · ${esc(this.#stepLabel(sc.step))}</span>${this.#realmNav(true)}<button data-camp="scene-show" class="primary">Show</button></div>`;
+  }
+
+  /** The realm map the journey is on, when this camp view is shown on another scene (its camp scene). */
+  #realmAway() {
+    const realm = this.hud.scene?.realScene ?? this.hud.scene;
+    return realm && canvas.scene && realm.id !== canvas.scene.id ? realm : null;
+  }
+  /** On the camp's own scene, the GM's way back to the realm map: everyone, or only you (0.96.2). */
+  #realmNav(small = false) {
+    const realm = this.#realmAway();
+    if (!realm || !game.user.isGM) return "";
+    return `<span class="cs-realm-nav"><button data-camp="realm-go" title="Everyone back to ${esc(realm.name)}"><i class="fa-solid fa-map"></i>${small ? "" : ` Back to ${esc(realm.name)}`}</button><button data-camp="realm-view" title="View ${esc(realm.name)} (only you)" aria-label="View ${esc(realm.name)} (only you)"><i class="fa-solid fa-eye"></i></button></span>`;
   }
 
   /** Held for an encounter: who is on it (the GM sees its name), its scene, and Carry on (GM). */
@@ -1741,7 +1760,7 @@ export class CampPanel {
       }
     }
     const stop = gm && this.practice && !this.practice.view ? '<button data-camp="practice-end">End practice</button>' : "";
-    return `<div class="cs-carousel-head"><div><span class="cs-context">Camp ${p.night}</span><span class="cs-context" role="status" aria-live="polite">${phased ? `${{ setup: "Setup", rest: "Rest and watches", break: "Break camp" }[phase]}. ` : ""}Step ${sc.at + 1} of ${sc.steps.length}</span></div><button data-camp="scene-min" class="cs-min" aria-label="Minimise the camp carousel">-</button></div>${this.#phaseSummary(p, step)}<div class="cs-chips" aria-label="Phase progress">${chips}</div>${body}${advance ? `<p class="cs-clock-advance">${esc(advance)}</p>` : ""}<div class="cs-foot">${go}${stop}${gm ? "" : '<span class="cs-note">The GM advances camp time.</span>'}</div>`;
+    return `<div class="cs-carousel-head"><div><span class="cs-context">Camp ${p.night}</span><span class="cs-context" role="status" aria-live="polite">${phased ? `${{ setup: "Setup", rest: "Rest and watches", break: "Break camp" }[phase]}. ` : ""}Step ${sc.at + 1} of ${sc.steps.length}</span></div><span class="cs-head-ctl">${this.#realmNav()}<button data-camp="scene-min" class="cs-min" aria-label="Minimise the camp carousel">-</button></span></div>${this.#phaseSummary(p, step)}<div class="cs-chips" aria-label="Phase progress">${chips}</div>${body}${advance ? `<p class="cs-clock-advance">${esc(advance)}</p>` : ""}<div class="cs-foot">${go}${stop}${gm ? "" : '<span class="cs-note">The GM advances camp time.</span>'}</div>`;
   }
 
   #watchTiming(p, i) {

@@ -58,25 +58,30 @@ export class EncounterBox {
       this.el.addEventListener("click", (e) => this.#click(e));
       this.el.addEventListener("dragstart", assetDrag);
     }
+    // During combat on this scene the box folds to its header (0.96.2); its minimise opens it anyway.
+    const combat = !!game.combat?.started && game.combat.scene?.id === canvas.scene?.id;
+    if (combat !== this.inCombat) { this.inCombat = combat; this.combatOpen = false; }
+    const open = combat ? this.combatOpen : this.open;
     const one = (x, i) => {
       const e = x.e, d = { actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] };
       const assets = assetStrip(d);
       const has = assets || e.pinned;
+      // The way back to the realm map shows whenever the box isn't folded for combat.
+      const nav = x.journey && !(combat && !open) ? `<div class="encbox-actions encbox-nav"><button data-act="carry-on" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude Encounter</button>
+              <span class="sp"></span><button data-act="map-all" class="primary" title="Everyone back to the realm map"><i class="fa-solid fa-users"></i> Back to the map</button><button data-act="map" title="View the realm map (only you)"><i class="fa-solid fa-eye"></i></button></div>` : "";
       return `<div class="encbox-row" data-i="${i}">
         <div class="encbox-head"><i class="fa-solid fa-triangle-exclamation"></i><b>${esc(e.name ?? "Encounter")}</b>
           ${x.journey ? `<span class="pill">Journey waiting</span>` : ""}
 </div>
-        ${this.open ? `<div class="encbox-body">${has ? assets : `<p class="hint">No actors, pictures or journal yet. Add them on its card.</p>`}
+        ${open ? `<div class="encbox-body">${has ? assets : `<p class="hint">No actors, pictures or journal yet. Add them on its card.</p>`}
           <div class="encbox-actions">
             ${e.pinned ? `<button data-act="journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}
             <button data-act="card"><i class="fa-solid fa-id-card"></i> Card</button>
-            ${x.journey ? `<span class="sp"></span><button data-act="carry-on" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude Encounter</button>
-              <button data-act="map-all" class="primary" title="Everyone back to the realm map"><i class="fa-solid fa-users"></i> Back to the map</button><button data-act="map" title="View the realm map (only you)"><i class="fa-solid fa-eye"></i></button>` : ""}
-          </div></div>` : ""}</div>`;
+          </div></div>` : ""}${nav}</div>`;
     };
     // The shell's header: its minimise folds away the actors, pictures and journal.
     const title = list.length === 1 ? list[0].e.name ?? "Encounter" : `${list.length} encounters`;
-    this.el.innerHTML = shellHead({ icon: "fa-triangle-exclamation", eyebrow: "Encounter on this scene", title, lock: { attr: 'data-act="lock"', on: isLocked("encbox") }, min: { attr: 'data-act="toggle"', on: !this.open, title: this.open ? "Fold away its actors, pictures and journal" : "Show its actors, pictures and journal" } }) + `<div class="body">${list.map(one).join("")}</div>`;
+    this.el.innerHTML = shellHead({ icon: "fa-triangle-exclamation", eyebrow: combat ? "Combat on this scene" : "Encounter on this scene", title, lock: { attr: 'data-act="lock"', on: isLocked("encbox") }, min: { attr: 'data-act="toggle"', on: !open, title: open ? "Fold away its actors, pictures and journal" : "Show its actors, pictures and journal" } }) + `<div class="body">${list.map(one).join("")}</div>`;
     this.el.classList.toggle("locked", isLocked("encbox"));
     this.#place();
   }
@@ -97,7 +102,7 @@ export class EncounterBox {
     const x = this.list?.[Number(b.closest("[data-i]")?.dataset.i ?? 0)];
     if (!x) return;
     const e = x.e, act = b.dataset.act;
-    if (act === "toggle") { this.open = !this.open; return this.refresh(); }
+    if (act === "toggle") { if (this.inCombat) this.combatOpen = !this.combatOpen; else this.open = !this.open; return this.refresh(); }
     if (act === "card") return this.openCard?.(x.ref);
     if (act === "journal") return openPinned(e.pinned);
     if (act === "actor-n") return openDoc((e.actors ?? [e.actor])[Number(b.dataset.i)]);
