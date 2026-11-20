@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.96.5: parties on Monk's TokenBar
+
+- On any scene with a KG party token, Monk's TokenBar shows the party as one entry. Its picture shows the people inside the party. Requesting a roll for that entry asks the members, each once, without the party's vehicles.
+- Encounter Perception requests go through Monk's TokenBar when it is active, else the chat card as before. Flash Token Bar 5e is no longer used.
+
 ## 0.96.4: a camp catching up on watches saves once
 
 - When the clock moves on past several watches by itself (skipping ahead into a night's rest), the GM's client rolls every passed watch's dice and saves them all together, once, with the step the camp goes to: the first watch whose encounter came, else the watch now. Before, each watch was saved on its own, with a two-second dice reveal to wait through for each.

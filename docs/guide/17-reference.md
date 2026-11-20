@@ -73,7 +73,7 @@ Calendaria (`calendaria`): recommended for travel, watches, camp timekeeping, ca
 | FXMaster | fxmaster | Supported scene effects |
 | FXMaster+ | fxmaster-plus | Supported water effect regions |
 | Tenacity | tenacity | Requested checks remain visible for spend decisions; DC display is forced on |
-| Flash Token Bar 5e | flash-rolls-5e | Encounter Perception roll requests, with chat fallback |
+| Monk's TokenBar | monks-tokenbar | Encounter Perception roll requests, with chat fallback; each party token is one bar entry showing its members |
 | Video Game Music | vgmusic | Scene and combat music |
 
 Each module needs its own installation/configuration. Supplied local maps, trade profiles and artwork belong to the companion package rather than these integrations.

@@ -1147,21 +1147,22 @@ export class TravelHud {
   }
 
   /**
-   * Ask the party to roll Perception for an encounter: through Flash Token Bar 5e when it is active
-   * (its roll request, to the party's actors, with the DC), else on dnd5e a chat card with the
+   * Ask the party to roll Perception for an encounter: through Monk's TokenBar when it is active
+   * (its roll request card, to the party's people, with the DC), else on dnd5e a chat card with the
    * system's Perception roll button for each player to click. The card never names the encounter.
    * The DC goes with the rolls when players may see it (Show Perception DC, or Tenacity active), so
    * the chat card shows success or failure and Tenacity can be spent on it.
    */
   async requestPerception(e) {
     const dc = e.dc != null && showDC() ? e.dc : null;
-    const actors = this.members().filter((a) => a?.id);
-    const flash = game.modules.get("flash-rolls-5e");
+    const actors = this.members().filter((a) => a?.id && a.type !== "vehicle" && a.type !== "group");
+    const monks = game.modules.get("monks-tokenbar")?.active ? game.MonksTokenBar : null;
     try {
-      if (flash?.active && flash.api?.requestRoll && actors.length) {
-        return await flash.api.requestRoll({ requestType: "skill", rollKey: "prc", actorIds: actors.map((a) => a.id), dc: dc ?? undefined, sendAsRequest: true });
+      if (game.user.isGM && monks?.requestRoll && actors.length) {
+        return await monks.requestRoll(actors, { request: "skill:prc", silent: true, rollmode: "roll",
+          ...(dc != null ? { dc, showdc: true } : {}) });
       }
-    } catch (err) { console.warn("kg-realms | Flash Token Bar 5e roll request failed; asking in the chat instead:", err); }
+    } catch (err) { console.warn("kg-realms | Monk's TokenBar roll request failed; asking in the chat instead:", err); }
     if (game.system.id !== "dnd5e") return ui.notifications.info("KG Realms: ask the party for Perception rolls (no roll request for this game system).");
     const names = actors.length ? ` (${actors.map((a) => esc(a.name)).join(", ")})` : "";
     return ChatMessage.create({

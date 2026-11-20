@@ -5,7 +5,7 @@ export const INTEGRATIONS = [
   {id:'fxmaster',name:'FXMaster',use:'Scene effects.'},
   {id:'fxmaster-plus',name:'FXMaster+',use:'Water and local-map effects.'},
   {id:'tenacity',name:'Tenacity',use:'Spends on requested checks.'},
-  {id:'flash-rolls-5e',name:'Flash Token Bar 5e',use:'Encounter Perception roll requests.'},
+  {id:'monks-tokenbar',name:"Monk's TokenBar",use:'Encounter Perception roll requests, and parties on the token bar.'},
   {id:'vgmusic',name:'Video Game Music',use:'Scene and combat music.'}
 ];
 const rows = value => Array.from(value?.values?.() ?? value ?? []);

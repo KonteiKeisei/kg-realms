@@ -1,5 +1,6 @@
 import {RealmDialog} from "./ui-theme.mjs";
 import {registerPartyAppearance} from './party-appearance.mjs';
+import { installMonksPartyBar } from "./monks-bar.mjs";
 import {registerWindowAppearance} from './ui-theme.mjs';
 import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
 import {localMapPicture} from './local-map-tiles.mjs';
@@ -72,6 +73,8 @@ const travelBounce = new TravelBounce();
 const localMapRenderer = new LocalMapRenderer({seasonSource: scene => localMaps.seasonSource(scene)});
 const mapAssets=new MapAssets({onChange:terrain=>layer.setTerrain(terrain)});
 Hooks.once("init", () => {localMapRenderer.install();mapAssets.install();});
+// Monk's TokenBar: each party token is one bar entry showing who is inside it.
+Hooks.once("init", () => installMonksPartyBar());
 Hooks.on('renderSettingsConfig', (_app, html) => waterRegionSettingUI(html?.[0] ?? html));
 import { applyRouteEdits, smoothRoutes } from "./routes.mjs";
 import { RoadEditor } from "./ui-roads.mjs";
