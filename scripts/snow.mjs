@@ -261,11 +261,18 @@ export class SnowCover {
     try { map.addLayer(this.layer, before); } catch { /* style still loading: styledata comes again */ }
   }
 
-  /** Move the snow lines to the world's current date (or the Snow tab's preview month). */
+  /**
+   * Move the snow lines to the world's current date (or the Snow tab's preview month). The snow
+   * depends only on the day, so a clock tick within the same day neither recomputes nor repaints.
+   */
   setDate() {
     const cal = game.time.calendar, months = cal?.monthsArray?.length ?? (Array.isArray(cal?.months?.values) ? cal.months.values.length : Object.keys(cal?.months?.values ?? {}).length) ?? 12;
     const frac = this.previewFrac ?? yearFraction(game.time.components, cal);
-    if (this.sheet) this.lines = snowLines(frac, this.config, { height: this.sheet.height, milesPerPixel: this.sheet.milesPerPixel, months: months || 12 });
+    const drawn = this.drawn, sheet = this.sheet;
+    if (drawn && drawn.frac === frac && drawn.months === months && drawn.config === this.config && drawn.map === this.map
+      && drawn.sheet === sheet && drawn.height === sheet?.height && drawn.mpp === sheet?.milesPerPixel) return;
+    this.drawn = { frac, months, config: this.config, map: this.map, sheet, height: sheet?.height, mpp: sheet?.milesPerPixel };
+    if (sheet) this.lines = snowLines(frac, this.config, { height: sheet.height, milesPerPixel: sheet.milesPerPixel, months: months || 12 });
     this.map?.triggerRepaint();
   }
 
@@ -372,6 +379,7 @@ export class SnowCover {
       try { if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID); } catch { /* map gone */ }
     }
     this.map = this.layer = null;
+    this.drawn = null;
   }
 }
 /** Detailed regional maps opt in independently of the realm snow switch. */

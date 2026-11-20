@@ -2,7 +2,8 @@ import {MapAssetStore,sameGeometry} from './asset-store.mjs';
 import {KtxDecoder} from './ktx-decoder.mjs';
 import {TerrainLayer} from './terrain-layer.mjs';
 import {mapAssetsMenu} from './ui-map-assets.mjs';
-import {worldDef,worldUrl,defaultWorldId} from '../worlds.mjs';
+import {worldDef,defaultWorldId} from '../worlds.mjs';
+import {terrainSource,routed} from '../world-tiles.mjs';
 const ID='kg-realms';
 export class MapAssets {
   constructor({onChange=()=>{},store=new MapAssetStore()}={}){
@@ -46,8 +47,9 @@ export class MapAssets {
         try{
           const world=worldDef(wanted);
           if(!world?.terrainPack)throw Error('This world has no realm terrain to download.');
-          const base=world.assetBase??`modules/${world.module}`;
-          const res=await fetch(worldUrl(world.id,world.terrainPack),{cache:'no-cache'});
+          // The module's tiles, or the GM's own regenerated ones (world-tiles.mjs).
+          const source=terrainSource(world),base=source.base;
+          const res=await fetch(routed(source.pack),{cache:'no-cache'});
           if(!res.ok)throw Error(`Map manifest HTTP ${res.status}`);
           const manifest=await res.json();
           if(this.loadEpoch!==epoch)return;

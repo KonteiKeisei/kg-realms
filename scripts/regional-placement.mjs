@@ -10,14 +10,53 @@ export function rectangleLink(center,width,parentSheet,regionalSheet){
 }
 
 /** Every distinct parent-road crossing becomes the same endpoint on both maps. */
-export function regionalEntrances(routes,link,parentSheet,regionalSheet){
-  const p=sourceProjection(parentSheet),r=sourceProjection(regionalSheet),t=affine(link.anchors),polygon=link.footprint.map(q=>p.toSource(...q)),out=[];
-  for(const f of routes.features??[]){
-    if(f.geometry?.type!=='LineString')continue;
-    const pts=f.geometry.coordinates.map(q=>p.toSource(...q)),route=f.properties?.id??'road',kind=f.properties?.kind==='trail'?'Trail':'Road';let crossing=out.filter(e=>e.route===route).length;
+/** The labels crossings take, by the line's kind (roads, trails and the waterways' kinds). */
+export const CROSSING_KINDS = { road: "Road", trail: "Trail", river: "River", shore: "Shoreline", lane: "Sea route", wind: "Wind or current" };
+
+/**
+ * Where a realm's roads, trails and waterways cross a Regional map's outline (0.97.7: waterways too,
+ * before only roads and trails). routes: the realm's road GeoJSON; waterways: its waterways
+ * ({ [id]: { kind, name, pts } }, optional). Each crossing: { id, route (its line's id: a road's, or
+ * water-<id>), line ("road" | "water"), kind (its label), name, parent, region, parentLL, regionLL }.
+ * A crossing's id is its line and its order along it, so it keeps its adjustments across reloads.
+ */
+export function regionalEntrances(routes,link,parentSheet,regionalSheet,waterways={}){
+  return crossingsAndSections(realmLines(routes,waterways),link,parentSheet,regionalSheet).crossings;
+}
+/** A realm's roads, trails and waterways as lines to cross a Regional map with. */
+function realmLines(routes,waterways){
+  return [
+    ...(routes?.features??[]).filter(f=>f.geometry?.type==='LineString').map(f=>({route:f.properties?.id??'road',line:'road',type:f.properties?.kind==='trail'?'trail':'road',kind:f.properties?.kind==='trail'?'Trail':'Road',name:f.properties?.name??'',coords:f.geometry.coordinates,source:f.properties??{}})),
+    ...Object.entries(waterways??{}).filter(([,w])=>CROSSING_KINDS[w?.kind]&&w.kind!=='road'&&(w.pts?.length??0)>1).map(([id,w])=>({route:`water-${id}`,water:id,line:'water',type:w.kind,kind:CROSSING_KINDS[w.kind],name:w.name??'',coords:w.closed?[...w.pts,w.pts[0]]:w.pts,source:w}))
+  ];
+}
+/**
+ * Regional sections (0.97.7): each realm line's stretch inside a Regional map's outline, converted to
+ * the Regional map, from the crossing where it enters to the one where it leaves (or its own end, inside).
+ * { roads: [GeoJSON features], waters: { [id]: waterway } }, each carrying of (the realm line's id),
+ * from and to (crossing ids), its name and kind, and section: true. Ids are the line and the stretch's
+ * order along it, so an edit or a deletion of one keeps.
+ */
+export function regionalSections(routes,link,parentSheet,regionalSheet,waterways={}){
+  const {sections}=crossingsAndSections(realmLines(routes,waterways),link,parentSheet,regionalSheet),roads=[],waters={};
+  for(const s of sections){
+    if(s.pts.length<2)continue;
+    if(s.line==='road')roads.push({type:'Feature',properties:{id:`section:${s.route}:${s.k}`,kind:s.type,name:s.name||null,of:s.route,section:true,...(s.from?{from:s.from}:{}),...(s.to?{to:s.to}:{})},geometry:{type:'LineString',coordinates:s.pts}});
+    else{const {pts:_p,closed:_c,from:_f,to:_t,...rest}=s.source;waters[`section-${s.water}-${s.k}`]={...rest,name:s.name,pts:s.pts,of:s.route,section:true,...(s.from?{from:s.from}:{}),...(s.to?{to:s.to}:{})};}
+  }
+  return {roads,waters};
+}
+function crossingsAndSections(lines,link,parentSheet,regionalSheet){
+  const p=sourceProjection(parentSheet),r=sourceProjection(regionalSheet),t=affine(link.anchors),polygon=link.footprint.map(q=>p.toSource(...q)),out=[],sections=[];
+  const toRegionLL=q=>r.toLonLat(...t.toRegion(q));
+  for(const l of lines){
+    const pts=l.coords.map(q=>p.toSource(...q)),route=l.route,kind=l.kind;let crossing=out.filter(e=>e.route===route).length,k=0;
+    // The stretch inside the outline being walked: from its crossing (or the line's start, inside).
+    let run=pts.length&&pointInBiome(pts[0],polygon)?{from:null,pts:[toRegionLL(pts[0])]}:null;
+    const close=(to)=>{if(run){sections.push({...run,to,k:k++,route,line:l.line,type:l.type,name:l.name,water:l.water,source:l.source});run=null;}};
     for(let i=1;i<pts.length;i++){
       const a=pts[i-1],b=pts[i],cuts=segmentCuts(a,b,polygon);
-      for(const cut of cuts){
+      for(const cut of [...cuts].sort((x,y)=>x-y)){
         const before=mixPoint(a,b,Math.max(0,cut-1e-5)),after=mixPoint(a,b,Math.min(1,cut+1e-5));
         let crosses=pointInBiome(before,polygon)!==pointInBiome(after,polygon);
         // A traced route may end exactly on the boundary.
@@ -25,10 +64,43 @@ export function regionalEntrances(routes,link,parentSheet,regionalSheet){
         if(!crosses)continue;
         const at=mixPoint(a,b,cut);if(out.some(e=>e.route===route&&Math.hypot(e.parent[0]-at[0],e.parent[1]-at[1])<.01))continue;
         const native=t.toRegion(at),id=`regional-entry:${link.world}:${route}:${crossing++}`;
-        out.push({id,route,kind,name:`${kind} crossing ${out.length+1}${f.properties?.name?`: ${f.properties.name}`:''}`,parent:at,region:native,parentLL:p.toLonLat(...at),regionLL:r.toLonLat(...native)});
+        const n=out.filter(e=>e.kind===kind).length+1;
+        out.push({id,route,line:l.line,kind,lineName:l.name,name:`${kind} crossing ${n}${l.name?`: ${l.name}`:''}`,parent:at,region:native,parentLL:p.toLonLat(...at),regionLL:r.toLonLat(...native)});
+        // Entering: a stretch starts here; leaving: the one under way ends here.
+        if(pointInBiome(after,polygon))run={from:id,pts:[r.toLonLat(...native)]};
+        else{if(run)run.pts.push(r.toLonLat(...native));close(id);}
       }
+      if(run&&pointInBiome(b,polygon))run.pts.push(toRegionLL(b));
     }
-  }return out;
+    close(null);
+  }return {crossings:out,sections};
+}
+
+/**
+ * A Regional map's roads with its sections settled: a line of its own drawn between two crossings of
+ * the same realm line is that line's section (it takes the realm line's name and identity, of), and
+ * the converted section for that stretch is no longer drawn.
+ */
+export function settleSections(routes,entries){
+  const route=new Map(entries.map(e=>[e.id,e])),pair=(f,t)=>[f,t].sort().join('|'),covered=new Set();
+  const features=(routes?.features??[]).map(f=>{
+    const p=f.properties??{},a=route.get(p.from),b=route.get(p.to);
+    if(p.section||!a||!b||a.route!==b.route)return f;
+    covered.add(pair(p.from,p.to));
+    return {...f,properties:{...p,of:a.route,name:p.name||a.lineName||null}};
+  });
+  return {...routes,features:features.filter(f=>!(f.properties?.section&&covered.has(pair(f.properties.from,f.properties.to))))};
+}
+/** The same for a Regional map's waterways: a line drawn between two crossings of one realm waterway is its section. */
+export function settleWaterSections(waterways,entries){
+  const route=new Map(entries.map(e=>[e.id,e])),pair=(f,t)=>[f,t].sort().join('|'),covered=new Set(),out={};
+  for(const [id,w] of Object.entries(waterways??{})){
+    const a=route.get(w?.from),b=route.get(w?.to);
+    if(w?.section||!a||!b||a.route!==b.route){out[id]=w;continue;}
+    covered.add(pair(w.from,w.to));out[id]={...w,of:a.route,name:w.name||a.lineName||''};
+  }
+  for(const [id,w] of Object.entries(out))if(w?.section&&covered.has(pair(w.from,w.to)))delete out[id];
+  return out;
 }
 
 /** Regional crossing positions are local overrides; their realm-side anchors remain fixed. */
@@ -41,6 +113,17 @@ export function adjustedEntrances(entries,edits,sheet){
 export function followCrossingRoads(routes,entries){
   const byId=new Map(entries.map(e=>[e.id,e.regionLL]));
   return {...routes,features:(routes?.features??[]).map(f=>{const from=byId.get(f.properties?.from),to=byId.get(f.properties?.to);if((!from&&!to)||f.geometry?.type!=='LineString')return f;const coordinates=f.geometry.coordinates.map(p=>[...p]);if(from)coordinates[0]=[...from];if(to)coordinates[coordinates.length-1]=[...to];return {...f,geometry:{...f.geometry,coordinates}};})};
+}
+
+/** A Regional map's waterways tied to crossings (from, to: crossing ids) end where those crossings are, as its roads do. */
+export function followCrossingWaters(waterways,entries){
+  const byId=new Map(entries.map(e=>[e.id,e.regionLL])),out={};
+  for(const [id,w] of Object.entries(waterways??{})){
+    const from=byId.get(w?.from),to=byId.get(w?.to);
+    if((!from&&!to)||!Array.isArray(w.pts)||w.pts.length<2){out[id]=w;continue;}
+    const pts=w.pts.map(p=>[...p]);if(from)pts[0]=[...from];if(to)pts[pts.length-1]=[...to];out[id]={...w,pts};
+  }
+  return out;
 }
 
 /** Clip rather than project unrelated journeys onto the regional picture. */

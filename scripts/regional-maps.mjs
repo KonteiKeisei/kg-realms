@@ -79,8 +79,25 @@ export function compileRegions(parent, children) {
   return {root,regions,owner,segments,terrainAt,roads};
 }
 
-/** One canonical place, with separately editable positions on each map. */
-export function regionalPlaces(world,raw,links,indexes) {
+/** A link's projections between its realm (parent) and its Regional map, in lon/lat. */
+export function linkProjection(link,indexes){
+  if(!indexes[link.parent]||!indexes[link.world])return null;
+  const a=sourceProjection(indexes[link.parent].sourceMap),b=sourceProjection(indexes[link.world].sourceMap),t=affine(link.anchors);
+  return {toRegion:(lon,lat)=>b.toLonLat(...t.toRegion(a.toSource(lon,lat))),toParent:(lon,lat)=>a.toLonLat(...t.toParent(b.toSource(lon,lat)))};
+}
+
+/**
+ * One canonical place, with one position (0.97.5): inside a Regional map's outline the Regional map
+ * decides where places are. Its realm shows them where the Regional map has them, converted:
+ *  - a realm place moved on the Regional map (its edits there, childEdits) is drawn at that spot,
+ *    marked regionalPosition (the Regional map's id), so moving it on the realm saves it there too;
+ *  - a place made on the Regional map shows on the realm, marked regionalWorld (its rank still decides
+ *    the zoom it shows at); before 0.97.5 only those ticked to show "approximately" did.
+ * A realm place no one has moved on the Regional map keeps its realm position: the two agree already.
+ * childEdits(world): a Regional map's place edits ({ [id]: { lon, lat, ... } }); without it, only
+ * places made there carry their position up.
+ */
+export function regionalPlaces(world,raw,links,indexes,childEdits=()=>({})) {
   const out=[...(raw(world)??[])],own=links[world];
   const transfer=(p,from,to,transform,extra={})=>{
     const q={...p,...extra,lon:transform[0],lat:transform[1],canonicalWorld:p.canonicalWorld??from,canonicalId:p.canonicalId??p.id};
@@ -93,9 +110,16 @@ export function regionalPlaces(world,raw,links,indexes) {
     for(const p of raw(own.parent)??[])if(pointInBiome([p.lon,p.lat],own.footprint)&&!ids.has(p.id))out.push(transfer(p,own.parent,world,own.positions?.[p.id]??b.toLonLat(...t.toRegion(a.toSource(p.lon,p.lat)))));
   }
   for(const link of Object.values(links).filter(l=>l.parent===world)){
-    if(!indexes[link.world]||!indexes[world])continue;
-    const a=sourceProjection(indexes[world].sourceMap),b=sourceProjection(indexes[link.world].sourceMap),t=affine(link.anchors);
-    for(const p of raw(link.world)??[]){if(!(link.publish??[]).includes(p.id)||out.some(q=>q.id===p.id))continue;const at=a.toLonLat(...t.toParent(b.toSource(p.lon,p.lat)));if(pointInBiome(at,link.footprint))out.push(transfer(p,link.world,world,at,{regionalWorld:link.world,approximate:true}));}
+    const proj=indexes[world]?linkProjection(link,indexes):null;if(!proj)continue;
+    // Realm places the Regional map has moved: drawn where it has them.
+    const edits=childEdits(link.world)??{};
+    for(let i=0;i<out.length;i++){
+      const p=out[i];if(p.regionalWorld||!pointInBiome([p.lon,p.lat],link.footprint))continue;
+      const at=Number.isFinite(edits[p.id]?.lon)&&Number.isFinite(edits[p.id]?.lat)?[edits[p.id].lon,edits[p.id].lat]:link.positions?.[p.id];
+      if(at)out[i]={...p,...(()=>{const q=proj.toParent(at[0],at[1]);return {lon:q[0],lat:q[1]};})(),regionalPosition:link.world};
+    }
+    // Places made on the Regional map: shown on the realm, where the Regional map has them.
+    for(const p of raw(link.world)??[]){if(out.some(q=>q.id===p.id))continue;const at=proj.toParent(p.lon,p.lat);if(pointInBiome(at,link.footprint))out.push(transfer(p,link.world,world,at,{regionalWorld:link.world}));}
   }
   return out;
 }

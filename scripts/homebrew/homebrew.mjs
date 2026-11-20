@@ -16,6 +16,7 @@ import { exportModule, fillModulePacks, sceneFromModule, applyModuleCalendars, r
 import {promptInstalledScenes,registerSceneSetup,adoptPackagedScenes} from '../module-scenes.mjs';
 import {registerCompanionConfigurations,applyCompanionConfigurations} from '../companion-configuration.mjs';
 import { startBiomeClimates } from "../biome-weather.mjs";
+import { registerWorldTiles, terrainSource, ownTiles, ownTilesFolder, setOwnTiles } from "../world-tiles.mjs";
 import { MAX_PICTURE, TILE_SUFFIX, worldIdFrom, homebrewSheet, planTiles, packManifest, emptyIndex, ROUTES_FILE, milesFromGrid, resheet, DATA_HOME, dataFolder, inGameWorld, freeFolder, filesToMove, copyFiles, detailLevels, nextTileFolder } from "./plan.mjs";
 
 const ID = "kg-realms";
@@ -32,6 +33,7 @@ let reloading = false;
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
 export function registerHomebrew() {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
+  registerWorldTiles();
   registerSceneSetup();
   registerCompanionConfigurations();
   Hooks.on("createScene", sceneFromModule);
@@ -65,7 +67,28 @@ export function registerHomebrew() {
     await applyCompanionConfigurations();
     await resheetWorlds().catch((err) => console.warn(`${ID} | moving homebrew worlds`, err));
     await fillWorlds().catch((err) => console.warn(`${ID} | homebrew world files`, err));
+    await checkModuleTiles().catch((err) => console.warn(`${ID} | own map tiles`, err));
   });
+}
+
+/**
+ * A companion map drawn with its own tiles, whose module has since shipped different ones (an update):
+ * the GM is told once, and offered the module's. Nothing changes without the GM's say.
+ */
+async function checkModuleTiles() {
+  for (const [id, own] of Object.entries(game.settings.get(ID, "worldTiles") ?? {})) {
+    const def = worldDef(id);
+    if (!def || def.homebrew || !own?.modulePack) continue;
+    const pack = await fetch(worldUrl(id, def.terrainPack ?? "terrain-pack.json"), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const fingerprint = pack?.fingerprint;
+    if (!fingerprint || fingerprint === own.modulePack || fingerprint === own.noticed) continue;
+    const title = game.modules.get(def.module)?.title ?? def.module;
+    const useModule = await RealmDialog.confirm({ window: { title: `${def.title}: new map tiles` }, rejectClose: false,
+      content: `<p>${esc(title)} now has new map tiles for <b>${esc(def.title)}</b>. This game draws it with its own tiles, made ${esc(new Date(own.made).toLocaleDateString())}.</p><p>Use the module's new tiles? Your own stay saved in Data/${esc(own.folder)}.</p>` });
+    if (!isPrimaryGM()) return;
+    if (useModule) { await setOwnTiles(id, null); forgetWorld(id); const scene = game.scenes.find((s) => s.getFlag(ID, "world") === id); if (scene) await scene.update({ [`flags.${ID}.mapVersion`]: Date.now() }); }
+    else await setOwnTiles(id, { ...own, noticed: fingerprint });
+  }
 }
 
 /** The folders in a folder of the Data folder, by name; none when it is not there yet. */
@@ -394,19 +417,35 @@ async function convertScene(scene, id, { miles, backup = null }) {
  * map's tiles from the picture there. The field is Foundry's, so it saves with the scene as always.
  * Once the tiles are made it is emptied again: the tiles are the map's picture.
  */
+/**
+ * The world whose map tiles a scene can regenerate: a made-here world, or a companion module's (realm or
+ * Regional) map, whose new tiles are kept outside its module folder (world-tiles.mjs). Null otherwise.
+ */
+function mapWorldOf(scene) {
+  const made = homebrewOf(scene);
+  if (made) return made;
+  const def = worldDef(scene?.getFlag(ID, "world"));
+  return def && def.terrainPack && def.module !== ID && !def.homebrew ? def : null;
+}
+
 export function sceneMapPicture(root, scene) {
-  if (!root || !scene || !homebrewOf(scene) || root.querySelector("[data-kgr-map-picture]")) return;
+  const def = mapWorldOf(scene);
+  if (!root || !scene || !def || root.querySelector("[data-kgr-map-picture]")) return;
   const field = root.querySelector('[name$="background.src"]');
-  const used = scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
+  const own = homebrewOf(scene) ? null : ownTiles(def.id);
+  const used = own?.src ?? scene.getFlag(ID, "homebrewOriginal")?.background ?? "";
   const row = document.createElement("div");
   row.dataset.kgrMapPicture = "true";
   row.className = "form-group";
-  row.innerHTML = `<label>Map tiles ${q("Makes this realm map's tiles from the picture in Background Image. It is fitted to this map's shape, and a bigger picture keeps its detail when you zoom in. Places, roads, rivers and everything else stay where they are, on top of the new art.")}</label><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button></div><p class="hint">Choose the new picture in Background Image, then click this. The current map keeps working until the tiles are ready, then everyone's game reloads.${used ? ` Tiles last made from: ${esc(used)}` : ""}</p>`;
+  // A companion's map: new tiles are this game world's own, and the module's can come back.
+  const companion = !homebrewOf(scene), note = companion ? (own ? ` This map uses its own tiles, made ${esc(new Date(own.made).toLocaleDateString())}, not ${esc(game.modules.get(def.module)?.title ?? def.module)}'s.` : ` The new tiles are kept in Data/${esc(ownTilesFolder(def.id))}, so updating ${esc(game.modules.get(def.module)?.title ?? def.module)} never replaces them.`) : "";
+  row.innerHTML = `<label>Map tiles ${q("Makes this realm map's tiles from the picture in Background Image. It is fitted to this map's shape, and a bigger picture keeps its detail when you zoom in. Places, roads, rivers and everything else stay where they are, on top of the new art.")}</label><div class="form-fields"><button type="button" data-map-regen><i class="fa-solid fa-arrows-rotate"></i> Regenerate map tiles from this picture</button>${own ? `<button type="button" data-map-module><i class="fa-solid fa-rotate-left"></i> Use the module's tiles</button>` : ""}</div><p class="hint">Choose the new picture in Background Image, then click this. The current map keeps working until the tiles are ready, then everyone's game reloads.${used ? ` Tiles last made from: ${esc(used)}.` : ""}${note}</p>`;
   row.querySelector("[data-map-regen]").addEventListener("click", () => {
     const src = String(field?.value ?? "").trim() || backgroundOf(scene) || used;
     if (!src) return ui.notifications.warn("KG Realms: choose a picture in Background Image first.");
     regenerateMap(scene, src);
   });
+  row.querySelector("[data-map-module]")?.addEventListener("click", () => useModuleTiles(scene, def).catch((error) => ui.notifications.error(`KG Realms: ${error.message}`)));
   const native = field?.closest(".form-group");
   if (native) native.after(row);
   else (root.querySelector('.tab[data-tab="basics"]') ?? root.querySelector("form") ?? root).prepend(row);
@@ -414,20 +453,35 @@ export function sceneMapPicture(root, scene) {
 
 async function regenerateMap(scene, src) {
   if (!isPrimaryGM()) return ui.notifications.warn("KG Realms: the primary GM must regenerate map tiles.");
-  const id = homebrewOf(scene)?.id;
+  const id = mapWorldOf(scene)?.id;
   if (!id) return;
   try { return await runMapBuild(id, () => rebuildMap(scene, src)); }
   catch (error) { ui.notifications.warn(`KG Realms: ${error.message}`); }
 }
 
+/** Back to a companion's module tiles: this map's own are no longer read (their files stay). */
+async function useModuleTiles(scene, def) {
+  if (!isPrimaryGM()) return ui.notifications.warn("KG Realms: the primary GM changes a map's tiles.");
+  const title = game.modules.get(def.module)?.title ?? def.module;
+  const yes = await RealmDialog.confirm({ window: { title: "Use the module's tiles" }, rejectClose: false, content: `<p>Draw <b>${esc(def.title)}</b> with ${esc(title)}'s own map tiles again?</p><p class="hint">This map's own tiles stay saved in Data/${esc(ownTilesFolder(def.id))}. Everyone's game reloads.</p>` });
+  if (!yes) return;
+  await setOwnTiles(def.id, null);
+  forgetWorld(def.id);
+  await scene.update({ [`flags.${ID}.mapVersion`]: Date.now() });
+}
+
 async function rebuildMap(scene, src) {
-  const def = homebrewOf(scene);
+  const def = mapWorldOf(scene);
   if (!def || !src) return;
   if (isVideo(src)) return ui.notifications.warn("KG Realms: a video cannot be made into map tiles. Choose a picture.");
+  // A made-here world's tiles go in its own folder; a companion's in this game world's (world-tiles.mjs),
+  // never its module folder, which an update replaces.
+  const companion = !homebrewOf(scene), source = terrainSource(def), target = companion ? ownTilesFolder(def.id) : def.root;
   const read = async (rel) => (await fetch(worldUrl(def.id, rel), { cache: "no-store" })).json();
+  const readPack = async () => (await fetch(foundry.utils.getRoute(source.pack), { cache: "no-store" })).json();
   let blob, bitmap, index, oldPack;
   try {
-    index = await read("index.json"); oldPack = await read("terrain-pack.json");
+    index = await read("index.json"); oldPack = await readPack();
     const res = await fetch(foundry.utils.getRoute(src), { cache: "no-store" });
     if (!res.ok) throw Error(`HTTP ${res.status}`);
     blob = await res.blob(); bitmap = await createImageBitmap(blob);
@@ -453,7 +507,7 @@ async function rebuildMap(scene, src) {
     win.set("read", "done", size(bitmap.width, bitmap.height));
     step = "tiles"; halt();
     // A folder of their own: the map in use is not touched until every new tile is saved.
-    const folder = nextTileFolder(oldPack, crypto.randomUUID()), tileDir = `${def.root}/${folder}`;
+    const folder = nextTileFolder(oldPack, crypto.randomUUID()), tileDir = `${target}/${folder}`;
     await ensureDir(tileDir);
     await checkUploads(tileDir);
     const lods = planTiles(sheet, { folder, detail }), tiles = lods.flatMap((l) => l.tiles);
@@ -464,16 +518,22 @@ async function rebuildMap(scene, src) {
     const clean = lods.map((l) => ({ ...l, tiles: l.tiles.map(({ crop, ...t }) => t) }));
     const pack = packManifest(def.id, sheet, lods, await sha256(new TextEncoder().encode(JSON.stringify(clean))));
     if (!isPrimaryGM()) throw Error("GM authority changed. Ask the primary GM to rebuild the map.");
-    const latest = await read("terrain-pack.json");
+    const latest = await readPack();
     if (latest.fingerprint !== oldPack.fingerprint) throw Error("The map changed during this build. Rebuild from the current map.");
-    await uploadJson(def.root, "terrain-pack.json", pack);
+    await uploadJson(target, "terrain-pack.json", pack);
+    if (companion) {
+      // Read from here from now on, in place of the module's. Which module tiles they replaced is kept,
+      // so a module update with new tiles is noticed (checkModuleTiles).
+      const modulePack = await fetch(worldUrl(def.id, def.terrainPack ?? "terrain-pack.json"), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      await setOwnTiles(def.id, { folder: target, src, made: Date.now(), moduleVersion: game.modules.get(def.module)?.version ?? null, modulePack: modulePack?.fingerprint ?? null });
+    }
     published = true;
     win.set("save", "done");
     win.finished = true; win.message = "Done. Reloading..."; win.render();
     forgetWorld(def.id);
     // The tiles are the map's picture now: the field goes back to empty, and the scene never draws it too.
     if (backgroundOf(scene)) await setBackground(scene, null);
-    await scene.update({ [`flags.${ID}.homebrewOriginal.background`]: src, [`flags.${ID}.mapVersion`]: Date.now() });
+    await scene.update({ ...(companion ? {} : { [`flags.${ID}.homebrewOriginal.background`]: src }), [`flags.${ID}.mapVersion`]: Date.now() });
   } catch (err) {
     encoder?.stop();
     bitmap?.close();

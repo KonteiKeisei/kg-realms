@@ -1,0 +1,1019 @@
+{
+  "reviewed_version": "0.93.6",
+  "commit": "b9afbac31b86b149f302ed02d5f133b6893616f3",
+  "review_date": "2026-11-04",
+  "scope": "Public engine runtime source, assets and packaging; synthetic data probes only",
+  "scan_method": "Text-based counts, not an AST extraction or translation key count",
+  "totals": {
+    "runtime_modules": 132,
+    "lines": 27585,
+    "html_lines": 743,
+    "notification_calls": 179,
+    "i18n_calls": 5
+  },
+  "baseline_tests": {
+    "full": {
+      "passed": 708,
+      "failed": 0
+    },
+    "without_private_world": {
+      "passed": 573,
+      "failed": 0
+    }
+  },
+  "glyph_ranges_per_font_stack": [
+    "0-255",
+    "256-511",
+    "8192-8447"
+  ],
+  "font_stacks": [
+    "Noto Sans Regular",
+    "Noto Sans Medium",
+    "Noto Sans Italic"
+  ],
+  "css_scan_matches": {
+    "pixel_width_declarations": 119,
+    "nowrap": 56,
+    "physical_left_right_properties": 117,
+    "logical_properties": 3
+  },
+  "synthetic_probes": {
+    "tradeNames": {
+      "moscow": "",
+      "tokyo": "",
+      "cafe": "cafe"
+    },
+    "availability": {
+      "unavailable": "Unavailable",
+      "translatedUnavailable": "Stocked"
+    },
+    "sleep": {
+      "elf": "trance",
+      "elfe": "full",
+      "warforged": "none",
+      "forge": "full"
+    },
+    "types": {
+      "english": "domain",
+      "translated": "natural",
+      "englishLayer": "realms",
+      "translatedLayer": "places"
+    },
+    "regionalLink": {
+      "english": "dale",
+      "translated": null
+    },
+    "favored": {
+      "english": [
+        "forest"
+      ],
+      "translated": []
+    },
+    "currency": "1,234.5 gp",
+    "tradeNameCollision": {
+      "profileCount": 2,
+      "nameIndexSize": 1,
+      "moscowSelectedProfile": "tokyo"
+    },
+    "vessel": {
+      "englishActor": {
+        "mph": 1.5,
+        "crewed": false
+      },
+      "translatedActor": {
+        "mph": 2,
+        "crewed": true
+      },
+      "naivelyTranslatedLabelEnglishActor": {
+        "mph": 2,
+        "crewed": false
+      }
+    }
+  },
+  "files": [
+    {
+      "path": "scripts/authority.mjs",
+      "lines": 22,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/away-pause.mjs",
+      "lines": 65,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/biome-climate.mjs",
+      "lines": 208,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/biome-trace-worker.mjs",
+      "lines": 5,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/biome-trace.mjs",
+      "lines": 54,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/biome-weather.mjs",
+      "lines": 81,
+      "html_lines": 0,
+      "notification_calls": 2,
+      "i18n_calls": 1
+    },
+    {
+      "path": "scripts/biomes.mjs",
+      "lines": 142,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/borders.mjs",
+      "lines": 101,
+      "html_lines": 2,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/camp-messages.mjs",
+      "lines": 31,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/camp-resolution.mjs",
+      "lines": 26,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/camp-rolls.mjs",
+      "lines": 56,
+      "html_lines": 1,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/camp-tasks.mjs",
+      "lines": 55,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/camp.mjs",
+      "lines": 95,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/canvas-input.mjs",
+      "lines": 32,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/canvas-util.mjs",
+      "lines": 50,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/card-kinds.mjs",
+      "lines": 277,
+      "html_lines": 1,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/editor-frame.mjs",
+      "lines": 13,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/encounter-defaults.mjs",
+      "lines": 17,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/encounter-map.mjs",
+      "lines": 20,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/favored-terrain.mjs",
+      "lines": 64,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/float-panel.mjs",
+      "lines": 80,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/generator.mjs",
+      "lines": 151,
+      "html_lines": 2,
+      "notification_calls": 3,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/geo.mjs",
+      "lines": 159,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/journal-link.mjs",
+      "lines": 16,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/journals.mjs",
+      "lines": 112,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/journey-light.mjs",
+      "lines": 147,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/journey-state.mjs",
+      "lines": 20,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/journey-write.mjs",
+      "lines": 33,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/label-hits.mjs",
+      "lines": 18,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-icon-packs.mjs",
+      "lines": 76,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-map-effects.mjs",
+      "lines": 152,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-map-lods.mjs",
+      "lines": 99,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-map-renderer.mjs",
+      "lines": 367,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-maps.mjs",
+      "lines": 859,
+      "html_lines": 31,
+      "notification_calls": 5,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/local-places.mjs",
+      "lines": 117,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/main.mjs",
+      "lines": 1530,
+      "html_lines": 4,
+      "notification_calls": 16,
+      "i18n_calls": 2
+    },
+    {
+      "path": "scripts/map-layers.mjs",
+      "lines": 337,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/map-symbols.mjs",
+      "lines": 152,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/night-lights.mjs",
+      "lines": 78,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/panel-render.mjs",
+      "lines": 38,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/panel-scroll.mjs",
+      "lines": 18,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-appearance.mjs",
+      "lines": 26,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-encounters.mjs",
+      "lines": 11,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-groups.mjs",
+      "lines": 60,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-manager.mjs",
+      "lines": 93,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-token-fit.mjs",
+      "lines": 53,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-token.mjs",
+      "lines": 91,
+      "html_lines": 1,
+      "notification_calls": 3,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/party-ui.mjs",
+      "lines": 119,
+      "html_lines": 2,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/place-card.mjs",
+      "lines": 743,
+      "html_lines": 68,
+      "notification_calls": 12,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/place-links.mjs",
+      "lines": 98,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/places.mjs",
+      "lines": 133,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/pmtiles.mjs",
+      "lines": 340,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/realm-layer.mjs",
+      "lines": 620,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/realm-style.mjs",
+      "lines": 336,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/regional-maps.mjs",
+      "lines": 101,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/regional-place.mjs",
+      "lines": 16,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/regional-placement.mjs",
+      "lines": 93,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/regional-service.mjs",
+      "lines": 221,
+      "html_lines": 3,
+      "notification_calls": 6,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/rest-recovery.mjs",
+      "lines": 17,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/river-hazards.mjs",
+      "lines": 27,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/river-labels.mjs",
+      "lines": 13,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/routes.mjs",
+      "lines": 180,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/scene-ambience.mjs",
+      "lines": 48,
+      "html_lines": 0,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/scene-resize.mjs",
+      "lines": 8,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/settlement-entry.mjs",
+      "lines": 167,
+      "html_lines": 2,
+      "notification_calls": 4,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/snow.mjs",
+      "lines": 378,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/source-map.mjs",
+      "lines": 160,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/trade.mjs",
+      "lines": 77,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/travel-motion.mjs",
+      "lines": 30,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/travel-rules.mjs",
+      "lines": 56,
+      "html_lines": 3,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/travel.mjs",
+      "lines": 802,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-biomes.mjs",
+      "lines": 119,
+      "html_lines": 12,
+      "notification_calls": 5,
+      "i18n_calls": 1
+    },
+    {
+      "path": "scripts/ui-camp.mjs",
+      "lines": 1853,
+      "html_lines": 150,
+      "notification_calls": 11,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-card.mjs",
+      "lines": 319,
+      "html_lines": 21,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-docking.mjs",
+      "lines": 60,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-editbar.mjs",
+      "lines": 159,
+      "html_lines": 4,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-editor.mjs",
+      "lines": 130,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-encounter-box.mjs",
+      "lines": 117,
+      "html_lines": 10,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-hud.mjs",
+      "lines": 2247,
+      "html_lines": 117,
+      "notification_calls": 17,
+      "i18n_calls": 1
+    },
+    {
+      "path": "scripts/ui-layers.mjs",
+      "lines": 114,
+      "html_lines": 2,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-local.mjs",
+      "lines": 285,
+      "html_lines": 18,
+      "notification_calls": 3,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-pins.mjs",
+      "lines": 635,
+      "html_lines": 56,
+      "notification_calls": 11,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-practice.mjs",
+      "lines": 91,
+      "html_lines": 7,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-roads.mjs",
+      "lines": 736,
+      "html_lines": 43,
+      "notification_calls": 11,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-search.mjs",
+      "lines": 125,
+      "html_lines": 7,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-shell.mjs",
+      "lines": 80,
+      "html_lines": 4,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-snow.mjs",
+      "lines": 156,
+      "html_lines": 20,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-trade.mjs",
+      "lines": 127,
+      "html_lines": 11,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/ui-waterways.mjs",
+      "lines": 576,
+      "html_lines": 37,
+      "notification_calls": 9,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/walking-timing.mjs",
+      "lines": 64,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/watch-outcomes.mjs",
+      "lines": 38,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/watch-roll-view.mjs",
+      "lines": 20,
+      "html_lines": 6,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/waterways.mjs",
+      "lines": 648,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/weather-filter.mjs",
+      "lines": 32,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/worlds.mjs",
+      "lines": 55,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/fleet.mjs",
+      "lines": 102,
+      "html_lines": 0,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/hud.mjs",
+      "lines": 326,
+      "html_lines": 25,
+      "notification_calls": 1,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/money.mjs",
+      "lines": 23,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/panel-place.mjs",
+      "lines": 55,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/ride-view.mjs",
+      "lines": 118,
+      "html_lines": 6,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/road-editor.mjs",
+      "lines": 160,
+      "html_lines": 13,
+      "notification_calls": 7,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/routing.mjs",
+      "lines": 129,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/scenery-art.mjs",
+      "lines": 2745,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/street-names.mjs",
+      "lines": 219,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/transit.mjs",
+      "lines": 228,
+      "html_lines": 0,
+      "notification_calls": 2,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/city/ui.mjs",
+      "lines": 192,
+      "html_lines": 10,
+      "notification_calls": 4,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/export-plan.mjs",
+      "lines": 247,
+      "html_lines": 1,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/export.mjs",
+      "lines": 380,
+      "html_lines": 9,
+      "notification_calls": 11,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/homebrew.mjs",
+      "lines": 510,
+      "html_lines": 18,
+      "notification_calls": 15,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/ktx2-worker.mjs",
+      "lines": 36,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/map-build.mjs",
+      "lines": 8,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/plan.mjs",
+      "lines": 227,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/homebrew/tiles.mjs",
+      "lines": 48,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/asset-request.mjs",
+      "lines": 60,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/asset-store.mjs",
+      "lines": 189,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/detail-worker.mjs",
+      "lines": 45,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/detail.mjs",
+      "lines": 90,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/download-progress.mjs",
+      "lines": 36,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/fields-codes.mjs",
+      "lines": 8,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/grid.mjs",
+      "lines": 187,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/ktx-decoder.mjs",
+      "lines": 25,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/lod-cache.mjs",
+      "lines": 91,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/map-assets.mjs",
+      "lines": 107,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/model.mjs",
+      "lines": 60,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/noise.mjs",
+      "lines": 107,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/parchment-geography.mjs",
+      "lines": 1,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/parchment.mjs",
+      "lines": 35,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/render.mjs",
+      "lines": 484,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/satellite-detail.mjs",
+      "lines": 40,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/satellite-worker.mjs",
+      "lines": 175,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/terrain-layer.mjs",
+      "lines": 133,
+      "html_lines": 0,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    },
+    {
+      "path": "scripts/terrain/ui-map-assets.mjs",
+      "lines": 83,
+      "html_lines": 11,
+      "notification_calls": 0,
+      "i18n_calls": 0
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import {registerIntegrationSetup,promptIntegrations} from './integration-setup.m
 import {localMapPicture} from './local-map-tiles.mjs';
 import {PlacedTileLods} from './placed-tile-lods.mjs';
 import {sceneEditorTools} from './scene-tools.mjs';
+import {dayGate} from './day-gate.mjs';
 Hooks.once('init',registerIntegrationSetup);
 const placedTileLods=new PlacedTileLods();Hooks.once('init',()=>placedTileLods.install());
 Hooks.once('ready',async()=>{
@@ -81,11 +82,12 @@ import { SnowTab } from "./ui-snow.mjs";
 import { WaterwayEditor } from "./ui-waterways.mjs";
 import { BiomeEditor } from "./ui-biomes.mjs";
 import { biomeLookup, biomeTypes, biomeFlag, onlyBiomeFlagChanged, mergeBiomeConfig, biomeEdits } from "./biomes.mjs";
+import { followCrossingWaters } from "./regional-placement.mjs";
 import { hazardVisible, isRiverHazard, isHazard, hazardSubtype, HAZARD_TYPES } from "./river-hazards.mjs";
-import { EncounterBox } from "./ui-encounter-box.mjs";
+import { EncounterBox, heldEncounterId } from "./ui-encounter-box.mjs";
 import { HarvestWindow, isDowned } from "./harvest/ui-harvest.mjs";
 import { HarvestRun } from "./harvest/run.mjs";
-import { spoilFood } from "./harvest/items.mjs";
+import { spoilFood, repairHarvestIcons } from "./harvest/items.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
 import { seasonOf, buildSea, automaticPort, terrainHarbours } from "./waterways.mjs";
 import { TravelHud } from "./ui-hud.mjs";
@@ -128,7 +130,11 @@ const regional = new RegionalMaps({
   rawPlaces:(id,places)=>applyEdits(places,editsOf(id),"surface"),
   getTerrain:async(id,data)=>{await loadShippedWaterways(id);await loadShippedBiomes(id);return terrainFor(id,data);},
   getBiomes:id=>biomesOf(id),
-  getRoutes:async(id,data)=>{if(!data.routes)return {type:"FeatureCollection",features:[]};const file=await roadFile(worldUrl(id,data.routes)).catch(e=>{throw Error(`${id} roads: ${e.message}`);});const routes=regional.followRoutes(id,applyRouteEdits(file,routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
+  // A realm's waterways, for where they cross its Regional maps' outlines (crossings).
+  getWaterways:async(id)=>{await loadShippedWaterways(id);return waterwaysOf(id);},
+  // Crossing markers are the GM's, shown only while the map editor is open (0.97.7).
+  showCrossings:()=>game.user.isGM&&!!editor?.active,
+  getRoutes:async(id,data)=>{const file=data.routes?await roadFile(worldUrl(id,data.routes)).catch(e=>{throw Error(`${id} roads: ${e.message}`);}):{type:"FeatureCollection",features:[]};const routes=regional.followRoutes(id,applyRouteEdits(regional.withSections(id,file),routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
   revision:()=>[setting("placeEdits"),setting("routeEdits"),setting("biomes"),setting("waterways")],
   onChange:()=>{backgroundJourneys.clear();if(canvas.ready){localMaps.refreshNavigation();drawRegion();}}
 });
@@ -160,6 +166,10 @@ let tradeWrites = Promise.resolve();
 const trade = new TradeMarkets({
   getEdits: world => (setting("tradeEdits") ?? {})[world] ?? {},
   getScale: () => setting("priceScale"),
+  // A region's card sums up the trade of the settlements inside it (trade.mjs summarizeTrade).
+  getPlaces: world => realmPlaces(world),
+  // A Regional map trades from its realm's catalogue (trade.mjs data).
+  parentOf: world => regional.links[world]?.parent ?? null,
   saveEdits(world, id, value, revision) {
     tradeWrites = tradeWrites.catch(() => {}).then(async () => {
       if (!game.user.isGM) throw Error("Only a GM can edit trade.");
@@ -171,6 +181,31 @@ const trade = new TradeMarkets({
     return tradeWrites;
   }
 });
+/**
+ * Once (0.97.7): trade edits saved for a realm place while viewing it on its Regional map were kept
+ * under the Regional map, so the two maps showed different markets. Each moves to the place's realm
+ * record, where both maps now read it, unless the realm already has its own (then it is left as is).
+ */
+async function moveSharedTrade() {
+  if (!isPrimaryGM()) return;
+  const all = foundry.utils.deepClone(setting("tradeEdits") ?? {});
+  let moved = 0;
+  for (const link of Object.values(regional.links)) {
+    const own = all[link.world];
+    if (!own || !Object.keys(own).length) continue;
+    try { await regional.prepare(link.world); } catch { continue; }
+    for (const p of regional.places(link.world)) {
+      if (!p.canonicalWorld || p.canonicalWorld === link.world || !own[p.id]) continue;
+      const home = all[p.canonicalWorld] ??= {}, id = p.canonicalId ?? p.id;
+      if (home[id]) continue;
+      home[id] = own[p.id]; delete own[p.id]; moved++;
+    }
+  }
+  if (!moved || !isPrimaryGM()) return;
+  await game.settings.set(MODULE_ID, "tradeEdits", all);
+  ui.notifications.info(`KG Realms: moved the trade of ${moved} place${moved === 1 ? "" : "s"} shown on a Regional map to its realm record, where both maps now read it.`);
+}
+Hooks.once("ready", () => moveSharedTrade().catch((err) => console.warn(`${MODULE_ID} | shared trade:`, err)));
 const openCard = (ref, options) => cards.open(ref, options);
 /** A world's index, with its map sheet in use unless a realm map of another world is on screen. */
 const worldWithSheet = async (id) => { const data = await loadWorld(id); if (!current || current.region.world === id) applySourceMap(data.sourceMap); return data; };
@@ -202,8 +237,35 @@ const localMaps = new LocalMaps({
   presetsDone: () => setting("localPresetsDone") ?? [],
   savePresetsDone: (ids) => game.settings.set(MODULE_ID, "localPresetsDone", ids),
   // The realm map to go back to from a local map: the active one if it is of that world, else the first.
-  realmSceneFor: (world) => { const all = game.scenes.filter((s) => regionOf(s)?.world === world && (regionOf(s).level ?? "surface") === "surface"); return all.find((s) => s.active) ?? all[0] ?? null; }
+  realmSceneFor: (world) => { const all = game.scenes.filter((s) => regionOf(s)?.world === world && (regionOf(s).level ?? "surface") === "surface"); return all.find((s) => s.active) ?? all[0] ?? null; },
+  // An encounter's scene, or a camp's: the way back (the top bar) to its realm map.
+  encounterParent: (scene) => encounterParentOf(scene)
 });
+/**
+ * The realm map a scene an encounter is set on goes back to: the one whose journey is waiting at an
+ * encounter there, else one whose journey has an encounter there, else the realm map of the world
+ * whose placed encounter it is. { to, place, focus } or null.
+ */
+function encounterParentOf(scene) {
+  if (!scene || regionOf(scene)) return null;
+  // A camp's own scene (a journey's, or this GM's practice night's): the journey's realm map.
+  const camp = campJourneyFor(scene);
+  if (camp) return { to: camp.realScene ?? camp, place: null, focus: null };
+  const P = hud.camp.practice, practiceRealm = hud.scene?.realScene ?? hud.scene;
+  if (P && practiceRealm && Object.values(P.state?.watch?.scenes ?? {}).includes(scene.id)) return { to: practiceRealm, place: null, focus: null };
+  const realms = game.scenes.filter((s) => regionOf(s));
+  const placed = allWorlds().flatMap((w) => Object.entries(encountersOf(w.id) ?? {}).filter(([, e]) => e?.scene === scene.id).map(([id, e]) => ({ world: w.id, id, e })));
+  let fallback = null;
+  for (const real of realms) for (const view of journeyScenes(real)) {
+    const j = view.getFlag(MODULE_ID, "journey"), own = (j?.encounters ?? []).filter((e) => e.scene === scene.id);
+    const waiting = own.find((e) => heldEncounterId(j, e.id)) ?? placed.find((x) => heldEncounterId(j, x.id))?.e;
+    if (waiting) return { to: real, place: waiting.name, focus: null };
+    if (own.length && !fallback) fallback = { to: real, place: own[0].name, focus: null };
+  }
+  if (fallback) return fallback;
+  for (const x of placed) { const to = localMaps.realmSceneFor(x.world); if (to) return { to, place: x.e.name, focus: null }; }
+  return null;
+}
 const cityTravel=new SettlementTravelUI({localMaps});
 const partyManager=new PartyManager({before:scene=>syncJourney(scene,{force:true}),busy:id=>cityTravel.fleet.busy(id),
  // A party splitting mid settlement trip: the trip stops where the party is (unused fares refunded), rather than refusing.
@@ -301,9 +363,23 @@ function drawPlaces(list) {
   layer.setPlaces(placesGeoJSON(list, outlinedIds(list, regions)));
   layer.setAreas(areasGeoJSON(list, regions));
 }
-function refreshPlaces() {
+/**
+ * After biome edits (debounced): places only if one's outline follows a zone and so changed, the
+ * travel panel's route only while planning (a journey under way keeps the biomes it set off with),
+ * the background journeys, and the shoreline zones.
+ */
+const biomesChanged = foundry.utils.debounce(() => {
+  refreshPlaces({ onlyIfChanged: true });
+  water.refresh();
+  if (hud.state?.trip) hud.render(); else hud.refresh();
+  syncViewedJourneys();
+  syncShoreZones().catch((err) => console.warn("kg-realms | shared biome zones:", err));
+}, 250);
+function refreshPlaces({ onlyIfChanged = false } = {}) {
   if (!current) return;
-  current.places = placesFor(current.region.world, current.world.places, current.region.level);
+  const places = placesFor(current.region.world, current.world.places, current.region.level);
+  if (onlyIfChanged && JSON.stringify(places) === JSON.stringify(current.places)) return;
+  current.places = places;
   drawPlaces(current.places);
   nightLights.draw(current.places, layer.frame);
   pins.refresh();
@@ -390,7 +466,9 @@ async function installEncounterDefaults() {
 const shippedBiomes=new Map();
 async function loadShippedBiomes(world){if(!borderPlaces.has(world)){borderPlaces.set(world,{});loadWorld(world).then(data=>borderPlaces.set(world,Object.fromEntries((data.places??[]).filter(p=>p.area||p.follow||p.shore).map(p=>[p.id,p])))).catch(()=>borderPlaces.delete(world));}if(!shippedBiomes.has(world)){const work=(async()=>{const r=await fetch(worldUrl(world, "biomes.json"));if(r.status===404)return{};if(!r.ok)throw Error(`Biome defaults: HTTP ${r.status}`);return r.json();})().catch(error=>{console.warn("kg-realms | biome defaults:",error);return{unavailable:true};});shippedBiomes.set(world,work);work.then(data=>shippedBiomes.set(world,data)).catch(()=>shippedBiomes.delete(world));}return shippedBiomes.get(world);}
 const storedBiomes = world => mergeBiomeConfig(shippedBiomes.get(world) instanceof Promise?{}:shippedBiomes.get(world),(setting("biomes")??{})[world]??{});
-const biomesOf = world => zonesWithBorders(storedBiomes(world),borderIndex(world));
+// The borders a zone can follow are gathered (place edits, waterways) only when one does: the biome
+// editor reads this on every redraw.
+const biomesOf = world => { const c = storedBiomes(world); return Object.values(c.zones ?? {}).some((z) => z?.follow) ? zonesWithBorders(c, borderIndex(world)) : c; };
 let biomeWrites=Promise.resolve();
 function saveBiomes(world,fn){
   biomeWrites=biomeWrites.catch(()=>{}).then(async()=>{if(!game.user.isGM)return;const shipped=await loadShippedBiomes(world);if(shipped.unavailable)throw Error("Biome defaults could not load. Reload before saving biome edits.");const all=foundry.utils.deepClone(setting("biomes")??{}),next=fn(foundry.utils.deepClone(mergeBiomeConfig(shipped,all[world])));all[world]=biomeEdits(shipped,next);await game.settings.set(MODULE_ID,"biomes",all);});return biomeWrites;
@@ -417,7 +495,8 @@ async function loadShippedWaterways(world) {
   return shippedWaterways.get(world);
 }
 function storedWaterways(world) {
-  const out = { ...(shippedWaterways.get(world) ?? {}) };
+  // A Regional map: its realm waterway sections first (regional-placement.mjs), then the module's and its own.
+  const out = { ...regional.waterSections(world), ...(shippedWaterways.get(world) ?? {}) };
   for (const [id, w] of Object.entries((setting("waterways") ?? {})[world] ?? {})) { if (w) out[id] = w; else delete out[id]; }
   return out;
 }
@@ -430,11 +509,14 @@ function borderIndex(world) {
   for (const id of Object.keys(places)) if (!places[id]) delete places[id];
   return { shores: storedWaterways(world), zones: storedBiomes(world).zones ?? {}, places };
 }
-function waterwaysOf(world) { return waterwaysWithBorders(storedWaterways(world), borderIndex(world)); }
+// A Regional map's waterways tied to crossings end where those crossings are (regional-placement.mjs).
+function waterwaysOf(world) { const ww = waterwaysWithBorders(storedWaterways(world), borderIndex(world)); return regional.links[world] ? regional.settleWaters(world, followCrossingWaters(ww, regional.entrances(world))) : ww; }
 /** fn(the waterways as they are) gives them as they should be; only what differs from the module's is kept. */
 function saveWaterways(world, fn) {
   return waterwayWrites(async () => {
-    const shipped = await loadShippedWaterways(world), next = fn(foundry.utils.deepClone(waterwaysOf(world))) ?? {};
+    // What is there without the GM's own: the module's, and on a Regional map its realm sections where its crossings are.
+    const module = await loadShippedWaterways(world), next = fn(foundry.utils.deepClone(waterwaysOf(world))) ?? {};
+    const shipped = regional.links[world] ? followCrossingWaters({ ...regional.waterSections(world), ...module }, regional.entrances(world)) : module;
     const own = {};
     for (const [id, w] of Object.entries(next)) if (!shipped[id] || JSON.stringify(shipped[id]) !== JSON.stringify(w)) own[id] = w;
     for (const id of Object.keys(shipped)) if (!(id in next)) own[id] = null;
@@ -663,7 +745,7 @@ async function syncJourney(scene, { force = false } = {}) {
       await loadShippedWaterways(region.world);
       await loadShippedBiomes(region.world);
       if (!isPrimaryGM()) return;
-      const base = await roadFile(worldUrl(region.world, world.routes)).catch((e) => { throw new Error(`Routes: ${e.message}`); });
+      const base = regional.withSections(region.world, world.routes ? await roadFile(worldUrl(region.world, world.routes)).catch((e) => { throw new Error(`Routes: ${e.message}`); }) : { type: "FeatureCollection", features: [] });
       const worldKey = JSON.stringify([region.world, sourceMap]);
       if (entry.worldKey !== worldKey) { entry.hud = null; entry.key = null; entry.worldKey = worldKey; }
       if (!entry.hud) {
@@ -684,12 +766,12 @@ async function syncJourney(scene, { force = false } = {}) {
         });
       }
       entry.hud.unfocused=!!scene.partyId&&focusedScene(scene.realScene)!==scene;
-      const key = JSON.stringify([ROUTE_FIELDS.map((k) => state[k]), state.trip?.walking, state.trip?.biomeTravel, routeEditsOf(region.world), editsOf(region.world), waterwaysOf(region.world), biomesOf(region.world), setting("regionalMaps"), setting("travelRules"), entry.hud.speed().feet, entry.hud.favoredTerrains(), currentSeason()]);
+      const key = JSON.stringify([ROUTE_FIELDS.map((k) => state[k]), state.trip?.walking, state.trip?.biomeTravel, routeEditsOf(region.world), editsOf(region.world), waterwaysOf(region.world), state.trip?.biomeTravel?.version ? null : biomesOf(region.world), setting("regionalMaps"), setting("travelRules"), entry.hud.speed().feet, entry.hud.favoredTerrains(), currentSeason()]);
       const projection = JSON.stringify([state.trip, state.encounters, state.rest, encountersOf(region.world)]);
       entry.hud.forceSnapshot ||= forceNow;
       if (key !== entry.key) {
         entry.places = regional.destinations(region.world);
-        const routes = applyRouteEdits(base, routeEditsOf(region.world));
+        const routes = regional.followRoutes(region.world, applyRouteEdits(base, routeEditsOf(region.world)));
         entry.routes = world.sourceMap ? smoothRoutes(routes, toSource, toLonLat) : routes;
         await entry.hud.refresh();
         entry.key = key; entry.projection = projection;
@@ -755,6 +837,19 @@ async function refreshAwayCamp() {
   try {
     do {
       awayCamp.again = false;
+      // A practice night on one of its watch scenes (it went there with its Go to button): its own camp
+      // view, on this client's practice. On any other scene off the realm map the GM's practice ends.
+      const P = hud.camp.practice, here = canvas.scene;
+      if (P && here && !regionOf(here)) {
+        hud.camp.keepPractice = false;
+        if (Object.values(P.state?.watch?.scenes ?? {}).includes(here.id)) {
+          if (awayCamp.worker && awayCamp.worker !== hud) awayCamp.worker.camp.renderScene(null);
+          awayCamp.worker = null; awayCamp.key = null;
+          hud.camp.renderScene(hud.camp.prog());
+          continue;
+        }
+        if (game.user.isGM && !P.view) hud.camp.endPractice();
+      }
       const journey = campJourneyFor(canvas.scene), key = journey ? `${journey.id}:${journey.partyId ?? ""}` : null;
       if (!journey) { awayCamp.worker?.camp.renderScene(null); awayCamp.worker = null; awayCamp.key = null; continue; }
       let worker;
@@ -797,6 +892,8 @@ const harvest = new HarvestWindow({ hud });
 const harvestRun = new HarvestRun();
 // A player who joins or reloads during a harvest is sent it again.
 Hooks.once("ready", () => { if (!game.user.isGM) setTimeout(() => HarvestRun.askAgain(), 1500); });
+// Harvested items made with an icon Foundry doesn't have (0.96.0 to the 0.97.0 test build) get their real one.
+Hooks.once("ready", () => { if (isPrimaryGM()) repairHarvestIcons(game.actors).then((n) => { if (n) ui.notifications.info(`KG Realms: fixed the icons of ${n} harvested item${n === 1 ? "" : "s"}.`); }).catch((err) => console.warn(`${MODULE_ID} | harvest icons:`, err)); });
 Hooks.on("renderTokenHUD", (app, html) => {
   const token = app.object ?? app.token, root = html instanceof HTMLElement ? html : html?.[0];
   if (!game.user.isGM || !root || !isDowned(token)) return;
@@ -824,6 +921,8 @@ const checkSpoilage = foundry.utils.debounce(async () => {
 const encounterBox = new EncounterBox({ worldEncounters: () => setting("encounters") ?? {}, openCard: (ref) => openCard(ref), onJourneyChanged: (scene) => syncJourney(scene, { force: true }) });
 const refreshEncounterBox = () => (regionOf(canvas.scene) ? encounterBox.close() : encounterBox.refresh());
 const pins = new PinEditor({
+  // The map being edited, so each Ctrl+Z step only lands on the map it was taken on (undo-stack.mjs).
+  getWorld: () => current?.region.world ?? null,
   getLayer: () => layer,
   getPlaces: () => current?.places ?? [],
   getPlace: (id) => getPlace(id),
@@ -882,10 +981,14 @@ const pins = new PinEditor({
   }
 });
 const roads = new RoadEditor({
+  // The map being edited, so each Ctrl+Z step only lands on the map it was taken on (undo-stack.mjs).
+  getWorld: () => current?.region.world ?? null,
   getWorld:()=>current?.region.world,
   getWaterways:()=>current?waterwaysOf(current.region.world):{},
   getLayer: () => layer,
   getRoutes: () => current?.routes ?? { type: "FeatureCollection", features: [] },
+  // The roads as the map draws them (curved through their corners), for picking one by a click.
+  getDrawnRoutes: () => current?.drawn ?? current?.routes ?? { type: "FeatureCollection", features: [] },
   getBase: () => current?.routesBase ?? { type: "FeatureCollection", features: [] },
   getPlaces: () => current?.places ?? [],
   getEdits: () => (current ? routeEditsOf(current.region.world) : { edited: {}, added: {}, deleted: [] }),
@@ -902,6 +1005,10 @@ const roads = new RoadEditor({
 });
 
 const water = new WaterwayEditor({
+  // The map being edited, so each Ctrl+Z step only lands on the map it was taken on (undo-stack.mjs).
+  getWorld: () => current?.region.world ?? null,
+  // On a Regional map, its crossings: a line drawn from or to one is tied to it (regional-placement.mjs).
+  getCrossings: () => (current && regional.links[current.region.world] ? regional.entrances(current.region.world) : []),
   getLayer: () => layer,
   // The place that follows a shoreline; making one, or linking one of its name (the GM's choice).
   shorePlace: (id) => current?.places.find((p) => followOf(p) === `shore:${id}`) ?? null,
@@ -929,6 +1036,8 @@ const water = new WaterwayEditor({
   getSea: () => hud.sea
 });
 const biomes = new BiomeEditor({
+  // The map being edited, so each Ctrl+Z step only lands on the map it was taken on (undo-stack.mjs).
+  getWorld: () => current?.region.world ?? null,
   // Outlines a zone can follow, and the place made from or following it.
   getBorderChoices:(self,name)=>current?borderChoices(borderIndex(current.region.world),self,name,{closedOnly:true}):[],
   zonePlace:id=>current?.places.find(p=>p.biomeZone===id||followOf(p)===`biome:${id}`)??null,
@@ -959,6 +1068,8 @@ function setMapEditor(on) {
   hud.suspend(true);
   layer.setEditing(true);
   editor.open();
+  // Regional crossings show while the map editor is open (regional-service.mjs places).
+  if (regional.hasCrossings(current.region.world)) refreshPlaces();
   const tool = ui.controls?.controls?.tokens?.tools?.kgRealmsEditor;
   if (tool) { tool.active = true; ui.controls?.render(); }
 }
@@ -968,6 +1079,7 @@ editor.onClose = () => {
   const tool = ui.controls?.controls?.tokens?.tools?.kgRealmsEditor;
   if (tool) tool.active = false;
   editor.close();
+  if (current && regional.hasCrossings(current.region.world)) refreshPlaces();
   ui.controls?.render();
 };
 const card = new PlaceCard({
@@ -1123,7 +1235,9 @@ Hooks.once("init", () => {
   register("encounterDefaultsApplied", {scope:"world", config:false, type:Object, default:{}});
   register("localMapFxEnabled", {scope:"world", config:false, type:Boolean, default:false});
   register("localMapWaterRegions", {name:"Water regions (FXMaster+)",hint:"Performance intensive. Disable if maps load slowly or water effects cause lag.",scope:"world",config:true,type:Boolean,default:true,onChange:async()=>{await enableLocalMapFx().catch(error=>console.warn('kg-realms | Could not enable FXMaster world effects:',error));for(const w of allWorlds())await localMaps.applySceneEffects(w.id);}});
-  register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{refreshPlaces();water.refresh();biomes.refresh();hud.refresh();syncViewedJourneys();syncShoreZones().catch(err=>console.warn("kg-realms | shared biome zones:",err));}});
+  // A biome save: the editor follows at once; the rest once, a moment after the last of a run of edits
+  // (the save itself, and a click right after it, never wait for it), and only what a change can move.
+  register("biomes", {scope:"world",config:false,type:Object,default:{},onChange:()=>{biomes.refresh();biomesChanged();}});
   register("waterways", { scope: "world", config: false, type: Object, default: {}, onChange: async () => { refreshPlaces(); if(current)layer.setRiverNames(waterwaysOf(current.region.world)); await hud.refresh(); if (current) await terrainFor(current.region.world, current.world).catch(() => null); water.refresh(); refreshSnowGrid(); syncShoreZones().catch((err) => console.warn("kg-realms | shoreline biome zones:", err)); } });
   // Each world's snow (the Snow tab, snow.mjs): { [world]: { north, south, reversed, midwinter, mountains, hills } }.
   register("regionalSnow",{scope:"world",config:false,type:Object,default:{},onChange:()=>{attachSnow();snowTab.refresh();}});
@@ -1373,8 +1487,10 @@ async function drawRegion() {
   layer.places = placesGeoJSON(current.places, outlinedIds(current.places, world.regions));
   layer.areas = areasGeoJSON(current.places, world.regions);
   layer.mapLayers = chosenLayers();
-  if (world.routes) {
-    current.routesBase = await roadFile(worldUrl(region.world, world.routes)).catch(() => null);
+  // A Regional map's roads carry its realm sections even before it has roads of its own (regional-service.mjs).
+  if (world.routes || regional.links[region.world]) {
+    const file = world.routes ? await roadFile(worldUrl(region.world, world.routes)).catch(() => null) : { type: "FeatureCollection", features: [] };
+    current.routesBase = file && regional.withSections(region.world, file);
     if (current?.scene !== scene) return;
     current.routes = current.routesBase ? regional.followRoutes(region.world,applyRouteEdits(current.routesBase, routeEditsOf(region.world))) : null;
     current.drawn = curved(current.routes);
@@ -1393,7 +1509,8 @@ async function drawRegion() {
     dim: () => setting("look") === LOOKS.night, customMarkers: () => moduleMarkers(shippedMarkers(), setting("customMarkers") ?? {}),
     attribution: world.source,
       detail: world.detail,
-      sourceMap: world.sourceMap,
+      // A Regional map's places show at its own zooms (source-map.mjs placeZooms), not its picture's.
+      sourceMap: world.sourceMap && regional.links[region.world] ? { ...world.sourceMap, regional: true } : world.sourceMap,
       groundGeometry: world.ground ? Object.fromEntries(["land", "water", "cover", "rivers", "borders", "roads", "trails", "cliffs", "nature", "forests", "frame"].filter((k) => world.ground[k]).map((k) => [k, worldUrl(region.world, world.ground[k])])) : null
   });
   if (current?.scene !== scene) return;
@@ -1604,13 +1721,15 @@ Hooks.on("updateToken", (doc, changes, options) => {
   if (hud.partyTokens()[0]?.document?.id === doc.id) partyMoved();
 });
 Hooks.on("lightingRefresh", () => { if (setting("look") === LOOKS.auto && layer.options && layer.options.look !== currentLook()) layer.setLook(currentLook()); });
+const seasonDay = dayGate();
 Hooks.on("updateWorldTime", () => {
   if (setting("look") === LOOKS.auto) layer.setLook(currentLook());
-  // The snow line moves with the date, and seasonal local maps with it.
+  // The snow line moves with the date, and seasonal local maps with it (checked once a day: a
+  // change in the weather has its own hook).
   snow.setDate();
-  localMaps.applySeasons();
+  if (seasonDay(game.time.components)) localMaps.applySeasons();
   // The party travels with the clock.
-  if (current && hud.el && (!isPrimaryGM()||!current.scene.getFlag(MODULE_ID,'partyJourneys'))) hud.tick();
+  if (current && hud.el && (!isPrimaryGM()||!current.scene.getFlag(MODULE_ID,'partyJourneys'))) hud.clockTick();
   if (isPrimaryGM()) syncViewedJourneys();
   // The camp view on the camp's own scene follows the clock.
   if (awayCamp.worker) refreshAwayCamp();

@@ -26,6 +26,23 @@ const setting = (k, d) => { try { return game.settings.get(ID, k); } catch { ret
 /** A party token's middle (sceneParties gives token documents). */
 const centre = (t) => { const g = canvas.scene?.grid?.size ?? 100; return [t.x + (t.width ?? 1) * g / 2, t.y + (t.height ?? 1) * g / 2]; };
 
+/**
+ * Whether a document change can alter the HUD on the scene being viewed: its places (notes), a party
+ * (group) token, or a party actor with a token here. Characters, monsters and their actors never show
+ * in it, so their moves and updates do not redraw it on every client.
+ */
+export function cityHudChange(hook, doc, scene = globalThis.canvas?.scene) {
+  if (!scene) return false;
+  if (hook.endsWith("Note")) return !doc?.parent || doc.parent === scene;
+  if (hook.endsWith("Token")) {
+    if (doc?.parent && doc.parent !== scene) return false;
+    const actor = doc?.actor;
+    return !actor || actor.type === "group";
+  }
+  if (hook === "updateActor") return doc?.type === "group" && Array.from(scene.tokens ?? []).some((t) => t.actorId === doc.id || t.actor?.id === doc.id);
+  return false;
+}
+
 export class CityHud {
   /** travel: the SettlementTravelUI (planning, routes on the map, the fleet). */
   constructor(travel) { this.travel = travel; this.focus = null; this.allPlaces = false; }
@@ -36,7 +53,7 @@ export class CityHud {
     Hooks.on("canvasReady", () => this.show());
     Hooks.on("canvasTearDown", () => this.hide());
     const soon = () => this.render();
-    for (const h of ["updateToken", "createToken", "deleteToken", "updateNote", "createNote", "deleteNote", "updateActor"]) Hooks.on(h, (doc) => { if (!doc?.parent || doc.parent === canvas.scene || h === "updateActor") this.later(); });
+    for (const h of ["updateToken", "createToken", "deleteToken", "updateNote", "createNote", "deleteNote", "updateActor"]) Hooks.on(h, (doc) => { if (this.el && cityHudChange(h, doc)) this.later(); });
     Hooks.on("updateUser", (user, changes) => { if (foundry.utils.hasProperty(changes, `flags.${ID}.cityAsk`)) this.later(); });
     // The clock moving changes only the time shown: not a rebuild of the HUD (each second, with Calendaria).
     Hooks.on("updateWorldTime", () => { if (this.view === "rest") this.#clock(); });

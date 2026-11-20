@@ -12,7 +12,7 @@ import { shellHead, shellTabs, movable, placeKept, isLocked, toggleLocked, apply
 import { uiBounds } from "../ui-editbar.mjs";
 import { ruleTooltip, ruleParagraphs } from "../travel-rules.mjs";
 import { sceneParties, groupMembers } from "../party-groups.mjs";
-import { creatureProfile, partsFor, dcFor, diceText, coins, minutesText, workMinutes, tierOf, SIZES, PARTS, DEFAULT_DCS, HARVEST_SKILLS, TIERS } from "./catalog.mjs";
+import { creatureProfile, partsFor, pickParts, isCorePart, dcFor, diceText, coins, minutesText, workMinutes, tierOf, SIZES, PARTS, DEFAULT_DCS, HARVEST_SKILLS, TIERS } from "./catalog.mjs";
 import { HarvestRun, outcomeText } from "./run.mjs";
 
 const MODULE_ID = "kg-realms";
@@ -32,7 +32,7 @@ export const HARVEST_RULES = {
   dc: ruleParagraphs([["DC", "Base DC + half the creature's CR, rounded down + the part's difficulty."], ["Skill", "Survival takes 4 off the DC, Medicine 2, Sleight of Hand nothing."], ["GM", "The DCs tab changes the base DC, what each skill takes off, and every part's difficulty, for this world."]]),
   rarity: ruleParagraphs([["Rarity", "By the creature's CR. Common 0 to 1, uncommon 2 to 4, rare 5 to 10, very rare 11 to 16, legendary 17 or more."], ["Value", "Each rarity is worth more: ×1, ×2, ×5, ×15 and ×40. The world's Prices setting applies too."], ["Stacking", "Items are named by rarity and kind, never by the creature, so like stacks with like."]]),
   time: ruleParagraphs([["Time", "Each part takes time by the creature's size: Tiny 5 minutes, Small 10, Medium 20, Large 40, Huge 80, Gargantuan 120. Meat and hide take twice as long."], ["Together", "Players work at the same time, so the clock moves on by the longest share. A helper adds no time."], ["Travel", "The party stays where it is while it harvests."]]),
-  run: ruleParagraphs([["The harvest", "Carried out like the camp's activities: a step for each creature, on everyone's screen. The GM requests the rolls; each player rolls their own, with their bonus on the button. The GM rolls for anyone with no player online."], ["GM", "Allow a reroll, or rule any part a success or failure with a reason. Confirm results gives the leader that creature's parts."], ["Done", "The clock moves on by the longest share and the harvest is logged."]]),
+  run: ruleParagraphs([["The harvest", "Carried out like the camp's activities: a step for each creature, on everyone's screen. The GM requests the rolls; each player rolls their own, with their bonus on the button. The GM rolls for anyone with no player online."], ["GM", "Allow a reroll, or rule any part a success or failure with a reason. Until the results are confirmed, change who leads or helps; whoever changed rolls again."], ["Finish", "The parts go to each leader's sheet, the creatures are marked taken, the clock moves on by the longest share and the harvest is logged. Calling it off before then gives and marks nothing."]]),
   practice: ruleParagraphs([["Practice run", "The same steps, on your screen only. Every roll is quiet, without asking the players."], ["Nothing changes", "No chat card, no items, no time passes, no parts marked as taken, and nothing in the journal. The results show in the Log tab."]])
 };
 
@@ -187,15 +187,33 @@ export class HarvestWindow {
     const profile = creatureProfile(actor);
     profile.name = actor.name;
     const id = foundry.utils.randomID();
-    this.creatures.push({ id, tokenId, name, img, source, profile, crew: { leader: null, helper: null }, skip: new Set() });
+    // Its meat and hide, and one or two other parts picked once (kept on its token, so reopening the
+    // harvest or a player rejoining shows the same ones). A creature from a compendium keeps its pick
+    // for this harvest.
+    const token = tokenId ? game.scenes.get(this.sceneId)?.tokens.get(tokenId) : null, saved = token?.getFlag(MODULE_ID, "harvestPick");
+    const pick = new Set(Array.isArray(saved) ? saved : pickParts(partsFor(profile, { people: this.people, dcs: this.dcs })));
+    if (token && !Array.isArray(saved)) token.setFlag(MODULE_ID, "harvestPick", [...pick]).catch((err) => console.warn(`${MODULE_ID} | harvest pick:`, err));
+    this.creatures.push({ id, tokenId, name, img, source, profile, crew: { leader: null, helper: null }, skip: new Set(), pick, showAll: false });
     return id;
   }
 
-  /** A creature's parts as they stand: each with whether it was already taken (on its token, or earlier this session). */
-  partsOf(c) {
+  /** Every part a creature could give, each with whether it was already taken (on its token, or earlier this session) and whether it is offered. */
+  allPartsOf(c) {
     const taken = c.tokenId ? canvas.scene?.tokens.get(c.tokenId)?.getFlag(MODULE_ID, "harvested") ?? {} : {};
     const session = Object.fromEntries(this.log.filter((l) => !l.practice && l.creature === c.id).flatMap((l) => l.rows.filter((r) => r.outcome !== "nothing").map((r) => [r.part, r])));
-    return partsFor(c.profile, { people: this.people, dcs: this.dcs }).map((p) => ({ ...p, taken: taken[p.key] ?? session[p.key] ?? null }));
+    return partsFor(c.profile, { people: this.people, dcs: this.dcs }).map((p) => {
+      const t = taken[p.key] ?? session[p.key] ?? null;
+      return { ...p, taken: t, offered: isCorePart(p) || c.pick.has(p.key) || !!t };
+    });
+  }
+  /** A creature's parts as offered: its meat, its hide, the parts picked for it, and any already taken. */
+  partsOf(c) { return this.allPartsOf(c).filter((p) => p.offered); }
+
+  /** The GM adds back a part that was not picked: saved with the creature's pick. */
+  async #offer(c, key) {
+    c.pick.add(key); c.skip.delete(key);
+    const token = c.tokenId ? game.scenes.get(this.sceneId)?.tokens.get(c.tokenId) : null;
+    if (token) await token.setFlag(MODULE_ID, "harvestPick", [...c.pick]).catch((err) => console.warn(`${MODULE_ID} | harvest pick:`, err));
   }
   /** The parts the leader will work on: picked and not yet taken. */
   workOf(c) { return this.partsOf(c).filter((p) => !p.taken && !c.skip.has(p.key)); }
@@ -288,9 +306,13 @@ export class HarvestWindow {
       const rolls = doing && lead ? `<span class="hv-rolls">${bonus(lead, ls, dcFor(p, ls, this.dcs))}${help ? bonus(help, hs, dcFor(p, hs, this.dcs)) : ""}</span>` : `<span class="hv-dc">${p.taken ? "" : `DC ${dcFor(p, ls, this.dcs)}`}</span>`;
       return `<label class="hv-pt"><input type="checkbox" data-act="pick" data-id="${c.id}" data-key="${esc(p.key)}" ${p.taken || locked ? "disabled" : ""} ${doing ? "checked" : ""} aria-label="${esc(p.name)}"><div>${esc(p.name)} ${taken}</div>${rolls}<span class="hv-tm">${p.taken ? "" : minutesText(p.minutes)}</span><span class="hv-amt">${p.taken ? "done" : this.#amount(p)}</span></label>`;
     }).join("") || `<p class="hint">This creature gives nothing to harvest${c.profile.type === "humanoid" || c.profile.type === "giant" ? ". Eating humanoids and giants is off in the module settings" : ""}.</p>`;
+    // The parts not picked for it: hidden, unless the GM shows them to add one back.
+    const extra = this.allPartsOf(c).filter((p) => !p.offered);
+    const more = !extra.length ? "" : `<button type="button" class="hv-link" data-act="show-all" data-id="${c.id}">${c.showAll ? "Hide the other parts" : `Show all parts (${extra.length} more)`}</button>`
+      + (c.showAll ? extra.map((p) => `<label class="hv-pt hv-extra"><input type="checkbox" data-act="offer" data-id="${c.id}" data-key="${esc(p.key)}" ${locked ? "disabled" : ""} aria-label="Add ${esc(p.name)}"><div>${esc(p.name)} <small>${p.from ? `From ${esc(p.from)} · ` : ""}not picked for this creature</small></div><span class="hv-dc">DC ${dcFor(p, ls, this.dcs)}</span><span class="hv-tm">${minutesText(p.minutes)}</span><span class="hv-amt">${this.#amount(p)}</span></label>`).join("") : "");
     return `<div class="hv-cr open ${lead && work.length ? "ready" : ""}" data-drop="creature" data-id="${c.id}">${head}
       <div class="hv-crew">${slot("leader", lead, c.crew.leader?.skill)}${slot("helper", help, c.crew.helper?.skill)}</div>
-      <div class="hv-det"><div class="hv-cap">Parts<span class="sp"></span>${rule(HARVEST_RULES.dc)}${rule(HARVEST_RULES.rarity)}</div>${rows}
+      <div class="hv-det"><div class="hv-cap">Parts<span class="sp"></span>${rule(HARVEST_RULES.dc)}${rule(HARVEST_RULES.rarity)}</div>${rows}${more}
       ${c.source !== "on this scene" && !locked ? `<button type="button" class="hv-link" data-act="remove" data-id="${c.id}">Take off the list</button>` : ""}</div></div>`;
   }
 
@@ -358,8 +380,9 @@ export class HarvestWindow {
     if (act === "lock") { await toggleLocked("harvest"); return this.render(); }
     if (act === "min") { this.min = !this.min; return this.render(); }
     if (act === "fold" && c) { this.openId = this.openId === c.id ? null : c.id; return this.render(); }
+    if (act === "show-all" && c) { c.showAll = !c.showAll; return this.render(); }
     if (act === "show-run") { this.runner.min = false; return this.runner.render(); }
-    if (act === "call-off") { this.runner.end(); ui.notifications.info("KG Realms: the harvest was called off. Parts already confirmed were kept; no time passed."); return this.render(); }
+    if (act === "call-off") { this.runner.end(); ui.notifications.info("KG Realms: the harvest was called off. Nothing was given or marked taken, and no time passed."); return this.render(); }
     if (this.#lockedOut(act)) return;
     if (act === "unassign" && c) { if (b.dataset.role === "leader") { c.crew.leader = c.crew.helper; c.crew.helper = null; } else c.crew.helper = null; return this.render(); }
     if (act === "remove" && c) { this.creatures = this.creatures.filter((x) => x !== c); return this.render(); }
@@ -371,7 +394,7 @@ export class HarvestWindow {
 
   /** While a harvest is under way, who harvests what is fixed. */
   #lockedOut(act) {
-    if (!this.running || !["unassign", "remove", "skill", "pick", "assign", "add", "practice", "start", "save-dcs", "reset-dcs"].includes(act)) return false;
+    if (!this.running || !["unassign", "remove", "skill", "pick", "offer", "assign", "add", "practice", "start", "save-dcs", "reset-dcs"].includes(act)) return false;
     ui.notifications.warn("KG Realms: a harvest is under way. Finish it or call it off to change who harvests what.");
     return true;
   }
@@ -382,6 +405,7 @@ export class HarvestWindow {
     if (t.dataset.act === "practice") { this.practice = t.checked; return this.render(); }
     if (t.dataset.act === "skill" && c?.crew[t.dataset.role]) { c.crew[t.dataset.role].skill = t.value; return this.render(); }
     if (t.dataset.act === "pick" && c) { if (t.checked) c.skip.delete(t.dataset.key); else c.skip.add(t.dataset.key); return this.render(); }
+    if (t.dataset.act === "offer" && c && t.checked) return this.#offer(c, t.dataset.key).then(() => this.render());
   }
 
   async #saveDcs() {

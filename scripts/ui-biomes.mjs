@@ -4,13 +4,15 @@ import { nearestOnLine } from "./routes.mjs";
 import { BIOME_FIELDS, DEFAULT_BIOMES, biomeTypes, biomeZone, biomeLookup, biomePriority } from "./biomes.mjs";
 import { lonLatToSource, sourceToLonLat } from "./source-map.mjs";
 import { borderSelect, borderHome } from "./borders.mjs";
+import { EditorFrame } from "./editor-frame.mjs";
+import { MapUndo, nothingToUndo } from "./undo-stack.mjs";
 const esc=s=>foundry.utils.escapeHTML(String(s??""));
 /** Calendaria's climate zones, for a biome to take its weather from; none without Calendaria. */
 const climateZones=()=>{const list=game.modules.get("calendaria")?.active?globalThis.CALENDARIA?.api?.getCalendarZones?.()??[]:[];return list.map(z=>[z.id,game.i18n.localize(z.name??z.id)]);};
 const climateRow=(scope,value,blank)=>{const zones=climateZones();if(!zones.length)return"";return`<label>Weather <span class="kgr-rule" tabindex="0" data-tooltip="The Calendaria climate zone this biome's weather comes from. A party here gets its weather. Edit the zones under Calendaria's Zone Climate." data-tooltip-class="kgr-rule-tip">?</span><select data-scope="${scope}" data-field="climate">${blank?`<option value="">${esc(blank)}</option>`:""}${zones.map(([id,name])=>`<option value="${esc(id)}" ${id===value?"selected":""}>${esc(name)}</option>`).join("")}</select></label>`;};
 
 export class BiomeEditor {
-  constructor(options){Object.assign(this,options);this.active=false;this.undo=[];this.mode="zones";this.newType="plains";}
+  constructor(options){Object.assign(this,options);this.active=false;this.undo=new MapUndo(40);this.mode="zones";this.newType="plains";this.frame=new EditorFrame(()=>this.drawEdit(),options?.request,options?.cancel);}
   all(){return this.getBiomes?.()??{};}
   status(){return{hint:this.tracing?"Tracing the map biome...":this.traceMode?"Click inside the selected biome, or near its boundary.":this.tracePreview?"Review the traced outline. Drag corners to adjust; Enter saves it.":this.draft?"Click to add corners. Enter or double-click closes the biome zone.":this.selected?"Drag a corner, or click an edge to add a corner. Delete removes the selected corner.":"Draw a biome zone or select an existing one. Unzoned land uses the map's terrain.",esc:this.traceMode||this.tracing?"cancels tracing":this.draft?"cancels the zone":this.selected?"deselects the zone":"leaves editing",crosshair:!!(this.draft||this.traceMode)};}
   open(){
@@ -22,7 +24,7 @@ export class BiomeEditor {
     this.key=e=>{if(e.target?.closest?.("input,textarea,select"))return;if(e.key==="Escape"){this.stop(e);if(this.draft||this.selected||this.traceMode||this.tracing)this.select(null);else this.onLeave?.();}else if(e.key==="Enter"&&this.draft){this.stop(e);this.finish();}else if((e.key==="Delete"||e.key==="Backspace")&&this.node!=null){this.stop(e);this.removeNode();}else if(e.code==="KeyZ"&&(e.ctrlKey||e.metaKey)){this.stop(e);this.back();}};
     window.addEventListener("keydown",this.key,true);this.render();this.draw();
   }
-  close(){if(!this.active)return;this.active=false;this.cancelTrace();this.off?.();window.removeEventListener("keydown",this.key,true);this.panel?.remove();this.panel=null;this.selected=this.draft=this.drag=this.node=this.hover=null;this.coords=[];this.getLayer()?.setBiomes(null);this.getLayer()?.setRouteEdit(null,null);}
+  close(){if(!this.active)return;this.active=false;this.frame.clear();this.cancelTrace();this.off?.();window.removeEventListener("keydown",this.key,true);this.panel?.remove();this.panel=null;this.selected=this.draft=this.drag=this.node=this.hover=null;this.coords=[];this.getLayer()?.setBiomes(null);this.getLayer()?.setRouteEdit(null,null);}
   stop(e){e.preventDefault();e.stopImmediatePropagation();}
   global(e){const r=canvas.app.view.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top];}
   screen(pts=this.coords??[]){return pts.map(p=>this.getLayer().toScreen(...p));}
@@ -41,8 +43,9 @@ export class BiomeEditor {
     }catch(error){if(this.active&&epoch===(this.traceEpoch??0))ui.notifications.warn(`KG Realms: ${error.message}`);}
     finally{if(epoch===(this.traceEpoch??0)){this.traceWorker?.terminate();this.traceWorker=null;this.tracing=false;if(this.active){this.draw();this.render();}}}
   }
-  async commit(fn){if(!game.user.isGM)return;this.undo.push(structuredClone(this.all()));if(this.undo.length>40)this.undo.shift();await this.saveBiomes(fn);this.draw();this.render();}
-  async back(){const before=this.undo.pop();if(before){await this.saveBiomes(()=>before);this.select(null);}}
+  async commit(fn){if(!game.user.isGM)return;this.undo.push(this.getWorld?.(),structuredClone(this.all()));await this.saveBiomes(fn);this.draw();this.render();}
+  // Undo steps back on this map only (undo-stack.mjs): another map's biomes never land here.
+  async back(){const world=this.getWorld?.(),before=this.undo.pop(world);if(!before)return nothingToUndo(this.undo,world," on the biomes");await this.saveBiomes(()=>before);this.select(null);}
   down(e){
     if(!this.active||e.button!==0)return;const g=this.global(e),layer=this.getLayer();
     if(this.traceMode){this.stop(e);return this.traceAt(layer.fromScreen(...g));}
@@ -56,13 +59,22 @@ export class BiomeEditor {
     const hit=biomeLookup(this.all())(...layer.fromScreen(...g));
     if(hit?.zoneId){this.stop(e);this.select(hit.zoneId);}else this.select(null);
   }
-  move(e){if(this.drag!=null){this.stop(e);this.coords[this.drag]=this.getLayer().fromScreen(...this.global(e));this.draw();}else if(this.draft&&!this.tracePreview){this.hover=this.getLayer().fromScreen(...this.global(e));this.draw();}}
+  // While a corner is dragged or a new zone follows the pointer, only the edited outline is drawn, at
+  // most once a frame; every zone goes to the map again once the edit is saved (draw).
+  move(e){if(this.drag!=null){this.stop(e);this.coords[this.drag]=this.getLayer().fromScreen(...this.global(e));this.frame.schedule();}else if(this.draft&&!this.tracePreview){this.hover=this.getLayer().fromScreen(...this.global(e));this.frame.schedule();}}
+  /** The outline being edited and its corners, alone: what a drag or the pointer changes. */
+  drawEdit(){
+    if(!this.active)return;const ring=this.coords??[],follow=this.all().zones?.[this.selected]?.follow;
+    const line=this.draft?[...ring,...(this.hover?[this.hover]:[])]:ring.length>1?[...ring,ring[0]]:null;
+    this.getLayer()?.setRouteEdit(line,follow?[]:ring,this.node);
+  }
   async up(e){if(this.drag==null)return;this.stop(e);this.drag=null;if(this.tracePreview)return this.draw();const pts=structuredClone(this.coords),id=this.selected;await this.commit(c=>({...c,zones:{...c.zones,[id]:{...c.zones[id],pts}}}));}
   async finish(){if(!this.draft)return;if(this.coords.length<3)return ui.notifications.warn("KG Realms: a biome zone needs at least three corners.");const id=`bio-${foundry.utils.randomID()}`,type=this.newType,pts=structuredClone(this.coords),holes=structuredClone(this.traceHoles??[]);this.draft=null;this.hover=null;await this.commit(c=>({...c,zones:{...c.zones,[id]:{name:biomeTypes(c)[type]?.name??"Biome",type,pts,...(holes.length?{holes}:{}),overrides:{}}}}));this.select(id);}
   async removeNode(){if(this.coords.length<=3)return ui.notifications.warn("KG Realms: a biome zone needs at least three corners.");this.coords.splice(this.node,1);this.node=null;if(this.tracePreview)return this.draw();const id=this.selected,pts=structuredClone(this.coords);await this.commit(c=>({...c,zones:{...c.zones,[id]:{...c.zones[id],pts}}}));}
   draw(){
-    if(!this.active)return;const config=this.all(),types=biomeTypes(config),zones=Object.entries(config.zones??{}).map(([id,z])=>({...z,id,color:biomeZone({...z,id},types).color}));
-    if(this.draft&&this.coords?.length)zones.push({id:"draft",name:this.tracePreview?"Traced biome preview":"New zone",color:types[this.newType]?.color,pts:[...this.coords,...(this.hover?[this.hover]:[])],holes:this.traceHoles??[]});
+    if(!this.active)return;this.frame.clear();const config=this.all(),types=biomeTypes(config),zones=Object.entries(config.zones??{}).map(([id,z])=>({...z,id,color:biomeZone({...z,id},types).color}));
+    // A new zone's fill has its corners; the pointer's trailing corner is on the edit line (drawEdit).
+    if(this.draft&&this.coords?.length)zones.push({id:"draft",name:this.tracePreview?"Traced biome preview":"New zone",color:types[this.newType]?.color,pts:[...this.coords],holes:this.traceHoles??[]});
     else if(this.selected){const z=zones.find(z=>z.id===this.selected);if(z)z.pts=this.coords;}
     this.getLayer()?.setBiomes(zones,this.selected??"draft");
     this.getLayer()?.setRouteEdit(this.draft?[...this.coords,...(this.hover?[this.hover]:[])]:null,config.zones?.[this.selected]?.follow?[]:this.coords??[],this.node);this.onStatus?.();
@@ -80,7 +92,7 @@ export class BiomeEditor {
       const z=c.zones[this.selected],base=types[z.type]??types.plains;
       body=`<label>Zone name<input data-scope="zone" data-field="name" value="${esc(z.name)}" maxlength="200"></label><label>Biome type<select data-scope="zone" data-field="type">${options(z.type)}</select></label>${climateRow("zone",z.climate??"","Same as its type")}${this.borderRow(z)}<label>Overlap priority<input type="number" data-scope="zone" data-field="priority" min="${DEFAULT_BIOMES[z.type]?1:0}" max="1000" value="${z.priority===0&&DEFAULT_BIOMES[z.type]?"":z.priority??""}" placeholder="${base.priority}"></label><p class="hint">Lower numbers win where zones overlap. Blank inherits the type. Zero is reserved for custom biomes. At equal priority, the smaller zone wins. Modifiers do not stack.</p><div class="bio-fields">${this.fields(z.overrides??{},base,"zone")}</div><p class="hint">Leave an override blank to inherit its type's default. Watch duty and setup fatigue are unchanged.</p><div class="row"><button data-bio="inherit">Use type defaults</button><button data-bio="delete" class="danger">Delete zone</button></div>`;
     }else body=`<label>New zone's type<select data-bio="draw-type">${options(this.newType)}</select></label><div class="row"><button data-bio="trace" class="primary" ${this.getTerrain?"":"disabled"}>Trace map biome</button><button data-bio="draw">Draw manually</button></div><p class="hint">Trace finds the connected map terrain and offers an editable outline. Draw manually when an area needs a different boundary. Unzoned land keeps its map biome.</p><label>Existing zone<select data-bio="zone-select"><option value="">Select a zone</option>${Object.entries(c.zones??{}).map(([id,z])=>`<option value="${esc(id)}">${esc(z.name??id)}</option>`).join("")}</select></label>`;
-    this.panel.innerHTML=`<div class="row"><button data-bio="zones" class="${this.mode==="zones"?"on":""}">Zones</button><button data-bio="types" class="${this.mode==="types"?"on":""}">Type defaults</button><button data-bio="undo" ${this.undo.length?"":"disabled"}>Undo</button></div>${body}<p class="hint">Travel changes apply to new journeys. Active journeys keep their departure settings. New camps and party biome flags use current zone settings.</p><div class="row"><button data-bio="export">Export biomes</button><button data-bio="import">Import biomes</button>${this.selected?'<button data-bio="cancel">Done</button>':""}</div>`;this.onStatus?.();
+    this.panel.innerHTML=`<div class="row"><button data-bio="zones" class="${this.mode==="zones"?"on":""}">Zones</button><button data-bio="types" class="${this.mode==="types"?"on":""}">Type defaults</button><button data-bio="undo" ${this.undo.has(this.getWorld?.())?"":"disabled"}>Undo</button></div>${body}<p class="hint">Travel changes apply to new journeys. Active journeys keep their departure settings. New camps and party biome flags use current zone settings.</p><div class="row"><button data-bio="export">Export biomes</button><button data-bio="import">Import biomes</button>${this.selected?'<button data-bio="cancel">Done</button>':""}</div>`;this.onStatus?.();
   }
   /** Share an outline with a shoreline or a place instead of its own corners; make a place from this zone. */
   borderRow(z){

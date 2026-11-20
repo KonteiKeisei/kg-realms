@@ -42,7 +42,10 @@ export class PracticeTab {
   close() {
     if (!this.active) return;
     this.active = false;
-    this.camp.endPractice();
+    // Going to the practice's watch scene (its Go to button) keeps the practice running there.
+    const keep = this.camp.keepPractice;
+    this.camp.keepPractice = false;
+    if (!keep) this.camp.endPractice();
     this.panel?.remove();
     this.panel = null;
   }

@@ -19,7 +19,7 @@ import {ICON_PACKS,iconPackOverride,worldIconPack,resolvedIconPack,iconPackOptio
 
 const MODULE_ID = "kg-realms";
 /** How long the zoom stays still before which places show is decided again (the settle delay). */
-const SETTLE_MS = 450;
+const SETTLE_MS = 200;
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const KINDS_WITH_MAPS = new Set(["settlement", "site"]);
 
@@ -656,6 +656,9 @@ export class LocalMaps {
       const to = this.realmSceneFor?.(map.world);
       if (to) return { to, place: map.name, focus: { scene: to.id, placeId: map.placeId } };
     }
+    // A scene an encounter is set on goes back to its realm map (the one whose journey waits there first).
+    const encounter = this.encounterParent?.(scene);
+    if (encounter?.to && encounter.to.id !== scene.id) return encounter;
     return null;
   }
 

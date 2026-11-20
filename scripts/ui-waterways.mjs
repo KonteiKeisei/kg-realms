@@ -8,6 +8,7 @@ import { ruleTooltip } from "./travel-rules.mjs";
 // node, right-click a node to remove it. Esc steps back; Ctrl+Z undoes.
 import { onCanvas, RightClick } from "./canvas-input.mjs";
 import {EditorFrame} from './editor-frame.mjs';
+import { MapUndo, nothingToUndo } from "./undo-stack.mjs";
 import { nearestOnLine, lineMiles, joinLines } from "./routes.mjs";
 import { lonLatToSource, sourceToLonLat, SOURCE_MAP } from "./source-map.mjs";
 import { WATERWAY_KINDS, SEASONS, TRADE_WIND, RIVER_CURRENT, coastSegments, waterSideOf } from "./waterways.mjs";
@@ -18,6 +19,8 @@ const SIDES = { left: "Left of the line as drawn", right: "Right of the line as 
 const CLOSE_PX = 12;
 
 const HIT_PX = 9;
+// How near (screen px) a click to a Regional map's crossing snaps to it.
+const CROSS_PX = 12;
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
@@ -32,7 +35,7 @@ export class WaterwayEditor {
     this.drag = null;
     this.node = null;
     this.hover = null;
-    this.undo = [];
+    this.undo = new MapUndo(50);
     this.panel = null;
     this.right = new RightClick();
     this.previewFrame = new EditorFrame(() => this.#draw());
@@ -59,14 +62,14 @@ export class WaterwayEditor {
   all() { return this.getWaterways() ?? {}; }
 
   async #commit(fn) {
-    this.undo.push(foundry.utils.deepClone(this.all()));
-    if (this.undo.length > 50) this.undo.shift();
+    this.undo.push(this.getWorld?.(), foundry.utils.deepClone(this.all()));
     await this.saveWaterways(fn);
   }
 
+  /** Step back on this map only (undo-stack.mjs): another map's step never lands here. */
   async #undo() {
-    const prev = this.undo.pop();
-    if (!prev) return ui.notifications.info("KG Realms: nothing to undo.");
+    const world = this.getWorld?.(), prev = this.undo.pop(world);
+    if (!prev) return nothingToUndo(this.undo, world);
     await this.saveWaterways(() => prev);
     if (this.selected && !prev[this.selected]) this.selected = null;
     this.node = null;
@@ -144,7 +147,10 @@ export class WaterwayEditor {
         const first = layer.toScreen(...this.coords[0]);
         if (Math.hypot(first[0] - g[0], first[1] - g[1]) < CLOSE_PX) { this.coords.push([...this.coords[0]]); return this.#finish({ closed: true }); }
       }
-      this.coords.push(layer.fromScreen(...g));
+      // On a Regional map, a point put on a crossing snaps to it, and a line starting or ending there is tied to it.
+      const crossing = this.#crossingAt(g);
+      this.coords.push(crossing ? [...crossing.regionLL] : layer.fromScreen(...g));
+      (this.draft.ties ??= [])[this.coords.length - 1] = crossing?.id ?? null;
       return this.#draw();
     }
     if (this.pickingSide && e.button === 0) {
@@ -250,14 +256,27 @@ export class WaterwayEditor {
 
   #cancelDraft() { this.draft = null; this.coords = null; this.hover = null; this.#draw(); this.#render(); }
 
+  /** The crossing (a Regional map's) under a screen point, within the snap reach, or null. */
+  #crossingAt(g) {
+    const layer = this.getLayer();
+    let best = null, bd = CROSS_PX;
+    for (const c of this.getCrossings?.() ?? []) {
+      const [x, y] = layer.toScreen(...c.regionLL), d = Math.hypot(x - g[0], y - g[1]);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
   async #finish({ closed = false } = {}) {
     const d = this.draft;
     if (!d) return;
     if (this.coords.length < 2) return this.#cancelDraft();
     const id = `ww-${foundry.utils.randomID()}`, pts = this.coords;
     const extra = d.kind === "river" ? { current: RIVER_CURRENT } : d.kind === "wind" ? { factor: TRADE_WIND, seasons: [...SEASONS] } : closed ? { closed: true } : {};
+    // Started or ended on a crossing: tied to it, so it keeps meeting it when the crossing is moved.
+    const from = d.ties?.[0] ?? null, to = closed ? null : d.ties?.[pts.length - 1] ?? null;
     this.draft = null; this.hover = null;
-    await this.#commit((all) => ({ ...all, [id]: { kind: d.kind, name: "", pts, ...extra } }));
+    await this.#commit((all) => ({ ...all, [id]: { kind: d.kind, name: "", pts, ...extra, ...(from ? { from } : {}), ...(to ? { to } : {}) } }));
     this.select(id);
     // A new shoreline: which side is water, next.
     if (d.kind === "shore") { this.pickingSide = true; this.#render(); }

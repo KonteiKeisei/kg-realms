@@ -42,35 +42,35 @@ export const LB_PER_RATION = 3;
 /** Each part: its label, the DC it adds (the GM can change these), its value in gp and its weight in lb, each. */
 export const PARTS = {
   meat: { label: "edible meat", diff: 0, gp: MEAT_GP, lb: 1, perLb: true, icon: "icons/consumables/meat/steak-raw-red-pink.webp" },
-  greens: { label: "wild greens", diff: 0, gp: MEAT_GP, lb: 1, perLb: true, icon: "icons/consumables/vegetable/leaf-green.webp" },
+  greens: { label: "wild greens", diff: 0, gp: MEAT_GP, lb: 1, perLb: true, icon: "icons/consumables/plants/leaf-herb-green.webp" },
   hide: { label: "hide", diff: 2, gp: 0.5, lb: 10, icon: "icons/commodities/leather/leather-bolt-brown.webp" },
-  monsterHide: { label: "monster hide", diff: 2, gp: 2, lb: 12, icon: "icons/commodities/leather/leather-scales-brown.webp" },
-  scales: { label: "dragon scales", diff: 4, gp: 50, lb: 15, icon: "icons/commodities/leather/scales-red.webp" },
-  aberrantHide: { label: "aberrant hide", diff: 3, gp: 5, lb: 10, icon: "icons/commodities/biological/skin-purple.webp" },
-  fiendHide: { label: "fiend hide", diff: 3, gp: 10, lb: 10, icon: "icons/commodities/leather/leather-scales-red.webp" },
-  celestialSkin: { label: "celestial skin", diff: 4, gp: 25, lb: 8, icon: "icons/commodities/biological/skin-white.webp" },
-  feySkin: { label: "fey skin", diff: 3, gp: 8, lb: 6, icon: "icons/commodities/biological/skin-green.webp" },
+  monsterHide: { label: "monster hide", diff: 2, gp: 2, lb: 12, icon: "icons/commodities/leather/scales-brown.webp" },
+  scales: { label: "dragon scales", diff: 4, gp: 50, lb: 15, icon: "icons/commodities/leather/scales-blue.webp" },
+  aberrantHide: { label: "aberrant hide", diff: 3, gp: 5, lb: 10, icon: "icons/commodities/leather/fur-pink.webp" },
+  fiendHide: { label: "fiend hide", diff: 3, gp: 10, lb: 10, icon: "icons/commodities/leather/leather-patch-red.webp" },
+  celestialSkin: { label: "celestial skin", diff: 4, gp: 25, lb: 8, icon: "icons/commodities/leather/fur-white.webp" },
+  feySkin: { label: "fey skin", diff: 3, gp: 8, lb: 6, icon: "icons/commodities/leather/scales-green.webp" },
   giantHide: { label: "giant's hide", diff: 2, gp: 3, lb: 20, icon: "icons/commodities/leather/leather-bolt-tan.webp" },
   bark: { label: "bark", diff: 1, gp: 0.5, lb: 10, icon: "icons/commodities/wood/bark-brown.webp" },
   plating: { label: "plating", diff: 4, gp: 10, lb: 20, icon: "icons/commodities/metal/plate-steel.webp" },
-  graveSkin: { label: "grave-cloth skin", diff: 3, gp: 3, lb: 6, icon: "icons/commodities/biological/skin-grey.webp" },
+  graveSkin: { label: "grave-cloth skin", diff: 3, gp: 3, lb: 6, icon: "icons/commodities/leather/leather-patch-grey.webp" },
   bones: { label: "bones", diff: 0, gp: 0.1, lb: 1, perLb: true, icon: "icons/commodities/bones/bone-simple-white.webp" },
-  claws: { label: "claws", diff: 2, gp: 0.5, lb: 0.2, dice: [1, 4], icon: "icons/commodities/claws/claw-black.webp" },
-  talons: { label: "talons", diff: 2, gp: 0.5, lb: 0.2, dice: [1, 4], icon: "icons/commodities/claws/claw-bird-black.webp" },
-  fangs: { label: "fangs", diff: 2, gp: 0.3, lb: 0.1, dice: [1, 6], icon: "icons/commodities/bones/tooth-fang-white.webp" },
-  horn: { label: "horns", diff: 3, gp: 2, lb: 2, dice: [1, 2], icon: "icons/commodities/biological/horn-grey.webp" },
-  stinger: { label: "stinger", diff: 4, gp: 3, lb: 1, dice: [1, 1], icon: "icons/commodities/biological/stinger-black.webp" },
-  tailSpikes: { label: "tail spikes", diff: 3, gp: 0.5, lb: 0.5, dice: [1, 6], icon: "icons/commodities/bones/spike-bone-white.webp" },
+  claws: { label: "claws", diff: 2, gp: 0.5, lb: 0.2, dice: [1, 4], icon: "icons/commodities/claws/claw-brown-black.webp" },
+  talons: { label: "talons", diff: 2, gp: 0.5, lb: 0.2, dice: [1, 4], icon: "icons/commodities/claws/talon-black.webp" },
+  fangs: { label: "fangs", diff: 2, gp: 0.3, lb: 0.1, dice: [1, 6], icon: "icons/commodities/bones/tooth-canine-white.webp" },
+  horn: { label: "horns", diff: 3, gp: 2, lb: 2, dice: [1, 2], icon: "icons/commodities/bones/horn-simple-grey.webp" },
+  stinger: { label: "stinger", diff: 4, gp: 3, lb: 1, dice: [1, 1], icon: "icons/commodities/biological/stinger-insect-grey.webp" },
+  tailSpikes: { label: "tail spikes", diff: 3, gp: 0.5, lb: 0.5, dice: [1, 6], icon: "icons/commodities/biological/tail-spiked-green.webp" },
   venom: { label: "venom gland", diff: 5, gp: 10, lb: 0.5, dice: [1, 3], icon: "icons/consumables/potions/vial-cork-green.webp" },
-  gland: { label: "gland", diff: 6, gp: 25, lb: 2, dice: [1, 1], icon: "icons/commodities/biological/organ-sac-red.webp" },
+  gland: { label: "gland", diff: 6, gp: 25, lb: 2, dice: [1, 1], icon: "icons/commodities/biological/organ-bladder-red.webp" },
   eyes: { label: "eyes", diff: 3, gp: 2, lb: 0.2, dice: [1, 2], icon: "icons/commodities/biological/eye-blue.webp" },
   feathers: { label: "feathers", diff: 0, gp: 0.1, lb: 0.5, dice: [1, 6], unit: "bundle", icon: "icons/commodities/materials/feather-white.webp" },
-  wings: { label: "wing membrane", diff: 4, gp: 5, lb: 3, dice: [1, 2], icon: "icons/commodities/biological/wing-bat-brown.webp" },
+  wings: { label: "wing membrane", diff: 4, gp: 5, lb: 3, dice: [1, 2], icon: "icons/commodities/biological/wing-lizard-brown.webp" },
   silk: { label: "silk gland", diff: 3, gp: 5, lb: 1, dice: [1, 1], icon: "icons/commodities/cloth/thread-spindle-white.webp" },
-  ink: { label: "ink sac", diff: 2, gp: 1, lb: 1, dice: [1, 1], icon: "icons/consumables/potions/vial-cork-black.webp" },
-  arcane: { label: "arcane gland", diff: 5, gp: 15, lb: 1, dice: [1, 1], icon: "icons/commodities/biological/organ-sac-purple.webp" },
+  ink: { label: "ink sac", diff: 2, gp: 1, lb: 1, dice: [1, 1], icon: "icons/consumables/potions/vial-ornet-silver-black.webp" },
+  arcane: { label: "arcane gland", diff: 5, gp: 15, lb: 1, dice: [1, 1], icon: "icons/commodities/biological/organ-brain-pink-purple.webp" },
   blood: { label: "blood", diff: 3, gp: 5, lb: 0.5, dice: [1, 4], unit: "vial", icon: "icons/consumables/potions/vial-cork-red.webp" },
-  sap: { label: "sap", diff: 3, gp: 5, lb: 0.5, dice: [1, 4], unit: "vial", icon: "icons/consumables/potions/vial-cork-amber.webp" },
+  sap: { label: "sap", diff: 3, gp: 5, lb: 0.5, dice: [1, 4], unit: "vial", icon: "icons/consumables/potions/potion-tube-corked-orange.webp" },
   heart: { label: "heart", diff: 6, gp: 30, lb: 3, dice: [1, 1], icon: "icons/commodities/biological/organ-heart-red.webp" },
   essence: { label: "essence", diff: 4, gp: 10, lb: 0.5, dice: [1, 3], unit: "vial", icon: "icons/consumables/potions/vial-cork-blue.webp" },
   core: { label: "core", diff: 5, gp: 40, lb: 5, dice: [1, 1], icon: "icons/commodities/gems/gem-rough-ball-purple.webp" }
@@ -233,6 +233,21 @@ export function partsFor(profile, { people = false, dcs = DEFAULT_DCS } = {}) {
   if (profile.type === "ooze") add("essence", { label: "ooze residue", key: "residue", from: "ooze" });
   if (profile.type === "undead") add("essence", INCORPOREAL.test(profile.name) ? { label: "ectoplasm", key: "ectoplasm", from: "undead" } : { label: "grave dust", key: "grave-dust", from: "undead" });
   if (profile.type === "construct") add("core", { label: "animating core", from: "construct" });
+  return out;
+}
+
+/** The parts every creature that has them always offers: its meat (or greens) and its hide. */
+const CORE_PARTS = new Set(["meat", "greens", "hide", "monsterHide", "scales", "aberrantHide", "fiendHide", "celestialSkin", "feySkin", "giantHide", "bark", "plating", "graveSkin"]);
+export const isCorePart = (p) => CORE_PARTS.has(p.part);
+
+/**
+ * Which of a creature's other parts it offers (bones, fangs, a gland, and so on): one or two of them
+ * at random, as keys. Its meat and hide are always offered and are not part of this pick.
+ */
+export function pickParts(parts, rnd = Math.random) {
+  const others = parts.filter((p) => !isCorePart(p)).map((p) => p.key);
+  const n = Math.min(others.length, rnd() < 0.5 ? 1 : 2), out = [];
+  while (out.length < n) out.push(others.splice(Math.floor(rnd() * others.length), 1)[0]);
   return out;
 }
 

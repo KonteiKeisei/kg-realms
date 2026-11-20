@@ -17,6 +17,11 @@ export function userChangeMatters(changes) {
   return !!changes && ["active", "role", "viewedScene", "name"].some((k) => k in changes);
 }
 
+/** Whether a user update can change who the primary GM is: only a role (connecting has its own hook). */
+export function authorityChange(changes) {
+  return !!changes && "role" in changes;
+}
+
 export function primaryGMChoices(game = globalThis.game) {
   return { "": "Automatic: first connected GM in the user list", ...Object.fromEntries(Array.from(game?.users ?? []).filter((u) => u.isGM).map((u) => [u.id, u.name])) };
 }

@@ -11,6 +11,7 @@ import {RealmDialog} from "./ui-theme.mjs";
 import { latLonToScene } from "./geo.mjs";
 import { onCanvas, RightClick } from "./canvas-input.mjs";
 import {EditorFrame} from './editor-frame.mjs';
+import { MapUndo, nothingToUndo } from "./undo-stack.mjs";
 import { nearestOnLine, lineMiles, editsBetween, simplifyLine, smoothLine, joinLines, ROUTE_KINDS } from "./routes.mjs";
 import { lonLatToSource, sourceToLonLat, SOURCE_MAP } from "./source-map.mjs";
 import { RIVER_HAZARDS, HAZARD_TYPES, isRiverHazard, isNavalHazard, isHazard, hazardSubtype, hazardDefaults, normalizeEncounter, encounterFile, readEncounterFile } from "./river-hazards.mjs";
@@ -18,7 +19,8 @@ import { RIVER_HAZARDS, HAZARD_TYPES, isRiverHazard, isNavalHazard, isHazard, ha
 /** How far (sheet px) a node may lie from the simplified line: about half a mile. */
 const SIMPLIFY_PX = 1.5;
 
-const HIT_PX = 9, SNAP_PX = 12;
+// HIT_PX: a corner. PICK_PX: a road's drawn line, to pick it or add a corner on it.
+const HIT_PX = 9, PICK_PX = 14, SNAP_PX = 12;
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 
 export class RoadEditor {
@@ -35,7 +37,7 @@ export class RoadEditor {
     this.draft = null;      // { kind, from, to } while drawing a new route
     this.drag = null;       // node index being dragged
     this.node = null;       // selected node index (Delete removes it)
-    this.undo = [];         // earlier route edits, newest last (Ctrl+Z)
+    this.undo = new MapUndo(50); // earlier route edits, newest last, each with its map (Ctrl+Z)
     this.encounter = null;  // selected encounter id
     this.placing = false;   // next click places an encounter
     this.hover = null;      // cursor [lon, lat] while drawing
@@ -74,21 +76,20 @@ export class RoadEditor {
 
   /** Every change goes through here, so Ctrl+Z can step back. */
   async #commit(fn) {
-    this.undo.push(foundry.utils.deepClone(this.getEdits()));
-    if (this.undo.length > 50) this.undo.shift();
+    this.undo.push(this.getWorld?.(), foundry.utils.deepClone(this.getEdits()));
     await this.saveEdits(fn);
   }
 
   /** An encounter change, remembered for Ctrl+Z like the road edits. */
   async #commitEnc(fn) {
-    this.undo.push({ encounters: foundry.utils.deepClone(this.getEncounters?.() ?? {}) });
-    if (this.undo.length > 50) this.undo.shift();
+    this.undo.push(this.getWorld?.(), { encounters: foundry.utils.deepClone(this.getEncounters?.() ?? {}) });
     await this.saveEncounters(fn);
   }
 
+  /** Step back on this map only (undo-stack.mjs): another map's step never lands here. */
   async #undo() {
-    const prev = this.undo.pop();
-    if (!prev) return ui.notifications.info("KG Realms: nothing to undo.");
+    const world = this.getWorld?.(), prev = this.undo.pop(world);
+    if (!prev) return nothingToUndo(this.undo, world);
     if (prev.encounters) {
       await this.saveEncounters(() => prev.encounters);
       if (this.encounter && !prev.encounters[this.encounter]) this.encounter = null;
@@ -133,12 +134,16 @@ export class RoadEditor {
     return coords.map(([lon, lat]) => layer.toScreen(lon, lat));
   }
 
-  /** The route under a screen point: { id, hit } or null. */
+  /**
+   * The route under a screen point: { id, hit } or null. Tested against the road as the map draws it
+   * (curved through its corners), not the straight lines between them: on a bend the two lie well
+   * apart, and a click on the drawn line missed.
+   */
   #routeAt(g) {
     let best = null;
-    for (const f of this.getRoutes().features) {
+    for (const f of (this.getDrawnRoutes ?? this.getRoutes)().features) {
       const hit = nearestOnLine(this.#screen(f.geometry.coordinates), g);
-      if (hit && hit.distance < HIT_PX && (!best || hit.distance < best.hit.distance)) best = { id: f.properties.id, hit };
+      if (hit && hit.distance < PICK_PX && (!best || hit.distance < best.hit.distance)) best = { id: f.properties.id, hit };
     }
     return best;
   }
@@ -216,8 +221,12 @@ export class RoadEditor {
     if (this.selected) {
       const i = this.#nodeAt(g);
       if (i >= 0) { this.#stop(e); this.drag = i; this.dragChanged = false; this.node = i; this.#draw(); this.#render(); return; }
-      const hit = nearestOnLine(this.#screen(this.coords), g);
-      if (hit && hit.distance < HIT_PX) {
+      // A new corner where the drawn (curved) line was clicked, between the two corners whose stretch
+      // that is.
+      const curve = this.coords.length > 1 ? smoothLine(this.coords, lonLatToSource, sourceToLonLat) : this.coords;
+      const onCurve = nearestOnLine(this.#screen(curve), g);
+      const hit = onCurve && onCurve.distance < PICK_PX ? { point: onCurve.point, index: nearestOnLine(this.#screen(this.coords), onCurve.point)?.index ?? 0 } : null;
+      if (hit) {
         this.#stop(e);
         this.coords.splice(hit.index + 1, 0, this.getLayer().fromScreen(...hit.point));
         this.drag = hit.index + 1;

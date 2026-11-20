@@ -912,6 +912,16 @@ export class TravelHud {
     if (this.leader) return this.#sync().catch((err) => console.warn("kg-realms | journey sync:", err));
   }
 
+  /**
+   * The world clock moved. A player's map shows the GM's last snapshot, which only a scene update
+   * changes, so a player redraws the panel (times left, the camp) and not the map. A GM works the
+   * position out from the clock, so the map follows it.
+   */
+  clockTick() {
+    if (game.user.isGM || this.headless || this.refreshPending) return this.tick();
+    this.render();
+  }
+
   async advanceClock(seconds) {
     if (!this.leader || seconds <= 0) return;
     this.motionDuration = 8000;

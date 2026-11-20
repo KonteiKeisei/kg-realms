@@ -18,8 +18,15 @@ import {collectExportFiles,exportFileProblem,exportRepairReport} from './export-
 import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
 import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors} from '../scene-package-support.mjs';
 import {configurationSnapshot,exportCalendariaSettings} from '../companion-configuration.mjs';
+import { terrainSource } from '../world-tiles.mjs';
 
 const ID = "kg-realms";
+/**
+ * The oldest KG Realms that reads what an export holds, written as the module's required version.
+ * 0.94.9 added the last parts of the format: portable settings (configuration.json), deletions and
+ * Regional projections. Raise it, to a released version, only when the export format itself changes.
+ */
+export const EXPORT_READS_FROM = "0.94.9";
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const q = (tip) => `<span class="kgr-rule" tabindex="0" data-tooltip="${esc(tip)}" data-tooltip-class="kgr-rule-tip" aria-label="${esc(tip)}">?</span>`;
 const encoder = new TextEncoder();
@@ -129,7 +136,8 @@ export async function buildExport(def, { moduleId, title, version, rootScene, in
 
 async function buildWorldExport(def, { moduleId, title, version }, onStep, context = {}) {
   def = { ...worldDef(def.id), ...def };
-  const assetBase = def.assetBase ?? `modules/${def.module}`;
+  // The map's tiles: the module's, or the GM's own regenerated ones (world-tiles.mjs), which the export carries.
+  const tileSource = terrainSource(def), assetBase = tileSource.base;
   const dir = `${moduleId}/data/worlds/${def.id}`, entries = [], systemId = game.system?.id ?? "";
   const add = async (name, bytes) => {
     const e = zipEntry(name, bytes);
@@ -143,7 +151,8 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
 
   onStep("Reading the world's data", 0);
   const options=context.options??{},data = context.data ?? worldForExport(await worldData(def.id),options);
-  const index = await getJson("index.json"), pack = await getJson(def.terrainPack ?? "terrain-pack.json");
+  const index = await getJson("index.json");
+  const pack = tileSource.own ? await fetch(foundry.utils.getRoute(tileSource.pack), { cache: "no-store" }).then((r) => { if (!r.ok) throw Error(`${tileSource.pack}: HTTP ${r.status}`); return r.json(); }) : await getJson(def.terrainPack ?? "terrain-pack.json");
   // A companion's biome grid is world-relative data, not card artwork. Keep its path.
   if (index.terrain?.file) {
     const response = await get(index.terrain.file);
@@ -339,8 +348,10 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   await add(`${dir}/terrain-pack.json`, json(pack));
 
   // The module.
-  const kg = game.modules.get(ID);
-  const minimum=kg?.version&&(Number(kg.version.split('.')[0])>0||Number(kg.version.split('.')[1])>=94)?kg.version:'0.94.0';
+  // The oldest KG Realms that reads this export (EXPORT_READS_FROM), not the one exporting: a module
+  // exported from a test build (0.97.2-harvest-test) required that build, and Foundry switched the
+  // module off on any released KG Realms below it.
+  const minimum = EXPORT_READS_FROM;
   const manifest={ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: String(game.release?.generation??13), maximum:'14' }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) };
   manifest.relationships.requires.push(...sceneBehaviorRequirements(groups.get('Scene')??[]));
   if(!calendar&&configuration?.calendaria)manifest.relationships.recommends=[{id:'calendaria',type:'module',reason:'Restores this world\'s Calendaria settings and weather configuration.'}];

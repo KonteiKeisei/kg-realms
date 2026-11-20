@@ -5,7 +5,7 @@ import {observeMapUi} from '../ui-docking.mjs';
 import {CityTransit,tripActive,calendariaClock,MOVE_MS,CLOCK_MS} from './transit.mjs';
 import {CityRideView} from './ride-view.mjs';
 import {selectedParty,sceneParties} from '../party-groups.mjs';
-import {isPrimaryGM} from '../authority.mjs';
+import {isPrimaryGM,authorityChange} from '../authority.mjs';
 import {cityPosition,cityDuration} from './routing.mjs';
 const ID='kg-realms';
 export class CityFleet {
@@ -26,7 +26,9 @@ export class CityFleet {
   // Calendaria's clock speed and running state before settlement travel took it over, to put back.
   game.settings.register(ID,'cityClockBefore',{scope:'world',config:false,type:Object,default:{}});
   for(const [key,name,def,min,max,step,scope]of [['cityWalkMph','Settlement walking speed (mph)',3,.5,8,.5,'world'],['cityCarriageMph','Settlement carriage speed (mph)',6,1,20,.5,'world'],['cityTransitRate','Settlement travel speed',1,1,5,1,'world'],['cityCarriageVolume','Carriage ride volume',.35,0,1,.05,'client']])game.settings.register(ID,key,{name,scope,config:true,type:Number,default:def,range:{min,max,step}});
-  Hooks.on('ready',()=>this.changed());Hooks.on('updateUser',()=>this.changed());Hooks.on('updateSetting',s=>{if(s.key===`${ID}.primaryGM`)this.changed();});
+  // Who runs the trips (the primary GM) changes only with a role, a GM connecting or leaving, or the
+  // setting: not with camp messages, scene switches or other modules' user flags.
+  Hooks.on('ready',()=>this.changed());Hooks.on('updateUser',(_user,changes)=>{if(authorityChange(changes))this.changed();});Hooks.on('userConnected',()=>this.changed());Hooks.on('updateSetting',s=>{if(s.key===`${ID}.primaryGM`)this.changed();});
   Hooks.on('updateWorldTime',()=>{for(const w of this.workers.values())w.seenAt=performance.now();this.renderStatus();});
   Hooks.on('pauseGame',()=>{this.lastTick=performance.now();this.changed();});
   Hooks.on('updateToken',(doc,changes,options)=>{if(!isPrimaryGM()||!('x'in changes||'y'in changes))return;for(const [id,r]of this.active())if(r.scene===doc.parent?.id&&r.tokens.some(t=>t.id===doc.id)&&options?.kgRealmsCityRide!==r.id)this.worker(id).stop('The party token was moved manually.').catch(e=>ui.notifications.error(e.message));});

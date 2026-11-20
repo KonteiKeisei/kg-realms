@@ -1,7 +1,7 @@
 // Keep planned routes, roads and trails readable above Foundry's scene darkness. The map
 // sprite itself is darkened by Foundry, so lines drawn only inside MapLibre fade with it.
 import { latLonToScene } from "./geo.mjs";
-const SETTLE_MS = 450;
+const SETTLE_MS = 200;
 
 function trace(graphics, points) {
   graphics.moveTo(points[0].x, points[0].y);

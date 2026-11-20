@@ -77,8 +77,9 @@ test('inherited and published POIs retain canonical identity, metadata and visib
   const {parent,data,link,root,child}=fixture(),bryn={id:'bryn',name:'Bryn Shander',lon:root.toLonLat(115,115)[0],lat:root.toLonLat(115,115)[1],scene:'town',hidden:true,area:[[1,1],[2,2],[3,3]]},discovery={id:'cave',name:'Cave',lon:child.toLonLat(100,100)[0],lat:child.toLonLat(100,100)[1],hidden:true};
   const raw=w=>w==='realm'?[bryn]:[discovery],indexes={realm:parent,dale:data};
   const inherited=regionalPlaces('dale',raw,{dale:link},indexes).find(p=>p.id==='bryn');assert.equal(inherited.canonicalWorld,'realm');assert.equal(inherited.scene,'town');assert.equal(inherited.hidden,true);assert.equal(inherited.area,undefined);near(child.toSource(inherited.lon,inherited.lat)[0],150);
-  assert.equal(regionalPlaces('realm',raw,{dale:link},indexes).length,1);
-  const published=regionalPlaces('realm',raw,{dale:{...link,publish:['cave']}},indexes).find(p=>p.id==='cave');assert.equal(published.canonicalWorld,'dale');assert.equal(published.hidden,true);assert.equal(published.approximate,true);
+  // 0.97.5: every place made on the Regional map shows on the realm (not only ones ticked to), where the Regional map has it.
+  const onRealm=regionalPlaces('realm',raw,{dale:link},indexes);assert.equal(onRealm.length,2);
+  const shown=onRealm.find(p=>p.id==='cave');assert.equal(shown.canonicalWorld,'dale');assert.equal(shown.regionalWorld,'dale');assert.equal(shown.hidden,true);
 });
 test('regional position edits remain local while inherited metadata writes back to the canonical map',()=>{
   gmGame();const {parent,data,link,root}=fixture(),settings={regionalMaps:{dale:link}};game.settings.get=(_m,k)=>settings[k];

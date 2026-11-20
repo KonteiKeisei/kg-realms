@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.96.4: a camp catching up on watches saves once
+
+- When the clock moves on past several watches by itself (skipping ahead into a night's rest), the GM's client rolls every passed watch's dice and saves them all together, once, with the step the camp goes to: the first watch whose encounter came, else the watch now. Before, each watch was saved on its own, with a two-second dice reveal to wait through for each.
+
 ## 0.96.3: players draw the GM's route instead of working it out
 
 - During a journey, the GM's client works out the route (roads, sea passages, timing) and saves the finished plan with the journey, once, whenever it changes. Players' clients draw that plan instead of working out the whole route again themselves on every route or timing change. With no GM online, players work it out as before.

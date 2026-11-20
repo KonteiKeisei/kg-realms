@@ -28,11 +28,74 @@ export function cleanTrade(value) {
   return { profile: text(value.profile, 120), rows, houses: (value.houses ?? []).map(v => text(v, 200)).filter(Boolean).slice(0, 60) };
 }
 
+/** A region whose card sums up the trade of the places inside it: a territory or domain with a closed outline. */
+export const isTradeRegion = (p) => ["territory", "domain"].includes(p?.kind) && !!p.areaClosed && (p.area?.length ?? 0) >= 3;
+function inside([x, y], pts) {
+  let hit = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [ax, ay] = pts[j], [bx, by] = pts[i]; if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) hit = !hit; }
+  return hit;
+}
+/** The settlements inside a region's outline (not the region itself, nor other regions). */
+export const placesInRegion = (region, places) => places.filter((p) => p.id !== region.id && p.kind === "settlement" && Number.isFinite(p.lon) && Number.isFinite(p.lat) && inside([p.lon, p.lat], region.area));
+/**
+ * A region's trade: its places' markets ([{ place, market }]) as one, read-only. Each good once per
+ * role (export, import, specialty), with where it trades and at what price (where: [{ name, gp, hidden,
+ * availability }], gp before the world scale), the cheapest as its price; houses from them all.
+ */
+export function summarizeTrade(markets) {
+  const rows = new Map(), houses = new Set();
+  for (const { place, market } of markets) {
+    for (const h of market?.houses ?? []) houses.add(h);
+    for (const r of market?.rows ?? []) {
+      const key = `${r.group}-${r.good || tradeName(r.name)}`;
+      const row = rows.get(key) ?? { key, good: r.good, name: r.name, unit: r.unit, group: r.group, cat: r.cat, desc: r.desc, base: Infinity, mod: 1, availability: r.availability, supplier: "", source: "", where: [] };
+      // A good hidden at a place, or a place hidden from the players, stays the GM's.
+      row.where.push({ name: place.name, gp: r.base * r.mod, hidden: !!r.hidden || !!place.hidden || place.visibility === "hidden", availability: r.availability });
+      if (r.base * r.mod < row.base) row.base = r.base * r.mod;
+      rows.set(key, row);
+    }
+  }
+  const list = [...rows.values()].map((r) => ({ ...r, hidden: r.where.every((w) => w.hidden), where: r.where.sort((a, b) => a.gp - b.gp || a.name.localeCompare(b.name)) }));
+  return { profile: "", rows: list.sort((a, b) => b.where.length - a.where.length || a.name.localeCompare(b.name)), houses: [...houses].sort(), summary: { places: markets.length } };
+}
+
+/**
+ * Where a place's market is kept: the map the place belongs to (its canonicalWorld, under its id there),
+ * else the map it is on. { world, place } with the place's id as it is known there.
+ */
+export function tradeHome(world, place) {
+  if (!place?.canonicalWorld || place.canonicalWorld === world) return { world, place };
+  const { canonicalWorld, canonicalId, ...rest } = place;
+  return { world: canonicalWorld, place: { ...rest, id: canonicalId ?? place.id } };
+}
+
 export class TradeMarkets {
   constructor(options = {}) { Object.assign(this, options); this.loads = new Map(); }
+  /** A world's own trade file, as it ships (cached). */
+  raw(world) {
+    this.raws ??= new Map();
+    if (!this.raws.has(world)) {
+      const work = Promise.resolve().then(() => this.load ? this.load(world) : fetch(worldUrl(world, "trade.json")).then(r => { if (r.status === 404) return null; if (!r.ok) throw Error(`Trade data: HTTP ${r.status}`); return r.json(); }))
+        .then(d => ({ settlements: [], goods: [], signature_goods: [], houses: [], tags: {}, matches: {}, ...(d ?? {}) }));
+      this.raws.set(world, work);
+      work.catch(() => { if (this.raws.get(world) === work) this.raws.delete(world); });
+    }
+    return this.raws.get(world);
+  }
+  /**
+   * A world's trade data, indexed. A Regional map (parentOf gives its realm) trades from its realm's
+   * catalogue: the realm's goods, specialties, houses, tags and settlement profiles, with the Regional
+   * map's own entries winning where both have one (0.97.7). Before, a Regional map with no trade file
+   * of its own offered only a custom good.
+   */
   async data(world) {
     if (!this.loads.has(world)) {
-      const work = Promise.resolve().then(() => this.load ? this.load(world) : fetch(worldUrl(world, "trade.json")).then(r => { if (r.status === 404) return { settlements: [], goods: [], signature_goods: [], houses: [], tags: {}, matches: {} }; if (!r.ok) throw Error(`Trade data: HTTP ${r.status}`); return r.json(); })).then(data => {
+      const parent = this.parentOf?.(world) ?? null;
+      const work = Promise.all([this.raw(world), parent && parent !== world ? this.raw(parent) : null]).then(([own, realm]) => {
+        if (!realm) return structuredClone(own);
+        const byId = (a, b) => [...new Map([...(a ?? []), ...(b ?? [])].map(x => [x.id, x])).values()];
+        return { ...structuredClone(own), settlements: byId(realm.settlements, own.settlements), goods: byId(realm.goods, own.goods), signature_goods: byId(realm.signature_goods, own.signature_goods), houses: byId(realm.houses, own.houses), tags: { ...realm.tags, ...own.tags }, matches: { ...realm.matches, ...own.matches } };
+      }).then(data => {
         data.byId = new Map(data.settlements.map(s => [s.id, s]));
         data.byName = new Map(data.settlements.map(s => [tradeName(s.name), s]));
         data.goodsById = new Map([...data.goods, ...data.signature_goods].map(g => [g.id, g]));
@@ -66,7 +129,17 @@ export class TradeMarkets {
     return { profile: profile.id, rows, houses: (profile.houses ?? []).map(id => data.housesById?.get(id)?.name).filter(Boolean) };
   }
   async get(world, place) {
+    // A place shown on another map (a realm place on its Regional map, or the other way): one market,
+    // read where the place belongs, so both maps show and edit the same record (0.97.7).
+    const home = tradeHome(world, place);
+    if (home.world !== world) return this.get(home.world, home.place);
     const data = await this.data(world), mine = this.getEdits?.(world)?.[place.id] ?? null, own = mine ?? data.edits?.[place.id] ?? null;
+    // A region with no trade of its own: its places' trade, summed up (read-only).
+    if (!own && isTradeRegion(place) && this.getPlaces) {
+      const within = placesInRegion(place, await this.getPlaces(world));
+      const markets = (await Promise.all(within.map(async (p) => ({ place: p, market: await this.get(world, p) })))).filter((m) => m.market.rows.length || m.market.houses.length);
+      if (markets.length) return { ...summarizeTrade(markets), scale: economyScale(this.getScale?.()), revision: "null", overridden: false, data };
+    }
     const market = own ? cleanTrade(own) : this.defaults(data, this.profile(data, place));
     return { ...market, scale: economyScale(this.getScale?.()), revision: JSON.stringify(mine), overridden: !!own, data };
   }

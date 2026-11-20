@@ -3,8 +3,10 @@
 // creature, then Done. On a creature's step the GM requests the rolls; each person's row shows their
 // face, whether they lead or help, and their roll button with its bonus (the GM rolls for anyone with
 // no player online); the GM can allow a reroll, or rule any part a success or failure with a reason;
-// Confirm results gives the leader that creature's parts. Done moves the clock on by the longest
-// share and logs it all. A practice run is the GM's alone: rolled quietly, nothing kept.
+// Confirm results settles that creature's results. Finish gives every confirmed creature's parts to
+// its leader, marks it taken, moves the clock on by the longest share and logs it all; calling the
+// harvest off before that gives and marks nothing. A practice run is the GM's alone: rolled quietly,
+// nothing kept.
 //
 // The GM's client holds the run and sends it to the players; a player's roll comes back to the GM,
 // who takes it only from a user who owns that character.
@@ -25,12 +27,13 @@ const setting = (k) => { try { return game.settings.get(MODULE_ID, k); } catch {
 const skillMod = (actor, k) => Number(actor?.system?.skills?.[k]?.total ?? actor?.system?.skills?.[k]?.mod ?? 0) || 0;
 const signed = (n) => `${n >= 0 ? "+" : ""}${n}`;
 const SHORT = { sur: "Sur", med: "Med", slt: "Sle" };
+const first = (name) => String(name ?? "?").split(" ")[0];
 const showDC = () => setting("showPerceptionDC") !== false;
 const playersOf = (actor) => Array.from(game.users ?? []).filter((u) => u.active && !u.isGM && actor?.testUserPermission?.(u, "OWNER"));
 
 export const RUN_RULES = {
-  step: ruleParagraphs([["Each part", "One check by the leader. The helper rolls too: a success adds 1 to the leader's roll, a failure takes 1 off."], ["Success", "The part, in the amount rolled."], ["Failure", "Nothing, and it can be tried again. Fail by 5 or more and it is ruined. Meat: a quarter, mangled."], ["GM ruling", "The GM can rule any part a success or failure, with a recorded reason."]]),
-  done: ruleParagraphs([["Time", "Players work at the same time: the clock moves on by the longest share. The party stays where it is."], ["Log", "A chat card for the GM, and the Harvests journal."]])
+  step: ruleParagraphs([["The rolls", "The leader rolls once for the creature, checked against each part's own DC. The helper rolls once too: on each part the helper's roll beats, the leader gets +1; on each it misses, −1."], ["Success", "The part, in the amount rolled."], ["Failure", "Nothing, and it can be tried again. Fail by 5 or more and it is ruined. Meat: a quarter, mangled."], ["GM", "Rule any part a success or failure, with a recorded reason. Until the results are confirmed, the GM can change who leads or helps; whoever changed rolls again."]]),
+  done: ruleParagraphs([["Finish", "The parts go to each leader's sheet and the creatures are marked taken. Calling the harvest off before this gives and marks nothing."], ["Time", "Players work at the same time: the clock moves on by the longest share. The party stays where it is."], ["Log", "A chat card for the GM, and the Harvests journal."]])
 };
 
 /** A face: the portrait, or initials (the camp's). */
@@ -80,8 +83,19 @@ export function bestSkill(mods, all) {
  * Change a step's setup (before its rolls are asked for). change: { field: "lead" | "help" | "skill" |
  * "part", value, role, key, on }. party: [{ id, name, img, mods }]. Returns whether anything changed.
  */
-export function changeSetup(s, change, party) {
-  if (!s || s.asked || s.done) return false;
+export function changeSetup(s, change, party, { gm = false } = {}) {
+  // The party sets it up until the GM asks for the rolls; the GM can still change who leads or helps
+  // (and their skill) until the results are confirmed. Whoever changed rolls again; the parts are fixed.
+  if (!s || s.done || (s.asked && (!gm || change?.field === "part"))) return false;
+  // A roll belongs to the person and the skill they rolled: it moves with them (a leader and helper
+  // swapped keep theirs), and anyone new, or on another skill, rolls again.
+  const slotKey = (slot) => (slot ? `${slot.id}|${slot.skill}` : null);
+  const had = new Map(["lead", "help"].filter((r) => s[r] && s.rolls?.[r] != null).map((r) => [slotKey(s[r]), s.rolls[r]]));
+  const changed = changeSlots(s, change, party);
+  if (changed && s.asked) for (const role of ["lead", "help"]) { const kept = had.get(slotKey(s[role])); if (kept != null) s.rolls[role] = kept; else delete s.rolls[role]; }
+  return changed;
+}
+function changeSlots(s, change, party) {
   const who = (id) => { const m = party.find((x) => x.id === id); return m ? { id: m.id, name: m.name, img: m.img, skill: bestSkill(m.mods, s.all) } : null; };
   const { field, value } = change ?? {};
   if (field === "lead") {
@@ -107,17 +121,22 @@ export function changeSetup(s, change, party) {
   return true;
 }
 
-/** The checks of a creature's step: [{ id, key, role, actor, skill, dc }]. None until someone leads. */
+/**
+ * The checks of a creature's step: one roll for the leader and one for the helper, each checked against
+ * every part's own DC (so a roller's optional bonuses are asked about once per creature, not once per
+ * part). [{ id ("lead" | "help"), role, actor, skill, dc (when every part has the same DC, else null),
+ * part (the parts' names) }]. None until someone leads, or once the GM has ruled on every part.
+ */
 export function stepChecks(s) {
-  if (!s.lead) return [];
-  return s.parts.flatMap((p) => [
-    { id: `${p.key}|lead`, key: p.key, role: "lead", actor: s.lead.id, skill: s.lead.skill, dc: p.dcLead, part: p.name },
-    ...(s.help ? [{ id: `${p.key}|help`, key: p.key, role: "help", actor: s.help.id, skill: s.help.skill, dc: p.dcHelp, part: p.name }] : [])
-  ]);
+  const open = s.lead ? s.parts.filter((p) => !s.overrides?.[p.key]) : [];
+  if (!open.length) return [];
+  const names = open.map((p) => p.name).join(", ");
+  const one = (role, slot) => { const dcs = new Set(open.map((p) => (role === "lead" ? p.dcLead : p.dcHelp))); return { id: role, role, actor: slot.id, skill: slot.skill, dc: dcs.size === 1 ? [...dcs][0] : null, part: names }; };
+  return [one("lead", s.lead), ...(s.help ? [one("help", s.help)] : [])];
 }
 
-/** Whether a step's results can be confirmed: each part has the leader's roll, or a GM ruling. */
-export const stepReady = (s) => s.asked && !!s.lead && s.parts.length > 0 && s.parts.every((p) => s.overrides[p.key] || s.rolls[`${p.key}|lead`] != null);
+/** Whether a step's results can be confirmed: the leader has rolled, or the GM has ruled on every part. */
+export const stepReady = (s) => s.asked && !!s.lead && s.parts.length > 0 && (s.rolls.lead != null || s.parts.every((p) => s.overrides[p.key]));
 
 /**
  * A confirmed step's rows: each part's roll (with help), its DC and what it gave. amount(dice) rolls
@@ -129,8 +148,9 @@ export function stepRows(s, amount = rollAmount) {
     let check;
     if (o) check = { total: null, helped: 0, success: !!o.success, ruined: false };
     else {
-      const help = s.help && s.rolls[`${p.key}|help`] != null ? { total: s.rolls[`${p.key}|help`], dc: p.dcHelp } : null;
-      check = harvestCheck(s.rolls[`${p.key}|lead`], help, p.dcLead);
+      // The leader's one roll (and the helper's) against this part's own DC.
+      const help = s.help && s.rolls.help != null ? { total: s.rolls.help, dc: p.dcHelp } : null;
+      check = harvestCheck(s.rolls.lead, help, p.dcLead);
     }
     const y = harvestYield({ ...p, part: p.kind }, check, amount(p.dice));
     return { part: p.key, kind: p.kind, name: p.name, perLb: p.perLb, roll: o ? "GM" : check.total, helped: check.helped, dc: p.dcLead, outcome: y.outcome, qty: y.qty, cut: y.name, gp: y.qty * y.unitGp, unitGp: y.unitGp, key: y.key, by: s.lead.name, ruling: o ?? null };
@@ -215,6 +235,11 @@ export class HarvestRun {
   /** On joining or reloading: ask the GM for the run, if there is one. */
   static askAgain() { game.socket.emit(SOCKET, { type: "harvest-again", user: game.user.id }); }
 
+  /**
+   * Confirm a creature's results: worked out and kept with the run, nothing given yet. The parts go to
+   * the leaders' sheets and the creatures are marked taken only when the GM finishes the harvest
+   * (#finish); calling it off before then gives and marks nothing.
+   */
   async #confirm() {
     const s = this.step;
     if (!s || s.done || !stepReady(s) || this.saving) return;
@@ -222,14 +247,6 @@ export class HarvestRun {
     try {
       const scale = Number(this.gm?.hud?.priceScale) || 1;
       s.rows = stepRows(s).map((r) => ({ ...r, gp: r.gp * scale, unitGp: r.unitGp * scale }));
-      if (!this.run.practice) {
-        const lead = game.actors.get(s.lead.id);
-        if (!lead) throw new Error(`${s.lead.name} is no longer in the world`);
-        for (const r of s.rows) if (r.qty) await giveYield(lead, { key: r.key, name: r.cut, unitGp: r.unitGp, qty: r.qty, part: r.kind, at: game.time.worldTime });
-        const token = s.tokenId ? canvas.scene?.tokens.get(s.tokenId) : null;
-        const marks = Object.fromEntries(s.rows.filter((r) => r.outcome !== "nothing").map((r) => [r.part, { outcome: r.outcome, qty: r.qty, by: r.by }]));
-        if (token && Object.keys(marks).length) await token.setFlag(MODULE_ID, "harvested", { ...(token.getFlag(MODULE_ID, "harvested") ?? {}), ...marks });
-      }
       s.done = true;
       // Straight on to the next creature, or to Done after the last.
       this.run.at += 1;
@@ -246,11 +263,24 @@ export class HarvestRun {
     return Math.max(0, ...Object.values(out)) * 60;
   }
 
+  /** A confirmed creature's parts to its leader's sheet, and the creature's token marked taken. */
+  async #give(s) {
+    const lead = game.actors.get(s.lead.id);
+    if (!lead) throw new Error(`${s.lead.name} is no longer in the world`);
+    for (const r of s.rows) if (r.qty) await giveYield(lead, { key: r.key, name: r.cut, unitGp: r.unitGp, qty: r.qty, part: r.kind, at: game.time.worldTime });
+    const token = s.tokenId ? game.scenes.find((sc) => sc.tokens.get(s.tokenId))?.tokens.get(s.tokenId) : null;
+    const marks = Object.fromEntries(s.rows.filter((r) => r.outcome !== "nothing").map((r) => [r.part, { outcome: r.outcome, qty: r.qty, by: r.by }]));
+    if (token && Object.keys(marks).length) await token.setFlag(MODULE_ID, "harvested", { ...(token.getFlag(MODULE_ID, "harvested") ?? {}), ...marks });
+  }
+
   async #finish() {
     const r = this.run;
     if (!r || this.saving) return;
     this.saving = true; this.render();
     try {
+      // Only now: each confirmed creature's parts are given and it is marked taken. A creature already
+      // given (a finish that failed part way and is tried again) is not given twice.
+      if (!r.practice) for (const s of r.steps.filter((x) => x.done && !x.given)) { await this.#give(s); s.given = true; }
       const seconds = this.#seconds();
       const entries = r.steps.filter((s) => s.done).map((s) => ({ creature: s.cid, tokenId: s.tokenId, name: s.name, leader: s.lead.name, helper: s.help?.name ?? null, rows: s.rows, minutes: s.minutes, practice: r.practice }));
       await this.gm.onFinished(entries, seconds, r.practice);
@@ -284,7 +314,7 @@ export class HarvestRun {
         const ch = stepChecks(s).find((c) => c.id === id), actor = ch ? game.actors.get(ch.actor) : null;
         // The step may have moved on (confirmed, skipped, a reroll allowed) while a dialog was open.
         if (!ch || !actor || s.rolls[id] != null || s.done || r !== this.run) continue;
-        const flavor = `Harvest: ${ch.part} (${s.name}), ${HARVEST_SKILLS[ch.skill].label}${ch.role === "help" ? ", helping" : ""}`;
+        const flavor = `Harvest: ${s.name} (${ch.part}), ${HARVEST_SKILLS[ch.skill].label}${ch.role === "help" ? ", helping" : ""}`;
         const total = await skillRoll(actor, ch.skill, { dc: showDC() || game.user.isGM ? ch.dc : null, flavor, chat: !r.practice, dialog: dialog && ids.length === 1 });
         if (total == null) break;
         if (s.done || r !== this.run || s.rolls[id] != null) continue;
@@ -352,9 +382,10 @@ export class HarvestRun {
   /** A setup control changed: the GM applies it; a player sends it to the GM. */
   #setup(t) {
     const r = this.run, s = this.step;
-    if (!r || !s || s.asked || s.done) return;
+    // After the rolls are asked for, only the GM running it changes who leads or helps.
+    if (!r || !s || s.done || (s.asked && !this.authority)) return;
     const change = { field: t.dataset.hrSet, value: t.type === "checkbox" ? null : t.value, role: t.dataset.role, key: t.dataset.key, on: t.type === "checkbox" ? t.checked : undefined };
-    if (this.authority) { if (changeSetup(s, change, r.party)) this.#changed(); else this.render(); return; }
+    if (this.authority) { if (changeSetup(s, change, r.party, { gm: true })) this.#changed(); else this.render(); return; }
     // Show it straight away; the GM's copy comes back and settles it.
     changeSetup(s, change, r.party);
     this.render();
@@ -369,9 +400,9 @@ export class HarvestRun {
     return !r.practice && (r.party ?? []).some((p) => game.actors.get(p.id)?.isOwner);
   }
 
-  /** Who does what on this creature, open to the party until the GM requests its rolls. */
+  /** Who does what on this creature: open to the party until the GM requests its rolls, and to the GM until the results are confirmed. */
   #setupBox(s) {
-    const r = this.run, can = this.#canSet() && !s.asked && !s.done, party = r.party ?? [];
+    const r = this.run, can = this.#canSet() && !s.done && (!s.asked || this.authority), party = r.party ?? [];
     const mods = (id) => party.find((p) => p.id === id)?.mods ?? {};
     const people = (sel, skipId, none) => `${none ? `<option value="">${none}</option>` : ""}${party.filter((p) => p.id !== skipId).map((p) => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.name)}</option>`).join("")}`;
     const skills = (slot) => Object.entries(HARVEST_SKILLS).map(([k, sk]) => {
@@ -380,11 +411,8 @@ export class HarvestRun {
     }).join("");
     const dis = can ? "" : "disabled";
     const row = (label, field, slot, skipId, none) => `<div class="hr-setup-row"><span>${label}</span><select data-hr-set="${field}" aria-label="${label}" ${dis}>${people(slot?.id, skipId, none)}</select>${slot ? `<select data-hr-set="skill" data-role="${field}" aria-label="${label}: skill" ${dis}>${skills(slot)}</select>` : "<span></span>"}</div>`;
-    const parts = s.all.map((p) => `<label><input type="checkbox" data-hr-set="part" data-key="${esc(p.key)}" ${(s.skip ?? []).includes(p.key) ? "" : "checked"} ${dis}> ${esc(p.name)}</label>`).join("");
-    const note = s.done ? "" : s.asked ? "Set when the GM asked for the rolls." : can ? "Anyone in the party can change this until the GM requests the rolls." : "The party sets this; the GM then requests the rolls.";
-    return `<section class="hr-setup ${can ? "" : "locked"}"><div class="hr-part-head"><b>Who and what</b>${note ? `<span class="cs-note">${note}</span>` : ""}</div>
-      ${row("Leads", "lead", s.lead, null, s.lead ? "" : "Nobody yet")}${row("Helps", "help", s.help, s.lead?.id, "Nobody")}
-      <div class="hr-setup-parts">${parts}</div></section>`;
+    // Which parts to take is ticked on each part's own row (#partsTable).
+    return `<section class="hr-setup ${can ? "" : "locked"}">${row("Leads", "lead", s.lead, null, s.lead ? "" : "Nobody yet")}${row("Helps", "help", s.help, s.lead?.id, "Nobody")}</section>`;
   }
 
   #html() {
@@ -411,38 +439,73 @@ export class HarvestRun {
       <div class="cs-foot">${go}${gm ? "" : '<span class="cs-note">The GM moves the harvest on.</span>'}</div>`;
   }
 
-  /** A creature's step: each part with its people, their rolls and the result. */
+  /**
+   * The parts as one table. Its first row is the creature's rolls: the leader's one roll and the
+   * helper's, in their own columns, each checked against every part's DC. Then a row for each part,
+   * with its DC, whether each roll beat it, and its result under its name. The leader and helper are
+   * set once, above (#setupBox). Before the GM asks for the rolls each part has its tick (take it or
+   * not); after, only the ticked ones show.
+   */
+  #partsTable(s, mine) {
+    const gm = game.user.isGM, seen = gm || showDC(), r = this.run, asked = s.asked || s.done;
+    const can = this.#canSet() && !asked, gmRuns = gm && this.authority && !s.done;
+    const lead = s.lead ? game.actors.get(s.lead.id) ?? s.lead : null, help = s.help ? game.actors.get(s.help.id) ?? s.help : null;
+    // A part's DC for the leader or helper: worked out on the ticked parts, else from its DCs by skill.
+    const dcOf = (p, role) => { const slot = role === "lead" ? s.lead : s.help; return (role === "lead" ? p.dcLead : p.dcHelp) ?? (slot ? p.dcs?.[slot.skill] : null); };
+    const head = (who, slot) => `<th scope="col" title="${esc(who.name)}: ${esc(HARVEST_SKILLS[slot.skill]?.label ?? "")} ${signed(skillMod(who, slot.skill))}">${esc(first(who.name))} <small>${SHORT[slot.skill]} ${signed(skillMod(who, slot.skill))}</small></th>`;
+    // A person's one roll for the creature: its button, waiting, or the total (and the GM's reroll).
+    const needed = stepChecks(s).length > 0;
+    const rollCell = (who, role) => {
+      const id = role, total = s.rolls[id], slot = role === "lead" ? s.lead : s.help;
+      const label = `${SHORT[slot.skill]} ${signed(skillMod(who, slot.skill))}`;
+      if (total != null) return `<span class="hr-roll">${total}</span>${gmRuns ? `<button data-hr="reroll" data-id="${esc(id)}" class="hr-icon" title="Allow a reroll" aria-label="Allow ${esc(who.name)} a reroll"><i class="fa-solid fa-rotate-right"></i></button>` : ""}`;
+      if (s.done || !needed) return `<span class="cs-meta">-</span>`;
+      if (!s.asked) return `<span class="cs-meta">Waiting</span>`;
+      if (this.rollsFor(who)) { mine.push(id); return `<button data-hr="roll" data-id="${esc(id)}" class="primary hr-rollbtn" title="Roll ${esc(label)}, once for every part" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> ${this.rolling.has(id) ? "Rolling…" : "Roll"}</button>`; }
+      return `<span class="cs-meta">Waiting</span>${gmRuns ? `<button data-hr="roll" data-id="${esc(id)}" class="hr-icon" title="Roll ${esc(label)} for ${esc(who.name)}, once for every part" aria-label="Roll for ${esc(who.name)}" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i></button>` : ""}`;
+    };
+    // On a part's row: whether that roll beat this part's DC (shown when DCs are).
+    const cell = (p, role) => {
+      const total = s.rolls[role];
+      if (s.overrides[p.key] || total == null || !seen) return "";
+      const ok = total >= dcOf(p, role);
+      return `<span class="hr-vs ${ok ? "ok" : "no"}" title="${total} against DC ${dcOf(p, role)}"><i class="fa-solid fa-${ok ? "check" : "xmark"}"></i></span>`;
+    };
+    // Under the part's name: the amount and time, then where its check stands or how it went.
+    const line = (p) => {
+      const o = s.overrides[p.key], row = s.rows?.find((x) => x.part === p.key);
+      if (row) { const ok = ["got", "mangled"].includes(row.outcome); return `<small class="hr-out ${ok ? "ok" : "no"}"><b>${row.outcome === "got" ? "Success" : row.outcome === "mangled" ? "Failure, but meat" : row.outcome === "ruined" ? "Ruined" : "Failure"}.</b> ${row.roll === "GM" ? "" : `${row.roll}${seen ? ` against DC ${row.dc}` : ""}. `}${esc(outcomeText(row))}.${row.ruling ? ` Reason: ${esc(row.ruling.reason || "GM ruling")}.` : ""}</small>`; }
+      if (o) return `<small class="hr-out">Ruled a ${o.success ? "success" : "failure"} by the GM${o.reason ? `: ${esc(o.reason)}` : ""}.${gmRuns ? ` <button data-hr="unrule" data-key="${esc(p.key)}" class="hr-link">Clear</button>` : ""}</small>`;
+      const lt = s.rolls.lead, ht = help ? s.rolls.help : null;
+      if (lt != null && ht != null) { const ok = ht >= p.dcHelp; return `<small class="hr-out">Total ${lt + (ok ? 1 : -1)}: ${lt} ${ok ? "+" : "−"} 1</small>`; }
+      return "";
+    };
+    const shown = asked ? s.parts : s.all, cols = 3 + (lead ? 1 : 0) + (help ? 1 : 0) + (seen ? 1 : 0);
+    const rows = shown.map((p) => {
+      const taking = !(s.skip ?? []).includes(p.key);
+      const tick = asked ? "" : `<input type="checkbox" data-hr-set="part" data-key="${esc(p.key)}" ${taking ? "checked" : ""} ${can ? "" : "disabled"} aria-label="Take ${esc(p.name)}">`;
+      const ruling = gmRuns && !s.overrides[p.key] && taking && lead;
+      const open = ruling && this.ruling === `${r.at}|${p.key}`;
+      const main = `<tr class="${taking ? "" : "off"}"><td class="hr-tick">${tick}</td><th scope="row"><span>${esc(p.name)}</span> <small>${esc(p.amountText)} · ${minutesText(p.minutes)}</small>${taking ? line(p) : ""}</th>${seen ? `<td class="hr-dc">${taking && lead ? `${dcOf(p, "lead")}${help ? `<small>/${dcOf(p, "help")}</small>` : ""}` : ""}</td>` : ""}${lead ? `<td>${taking ? cell(p, "lead") : ""}</td>` : ""}${help ? `<td>${taking ? cell(p, "help") : ""}</td>` : ""}<td class="hr-tick">${ruling ? `<button data-hr="ruling" data-key="${esc(p.key)}" class="hr-icon ${open ? "on" : ""}" title="Override: rule a success or failure" aria-label="Override ${esc(p.name)}" aria-expanded="${open}"><i class="fa-solid fa-gavel"></i></button>` : ""}</td></tr>`;
+      return main + (open ? `<tr class="hr-ruling"><td colspan="${cols}">${this.#overrideUI(s, p)}</td></tr>` : "");
+    }).join("");
+    const heads = `<tr><th></th><th scope="col">Part</th>${seen ? `<th scope="col" title="${help ? "The leader's DC / the helper's DC" : "The DC"}">DC</th>` : ""}${lead ? head(lead, s.lead) : ""}${help ? head(help, s.help) : ""}<th></th></tr>`;
+    // The creature's rolls: one each, checked against every part below.
+    const rollRow = lead ? `<tr class="hr-rollrow"><td></td><th scope="row">Roll <small>once, for every part</small></th>${seen ? "<td></td>" : ""}<td>${rollCell(lead, "lead")}</td>${help ? `<td>${rollCell(help, "help")}</td>` : ""}<td></td></tr>` : "";
+    return `<table class="hr-table">${heads}${rollRow}${rows}</table>${help ? `<p class="cs-note hr-help-note">${esc(first(help.name))} helps: on each part ${esc(first(help.name))}'s roll beats, ${esc(first(lead.name))} gets +1; on each it misses, −1.</p>` : ""}`;
+  }
+
+  /** A creature's step: who does it, then its parts with their rolls and results. */
   #creature(s) {
-    const gm = game.user.isGM, seen = gm || showDC(), mine = [];
+    const gm = game.user.isGM, mine = [];
     const setup = this.#setupBox(s);
     if (!s.lead || !s.parts.length) {
       const why = !s.lead ? "Nobody leads this creature yet. Pick a leader above, or skip it." : "No parts are ticked. Tick at least one, or skip it.";
-      return `<div class="cs-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${esc(s.desc)}.</span></div>${setup}<p class="cs-note">${why}</p>`;
+      return `<div class="cs-title hr-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${esc(s.desc)}.</span></div>${setup}${this.#partsTable(s, mine)}<p class="cs-note">${why}</p>`;
     }
     const lead = game.actors.get(s.lead.id) ?? s.lead, help = s.help ? game.actors.get(s.help.id) ?? s.help : null;
-    const parts = s.parts.map((p) => {
-      const o = s.overrides[p.key], row = s.rows?.find((x) => x.part === p.key);
-      const person = (who, role) => {
-        const id = `${p.key}|${role}`, total = s.rolls[id], skill = role === "lead" ? s.lead.skill : s.help.skill, dc = role === "lead" ? p.dcLead : p.dcHelp;
-        const label = `${SHORT[skill]} (${signed(skillMod(who, skill))})${seen ? ` · DC ${dc}` : ""}`;
-        let res;
-        if (total != null) res = `<span class="cs-roll ${seen && s.done ? (total >= dc ? "ok" : "no") : ""}">Rolled ${total}</span>${gm && !s.done && this.authority ? `<button data-hr="reroll" data-id="${esc(id)}" class="cs-small"><i class="fa-solid fa-rotate-right"></i> Allow reroll</button>` : ""}`;
-        else if (s.done || o) res = `<span class="cs-meta">No roll</span>`;
-        else if (!s.asked) res = `<span class="cs-meta">Waiting for the GM</span>`;
-        else if (this.rollsFor(who)) { mine.push(id); res = `<button data-hr="roll" data-id="${esc(id)}" class="primary" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> ${this.rolling.has(id) ? "Rolling…" : `Roll ${esc(label)}`}</button>`; }
-        else res = `<span class="cs-meta">Waiting for a roll</span>${gm && this.authority ? `<button data-hr="roll" data-id="${esc(id)}" class="cs-small" ${this.rolling.has(id) ? "disabled" : ""}><i class="fa-solid fa-dice-d20"></i> Roll ${esc(label)} for them</button>` : ""}`;
-        return `<div class="cs-person ${role === "lead" ? "lead" : ""}">${face(who)}<span class="cs-person-name">${esc(who.name)}</span>${help ? `<span class="cs-meta">${role === "lead" ? "Leader" : "Helping: success +1, failure −1"}</span>` : ""}${res}</div>`;
-      };
-      let sum = "";
-      const lt = s.rolls[`${p.key}|lead`], ht = s.help ? s.rolls[`${p.key}|help`] : null;
-      if (!s.done && !o && lt != null && ht != null) { const ok = ht >= p.dcHelp; sum = `<p class="cs-sum">Total ${lt + (ok ? 1 : -1)}: ${lt} ${ok ? "+" : "-"} 1</p>`; }
-      const ruling = o ? `<p class="cs-sum">Ruled a ${o.success ? "success" : "failure"} by the GM${o.reason ? `: ${esc(o.reason)}` : ""}.${gm && this.authority && !s.done ? ` <button data-hr="unrule" data-key="${esc(p.key)}" class="cs-small">Clear</button>` : ""}</p>` : "";
-      const result = row ? `<div class="cs-result"><div class="camp-result ${["got", "mangled"].includes(row.outcome) ? "ok" : "no"}"><span class="grow"><strong>${row.outcome === "got" ? "Success" : row.outcome === "mangled" ? "Failure, but meat" : row.outcome === "ruined" ? "Ruined" : "Failure"}.</strong> ${row.roll === "GM" ? "" : `${row.roll}${seen ? ` against DC ${row.dc}` : ""}. `}${esc(outcomeText(row))}.${row.ruling ? `<span class="camp-ruling-reason"><strong>Reason:</strong> ${esc(row.ruling.reason || "GM ruling")}</span>` : ""}</span></div></div>` : "";
-      const override = gm && this.authority && !s.done && !o ? this.#overrideUI(s, p) : "";
-      return `<section class="hr-part"><div class="hr-part-head"><b>${esc(p.name)}</b><span class="cs-meta">${esc(p.amountText)} · ${minutesText(p.minutes)}</span></div>
-        <div class="cs-people">${person(lead, "lead")}${help ? person(help, "help") : ""}</div>${sum}${ruling}${result}${override}</section>`;
-    }).join("");
-    const meta = `${esc(s.desc)}. ${esc(lead.name)} leads${help ? `, ${esc(help.name)} helps` : ""}. About ${minutesText(s.minutes)}.`;
+    const parts = this.#partsTable(s, mine);
+    const meta = `${esc(s.desc)}. About ${minutesText(s.minutes)}.${s.asked || s.done ? ` ${esc(lead.name)} leads${help ? `, ${esc(help.name)} helps` : ""}.` : ""}`;
     let actions = "";
     if (gm && this.authority && !s.done) {
       if (!s.asked) actions = `<button data-hr="ask" class="primary">${this.run.practice ? "Start the checks" : "Request rolls"}</button>`;
@@ -457,13 +520,13 @@ export class HarvestRun {
       const free = mine.filter((id) => !this.rolling.has(id));
       actions = `${free.length > 1 ? `<button data-hr="roll-all" data-ids="${esc(free.join(","))}">Roll all mine (${free.length})</button>` : ""}<span class="cs-note">Waiting for GM confirmation.</span>`;
     }
-    return `<div class="cs-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${meta}</span></div>${setup}${parts}<div class="cs-actions">${actions}</div>`;
+    return `<div class="cs-title hr-title"><b>${esc(s.name)} ${ruleTooltip(RUN_RULES.step)}</b><span class="cs-meta">${meta}</span></div>${setup}${parts}<div class="cs-actions">${actions}</div>`;
   }
 
   /** The GM's ruling for a part: a reason, and success or failure (automatic before any roll), as camp tasks have. */
   #overrideUI(s, p) {
     const draft = this.reasons[`${this.run.at}|${p.key}`] ?? "";
-    return `<details class="hr-override"><summary>Override</summary><fieldset class="camp-override"><legend>Override</legend><label>Reason <input type="text" data-hr="reason" data-key="${esc(p.key)}" maxlength="500" value="${esc(draft)}" placeholder="For example: a skinning knife of fine make"></label><div class="row"><button data-hr="rule" data-key="${esc(p.key)}" data-result="success" class="ruling-success">${s.asked ? "Success" : "Automatic success"}</button><button data-hr="rule" data-key="${esc(p.key)}" data-result="failure" class="ruling-failure">Failure</button></div></fieldset></details>`;
+    return `<fieldset class="camp-override hr-override"><legend>Override</legend><label>Reason <input type="text" data-hr="reason" data-key="${esc(p.key)}" maxlength="500" value="${esc(draft)}" placeholder="For example: a skinning knife of fine make"></label><div class="row"><button data-hr="rule" data-key="${esc(p.key)}" data-result="success" class="ruling-success">${s.asked ? "Success" : "Automatic success"}</button><button data-hr="rule" data-key="${esc(p.key)}" data-result="failure" class="ruling-failure">Failure</button></div></fieldset>`;
   }
 
   #done() {
@@ -488,6 +551,7 @@ export class HarvestRun {
       }
       return this.#changed();
     }
+    if (a === "ruling" && s) { const key = `${this.run.at}|${b.dataset.key}`; this.ruling = this.ruling === key ? null : key; return this.render(); }
     if (a === "reroll" && s) { delete s.rolls[b.dataset.id]; return this.#changed(); }
     if (a === "rule" && s) {
       const reason = (this.reasons[`${this.run.at}|${b.dataset.key}`] ?? "").trim().slice(0, 500) || "GM ruling";

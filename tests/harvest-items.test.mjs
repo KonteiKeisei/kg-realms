@@ -75,20 +75,31 @@ test("the harvest party: the party token's members and the characters on the sce
   assert.deepEqual(names, ["pikle", "mara", "toth"], "Mara once; Bryn has no token here and isn't in the party");
 });
 
-test("the harvest run: help adds or takes 1, a GM ruling decides a part, and a step is ready once each part has the leader's roll or a ruling", async () => {
+test("the harvest run: one roll each for the creature, checked against every part's DC; help adds or takes 1 per part; a GM ruling decides a part", async () => {
   const { stepRows, stepReady, stepChecks } = await import("../scripts/harvest/run.mjs");
   const part = (key, kind, dc) => ({ key, kind, name: key, perLb: kind === "meat", dice: [1, 4, 0], unitGp: 1, minutes: 20, dcLead: dc, dcHelp: dc + 2, amountText: "1d4" });
-  const s = { name: "Wolf", lead: { id: "a", name: "Pikle", skill: "sur" }, help: { id: "b", name: "Mara", skill: "med" }, parts: [part("fangs:common", "fangs", 10), part("hide:common", "hide", 12), part("meat:common", "meat", 10)], asked: true, rolls: {}, overrides: {} };
-  assert.equal(stepChecks(s).length, 6);
+  const s = { name: "Wolf", lead: { id: "a", name: "Pikle", skill: "sur" }, help: { id: "b", name: "Mara", skill: "med" }, parts: [part("fangs:common", "fangs", 10), part("hide:common", "hide", 12), part("meat:common", "meat", 14)], asked: true, rolls: {}, overrides: {} };
+  assert.deepEqual(stepChecks(s).map((c) => [c.id, c.actor, c.dc]), [["lead", "a", null], ["help", "b", null]], "two rolls, not six; the DCs differ, so none on the card");
   assert.equal(stepReady(s), false);
-  s.rolls = { "fangs:common|lead": 9, "fangs:common|help": 15, "meat:common|lead": 2 };
+  s.rolls = { lead: 11, help: 13 };
   s.overrides = { "hide:common": { success: true, reason: "a fine skinning knife" } };
   assert.equal(stepReady(s), true);
   const rows = stepRows(s, () => 4);
-  assert.deepEqual(rows.map((r) => [r.roll, r.outcome, r.qty]), [[10, "got", 4], ["GM", "got", 4], [2, "mangled", 1]]);
-  assert.equal(rows[0].helped, 1);
+  // Fangs: help 13 beats 12, so 11 + 1 = 12 against 10. Meat: help 13 misses 16, so 11 - 1 = 10 against 14.
+  assert.deepEqual(rows.map((r) => [r.roll, r.outcome, r.qty]), [[12, "got", 4], ["GM", "got", 4], [10, "mangled", 1]]);
+  assert.deepEqual(rows.map((r) => r.helped), [1, 0, -1]);
   assert.equal(rows[1].ruling.reason, "a fine skinning knife");
   assert.equal(rows[2].cut, "Mangled meat", "a failed meat check: a quarter, mangled");
+});
+
+test("the GM ruling on every part needs no rolls at all; a single DC goes on the roll's card", async () => {
+  const { stepReady, stepChecks } = await import("../scripts/harvest/run.mjs");
+  const part = (key, dc) => ({ key, kind: "hide", name: key, dcLead: dc, dcHelp: dc });
+  const s = { name: "Deer", lead: { id: "a", skill: "sur" }, help: null, parts: [part("hide:common", 8), part("fangs:common", 8)], asked: true, rolls: {}, overrides: {} };
+  assert.deepEqual(stepChecks(s).map((c) => [c.id, c.dc]), [["lead", 8]]);
+  s.overrides = { "hide:common": { success: true }, "fangs:common": { success: false } };
+  assert.equal(stepChecks(s).length, 0);
+  assert.equal(stepReady(s), true);
 });
 
 test("the harvest window is in the unified shell, with a practice run, and Provisioning is a camp task", () => {
@@ -97,7 +108,12 @@ test("the harvest window is in the unified shell, with a practice run, and Provi
   assert.ok(ui.includes('data-act="practice"'));
   assert.ok(ui.includes("if (!practice && entries.length)"), "a practice run logs nothing outside the window");
   const run = readFileSync(new URL("../scripts/harvest/run.mjs", import.meta.url), "utf8");
-  assert.ok(run.includes("if (!this.run.practice) {") && run.includes("giveYield("), "a practice run gives nothing");
+  assert.ok(run.includes("if (!r.practice) for (const s of r.steps.filter((x) => x.done && !x.given))") && run.includes("giveYield("), "a practice run gives nothing");
+  // Parts are given and creatures marked taken only at Finish: confirming a creature, or calling the harvest off, gives nothing.
+  const confirm = run.slice(run.indexOf("async #confirm()"), run.indexOf("/** The clock:"));
+  assert.ok(!confirm.includes("giveYield(") && !confirm.includes("setFlag("), "confirming gives and marks nothing");
+  const finish = run.slice(run.indexOf("async #finish()"), run.indexOf("/* ---------------------------------------------------------------- rolls"));
+  assert.ok(finish.indexOf("this.#give(s)") < finish.indexOf("this.gm.onFinished("), "Finish gives before it logs");
   assert.ok(run.includes('className = "kgr-ui kgr-harvest-run"') && !run.includes("kgr-camp-scene"), "its own element: the camp's code looks for .kgr-camp-scene");
   const css = readFileSync(new URL("../styles/realms.css", import.meta.url), "utf8");
   assert.ok(css.includes(".kgr-harvest-run .cs-person {") && css.includes(".kgr-harvest-run .cs-face {"), "the camp step view's look, copied");

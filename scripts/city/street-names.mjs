@@ -10,7 +10,7 @@ const FONT = "kgr-street-names";
 const LETTER_FT = { avenue: 24, street: 17, lane: 12, alley: 9 };
 const SHOW_PX = 9, FULL_PX = 12, MAX_PX = 20; // on screen: appears, fully shown, largest
 const GAP_PX = 520; // on screen, between repeats of one name along a long street
-const SETTLE_MS = 450; // the zoom still this long before the names are laid out for it
+const SETTLE_MS = 200; // the zoom still this long before the names are laid out for it
 
 /** Same-named pieces joined end to end into runs (a piece meets one other of its name: one run). */
 export function streetRuns(roads, tol = 3) {

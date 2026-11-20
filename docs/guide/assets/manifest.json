@@ -1,0 +1,43 @@
+[
+  {
+    "file": "install-release.png",
+    "type": "user-provided screenshot with original red arrows",
+    "audience": "GM",
+    "sources": []
+  },
+  {
+    "file": "install-copy-link.png",
+    "type": "user-provided screenshot with original red arrows",
+    "audience": "GM",
+    "sources": []
+  },
+  {
+    "file": "install-foundry.png",
+    "type": "user-provided screenshot with original red arrows",
+    "audience": "GM",
+    "sources": []
+  },
+  {
+    "file": "enable-kg-realms.png",
+    "type": "user-provided screenshot",
+    "audience": "GM",
+    "sources": [],
+    "visible_state": "KG Realms enabled; Faerun companion disabled"
+  },
+  {
+    "file": "module-integrations.png",
+    "type": "user-provided screenshot",
+    "audience": "GM",
+    "sources": [],
+    "visible_state": "All six integrations Already Enabled; captured in 0.93.9. Manual review only for this state from 0.93.10.",
+    "original_path": "C:/Users/Konte/AppData/Local/Temp/codex-clipboard-4a21bd05-e3b3-4471-abd1-5d06f0ac5d35.png"
+  },
+  {
+    "file": "generate-trorune.png",
+    "type": "user-provided screenshot",
+    "audience": "GM",
+    "sources": [],
+    "visible_state": "Scenes sidebar with Generate Trorune visible",
+    "original_path": "C:/Users/Konte/AppData/Local/Temp/codex-clipboard-e88bcc36-7184-495a-8970-c37c8fbdca87.png"
+  }
+]

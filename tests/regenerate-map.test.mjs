@@ -50,20 +50,22 @@ test("only the tiles change: not the world's sheet, the scene's size or anything
   assert.ok(!body.includes('uploadJson(def.root, "index.json"'), "index.json keeps the sheet");
   assert.ok(body.includes("const sheet = index.sourceMap"));
   assert.ok(body.includes("resizeWidth: sheet.width * f, resizeHeight: sheet.height * f"), "any picture is fitted to the map as it is");
-  assert.ok(body.indexOf('uploadJson(def.root, "terrain-pack.json", pack)') > body.indexOf("encodeTiles(bitmap, tiles"), "the map switches only once every tile is saved");
+  // The target is the world's own folder, or for a companion this game world's (world-tiles.mjs).
+  assert.ok(body.indexOf('uploadJson(target, "terrain-pack.json", pack)') > body.indexOf("encodeTiles(bitmap, tiles"), "the map switches only once every tile is saved");
   assert.ok(!/scene\.update\(\{[^}]*(width|height|grid)/.test(body), "the scene keeps its size and grid");
 });
 
 test("the scene config: Foundry's Background Image stays and saves as always, with the button under it", () => {
   const brew = readFileSync(new URL("../scripts/homebrew/homebrew.mjs", import.meta.url), "utf8");
   assert.ok(brew.includes("Regenerate map tiles from this picture"));
-  assert.ok(brew.includes("!homebrewOf(scene) ||"));
+  assert.ok(brew.includes("const def = mapWorldOf(scene);") && brew.includes("!scene || !def ||"), "made-here and companion maps only");
   assert.ok(brew.includes('root.querySelector(\'[name$="background.src"]\')'), "it reads Foundry's field");
   assert.ok(brew.includes("native.after(row)"), "under it");
   assert.ok(!brew.includes("native.hidden") && !brew.includes('native.style.display'), "the field is not hidden");
   assert.ok(!brew.includes("data-map-src"), "no box of its own, which the scene's Save could not keep");
   assert.ok(brew.includes('String(field?.value ?? "").trim() || backgroundOf(scene) || used'), "what is in the field, saved or not");
-  assert.ok(brew.indexOf("await setBackground(scene, null)") < brew.indexOf("flags.${ID}.mapVersion`]: Date.now()"), "emptied before everyone reloads");
+  const build = brew.slice(brew.indexOf("async function rebuildMap"));
+  assert.ok(build.indexOf("await setBackground(scene, null)") < build.indexOf("flags.${ID}.mapVersion`]: Date.now()"), "emptied before everyone reloads");
   assert.ok(readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8").includes("sceneMapPicture(root, scene);"));
 });
 

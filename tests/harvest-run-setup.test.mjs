@@ -35,7 +35,7 @@ test("a helper can't be the leader; leading the helper swaps them", () => {
   changeSetup(s, { field: "lead", value: "b" }, party);
   assert.equal(s.lead.id, "b");
   assert.equal(s.help.id, "a");
-  assert.equal(stepChecks(s).length, 4);
+  assert.equal(stepChecks(s).length, 2, "one roll each for the creature, whatever its parts");
 });
 
 test("unticking a part drops it and its time; the skill can be changed", () => {
@@ -48,10 +48,36 @@ test("unticking a part drops it and its time; the skill can be changed", () => {
   assert.equal(s.parts[0].dcLead, 14);
 });
 
-test("once the rolls are asked for, the setup is fixed", () => {
+test("once the rolls are asked for, the party can't change the setup", () => {
   const s = step();
   changeSetup(s, { field: "lead", value: "a" }, party);
   s.asked = true;
   assert.equal(changeSetup(s, { field: "lead", value: "b" }, party), false);
   assert.equal(s.lead.id, "a");
+});
+
+const third = { id: "c", name: "Cal", img: "", mods: { sur: 5, med: 5, slt: 5 } };
+const asked = () => { const s = step(); changeSetup(s, { field: "lead", value: "a" }, party); changeSetup(s, { field: "help", value: "b" }, party); s.asked = true; s.rolls = { lead: 14, help: 9 }; return s; };
+
+test("after the rolls are asked for, the GM can change the helper: only the new helper rolls again", () => {
+  const s = asked();
+  assert.ok(changeSetup(s, { field: "help", value: "c" }, [...party, third], { gm: true }));
+  assert.equal(s.help.id, "c");
+  assert.deepEqual(s.rolls, { lead: 14 }, "the leader keeps their roll");
+});
+
+test("the GM swapping leader and helper keeps both rolls with the people who made them", () => {
+  const s = asked();
+  assert.ok(changeSetup(s, { field: "lead", value: "b" }, party, { gm: true }));
+  assert.deepEqual([s.lead.id, s.help.id], ["b", "a"]);
+  assert.deepEqual(s.rolls, { lead: 9, help: 14 });
+});
+
+test("the GM changing a skill makes that person roll again; the parts and a confirmed step stay fixed", () => {
+  const s = asked();
+  assert.ok(changeSetup(s, { field: "skill", role: "lead", value: "slt" }, party, { gm: true }));
+  assert.deepEqual(s.rolls, { help: 9 });
+  assert.equal(changeSetup(s, { field: "part", key: "bones", on: false }, party, { gm: true }), false);
+  s.done = true;
+  assert.equal(changeSetup(s, { field: "help", value: "a" }, party, { gm: true }), false);
 });

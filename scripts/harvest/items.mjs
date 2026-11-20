@@ -42,6 +42,42 @@ export function itemData(y) {
   };
 }
 
+/**
+ * Icon paths 0.96.0 to 0.97.0 test builds gave harvested items that Foundry does not have, and the icon
+ * each now has. Items made with them are repaired (repairHarvestIcons).
+ */
+export const OLD_HARVEST_ICONS = {
+  "icons/commodities/biological/horn-grey.webp": "icons/commodities/bones/horn-simple-grey.webp",
+  "icons/commodities/biological/organ-sac-purple.webp": "icons/commodities/biological/organ-brain-pink-purple.webp",
+  "icons/commodities/biological/organ-sac-red.webp": "icons/commodities/biological/organ-bladder-red.webp",
+  "icons/commodities/biological/skin-green.webp": "icons/commodities/leather/scales-green.webp",
+  "icons/commodities/biological/skin-grey.webp": "icons/commodities/leather/leather-patch-grey.webp",
+  "icons/commodities/biological/skin-purple.webp": "icons/commodities/leather/fur-pink.webp",
+  "icons/commodities/biological/skin-white.webp": "icons/commodities/leather/fur-white.webp",
+  "icons/commodities/biological/stinger-black.webp": "icons/commodities/biological/stinger-insect-grey.webp",
+  "icons/commodities/biological/wing-bat-brown.webp": "icons/commodities/biological/wing-lizard-brown.webp",
+  "icons/commodities/bones/spike-bone-white.webp": "icons/commodities/biological/tail-spiked-green.webp",
+  "icons/commodities/bones/tooth-fang-white.webp": "icons/commodities/bones/tooth-canine-white.webp",
+  "icons/commodities/claws/claw-bird-black.webp": "icons/commodities/claws/talon-black.webp",
+  "icons/commodities/claws/claw-black.webp": "icons/commodities/claws/claw-brown-black.webp",
+  "icons/commodities/leather/leather-scales-brown.webp": "icons/commodities/leather/scales-brown.webp",
+  "icons/commodities/leather/leather-scales-red.webp": "icons/commodities/leather/leather-patch-red.webp",
+  "icons/commodities/leather/scales-red.webp": "icons/commodities/leather/scales-blue.webp",
+  "icons/consumables/potions/vial-cork-amber.webp": "icons/consumables/potions/potion-tube-corked-orange.webp",
+  "icons/consumables/potions/vial-cork-black.webp": "icons/consumables/potions/vial-ornet-silver-black.webp",
+  "icons/consumables/vegetable/leaf-green.webp": "icons/consumables/plants/leaf-herb-green.webp"
+};
+
+/** Give harvested items made with a missing icon (OLD_HARVEST_ICONS) their real one. actors: the world's. */
+export async function repairHarvestIcons(actors) {
+  let fixed = 0;
+  for (const actor of actors) {
+    const updates = actor.items.filter((i) => harvestFlag(i) && OLD_HARVEST_ICONS[i.img]).map((i) => ({ _id: i.id, img: OLD_HARVEST_ICONS[i.img] }));
+    if (updates.length) { await actor.updateEmbeddedDocuments("Item", updates); fixed += updates.length; }
+  }
+  return fixed;
+}
+
 /** Give an actor a yield: onto its stack of the same key, or a new item. Returns the item. */
 export async function giveYield(actor, y) {
   if (!y.qty) return null;

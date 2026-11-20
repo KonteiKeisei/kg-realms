@@ -224,7 +224,8 @@ test("a world's export holds everything, linked up to its new paths and compendi
 
   // The module: its compendiums, with their empty folders, and what fills them.
   const manifest = JSON.parse(files.get(`${M}/module.json`));
-  assert.equal(manifest.relationships.requires[0].compatibility.minimum, "0.94.0");
+  // The oldest KG Realms that reads the export, whatever version exported it (here a mocked 0.80.0).
+  assert.equal(manifest.relationships.requires[0].compatibility.minimum, "0.94.9");
   assert.deepEqual(manifest.packs.map((x) => x.name).sort(), ["actors", "items", "journals", "scenes"]);
   assert.equal(manifest.packs.find((x) => x.name === "actors").system, "dnd5e");
   for (const x of manifest.packs) assert.ok(files.has(`${M}/${x.path}/`), `${x.path}'s folder`);

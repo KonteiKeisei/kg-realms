@@ -1036,8 +1036,14 @@ export class CampPanel {
     if (act === "task-roll") return this.#taskRoll(btn.dataset.key, btn.dataset.id, btn.dataset.skill);
     // Provisioning's rations shared equally: anyone in the party may press it; the GM's client does it.
     if (act === "ration-share") return game.user.isGM ? this.#shareRations() : this.request({ rationShare: { go: true } });
-    // Back to the realm map from the camp's own scene (any GM).
-    if (act === "realm-go" || act === "realm-view") { const realm = this.#realmAway(); if (!realm || !game.user.isGM) return; return act === "realm-go" ? realm.activate() : realm.view(); }
+    // To the current watch's scene (any GM). A practice night goes with it: leaving the realm map
+    // closes the map editor's Practice tab, which would otherwise end it.
+    if (act === "watch-scene") {
+      const sc = game.scenes.get(btn.dataset.id);
+      if (!sc || !game.user.isGM) return;
+      if (this.practice) this.keepPractice = true;
+      return btn.dataset.all ? sc.activate() : sc.view();
+    }
     if (!game.user.isGM || (!this.practice && !isPrimaryGM())) return;
     const night = this.prog()?.night, key = btn.dataset.key;
     if (act === "practice-end") return this.endPractice();
@@ -1432,6 +1438,48 @@ export class CampPanel {
     if (dt > 0) await this.advance(dt);
   }
 
+  /**
+   * The clock moved on past several watches by itself (0.96.4): every watch from `from` to `to` rolls
+   * its dice here, as #watchBegins does, and they are all saved together, once, with the step the camp
+   * goes to: the first watch whose encounter came (to be shown), else the watch now. Before, each
+   * watch was saved on its own, with a dice roll to wait through for each.
+   */
+  async #catchUpWatches(p, from, to, valid) {
+    const n = this.#tonight(p);
+    if (!n) return;
+    const pl = n.pl, campId = this.watch.campId, lead = pl.setup ?? pl.rest - pl.window, { conceal } = this.campEffects(p.night);
+    const list = [...(this.st.encounters ?? [])], reveals = { ...(this.watch.reveals ?? {}) };
+    let changed = false, step = `w${to}`;
+    for (let i = from; i <= to; i++) {
+      const had = reveals[i];
+      if (had?.campId === campId && had.done) {
+        if (!had.seen && had.results?.some((x) => x.roll === 1 && !x.harmless)) { step = `w${i}`; break; }
+        continue;
+      }
+      const last = i === pl.watches.length - 1, die = pl.watches.length - i + 1 + conceal;
+      for (let k = 0; k < list.length; k++) {
+        const e = list[k];
+        if (!e.rest?.pending || e.rest.night !== p.night || (e.rest.rolls ?? []).some((r) => r.w === i)) continue;
+        const roll = (await new Roll(`1d${die}`).evaluate()).total, rolls = [...(e.rest.rolls ?? []), { die, roll, w: i }];
+        if (roll === 1) {
+          const into = pl.watches[i].from + Math.random() * Math.max(0, pl.watches[i].to - pl.watches[i].from - 0.25);
+          list[k] = { ...e, rest: { ...e.rest, rolls, pending: false, watch: i, at: lead + Math.floor(into * 4) / 4 } };
+        } else list[k] = { ...e, rest: { ...e.rest, rolls, ...(last ? { pending: false, quiet: true } : {}) } };
+        changed = true;
+      }
+      const results = list.flatMap((e) => e.rest?.night === p.night ? (e.rest.rolls ?? []).filter((r) => r.w === i).map((r) => ({ die: r.die, roll: r.roll, encounter: e.id })) : []);
+      if (!results.length) {
+        const scheduled = list.some((e) => e.rest?.night === p.night && e.rest.watch === i && !e.rest.pending && !e.rest.quiet && this.st.trip?.resumed?.[e.id] == null);
+        const d = scheduled ? 1 : die, roll = (await new Roll(`1d${d}`).evaluate()).total;
+        results.push(scheduled ? { die: d, roll, scheduled: true } : ambientWatchResult(d, roll));
+      }
+      reveals[i] = { id: foundry.utils.randomID(), campId, until: Date.now(), dice: results.map((r) => r.die), done: true, results };
+      if (results.some((x) => x.roll === 1 && !x.harmless)) { step = `w${i}`; break; }
+    }
+    if (!valid() || (this.commandContext && !this.commandContext.valid())) return;
+    await this.save({ ...(changed ? { encounters: list } : {}), "watch.reveals": reveals, "watch.scene": { ...(this.watch.scene ?? {}), step, hold: false } });
+  }
+
   #awaitingWatchResult(i) {
     const r = i != null ? this.watch.reveals?.[i] : null;
     return !!r && r.campId === this.watch.campId && r.done && !r.seen && r.results?.some((x) => x.roll === 1 && !x.harmless);
@@ -1518,14 +1566,7 @@ export class CampPanel {
         this.commandContext = { scene, trip, campId, valid };
         (async () => {
           if (resumeReveal) await this.#watchBegins(p, at, { valid });
-          else {
-            let step = `w${n.cur}`;
-            for (let i = Math.max(0, at ?? 0); i <= n.cur && valid(); i++) {
-              await this.#watchBegins(p, i, { clock: false, valid });
-              if (this.#awaitingWatchResult(i)) { step = `w${i}`; break; }
-            }
-            if (valid()) await this.write({ scene: { ...this.watch.scene, step, hold: false } });
-          }
+          else await this.#catchUpWatches(p, Math.max(0, at ?? 0), n.cur, valid);
         })()
           .catch((err) => console.warn("kg-realms | the camp scene could not follow the clock:", err)).finally(() => { this.following = false; this.commandContext = null; commands.delete(commandKey); this.hud.onCampWorkEnded?.(scene); });
       }
@@ -1637,19 +1678,25 @@ export class CampPanel {
   }
 
   #sceneMinBar(sc) {
-    return `<div class="cs-bar"><i class="fa-solid fa-campground"></i><span class="grow">The camp · ${esc(this.#stepLabel(sc.step))}</span>${this.#realmNav(true)}<button data-camp="scene-show" class="primary">Show</button></div>`;
+    return `<div class="cs-bar"><i class="fa-solid fa-campground"></i><span class="grow">The camp · ${esc(this.#stepLabel(sc.step))}</span>${this.#watchSceneGo(this.#stepWatch(sc.step), true)}<button data-camp="scene-show" class="primary">Show</button></div>`;
   }
 
-  /** The realm map the journey is on, when this camp view is shown on another scene (its camp scene). */
-  #realmAway() {
-    const realm = this.hud.scene?.realScene ?? this.hud.scene;
-    return realm && canvas.scene && realm.id !== canvas.scene.id ? realm : null;
+  /** The scene set for a watch (its own, else the night's), or null. */
+  watchScene(i) {
+    if (i == null || i < 0) return null;
+    const id = this.watch.scenes?.[i] ?? this.watch.scenes?.all;
+    return id ? game.scenes.get(id) ?? null : null;
   }
-  /** On the camp's own scene, the GM's way back to the realm map: everyone, or only you (0.96.2). */
-  #realmNav(small = false) {
-    const realm = this.#realmAway();
-    if (!realm || !game.user.isGM) return "";
-    return `<span class="cs-realm-nav"><button data-camp="realm-go" title="Everyone back to ${esc(realm.name)}"><i class="fa-solid fa-map"></i>${small ? "" : ` Back to ${esc(realm.name)}`}</button><button data-camp="realm-view" title="View ${esc(realm.name)} (only you)" aria-label="View ${esc(realm.name)} (only you)"><i class="fa-solid fa-eye"></i></button></span>`;
+  /**
+   * The GM's way to the current watch's scene, from the camp view (a practice night too): everyone,
+   * or only you (a practice not shown to the players: only you). The way back to the realm map is the
+   * top bar's, as on every scene (local-maps.mjs).
+   */
+  #watchSceneGo(i, small = false) {
+    const sc = this.watchScene(i);
+    if (!sc || !game.user.isGM || sc.id === canvas.scene?.id) return "";
+    const all = !this.practice || this.practice.players;
+    return `<span class="cs-realm-nav">${all ? `<button data-camp="watch-scene" data-id="${sc.id}" data-all="1" title="Everyone to ${esc(sc.name)}"><i class="fa-solid fa-users"></i>${small ? "" : ` Go to ${esc(sc.name)}`}</button>` : ""}<button data-camp="watch-scene" data-id="${sc.id}" title="View ${esc(sc.name)} (only you)" aria-label="View ${esc(sc.name)} (only you)"><i class="fa-solid fa-eye"></i>${small || all ? "" : ` View ${esc(sc.name)}`}</button></span>`;
   }
 
   /** Held for an encounter: who is on it (the GM sees its name), its scene, and Carry on (GM). */
@@ -1760,7 +1807,7 @@ export class CampPanel {
       }
     }
     const stop = gm && this.practice && !this.practice.view ? '<button data-camp="practice-end">End practice</button>' : "";
-    return `<div class="cs-carousel-head"><div><span class="cs-context">Camp ${p.night}</span><span class="cs-context" role="status" aria-live="polite">${phased ? `${{ setup: "Setup", rest: "Rest and watches", break: "Break camp" }[phase]}. ` : ""}Step ${sc.at + 1} of ${sc.steps.length}</span></div><span class="cs-head-ctl">${this.#realmNav()}<button data-camp="scene-min" class="cs-min" aria-label="Minimise the camp carousel">-</button></span></div>${this.#phaseSummary(p, step)}<div class="cs-chips" aria-label="Phase progress">${chips}</div>${body}${advance ? `<p class="cs-clock-advance">${esc(advance)}</p>` : ""}<div class="cs-foot">${go}${stop}${gm ? "" : '<span class="cs-note">The GM advances camp time.</span>'}</div>`;
+    return `<div class="cs-carousel-head"><div><span class="cs-context">Camp ${p.night}</span><span class="cs-context" role="status" aria-live="polite">${phased ? `${{ setup: "Setup", rest: "Rest and watches", break: "Break camp" }[phase]}. ` : ""}Step ${sc.at + 1} of ${sc.steps.length}</span></div><span class="cs-head-ctl">${this.#watchSceneGo(i)}<button data-camp="scene-min" class="cs-min" aria-label="Minimise the camp carousel">-</button></span></div>${this.#phaseSummary(p, step)}<div class="cs-chips" aria-label="Phase progress">${chips}</div>${body}${advance ? `<p class="cs-clock-advance">${esc(advance)}</p>` : ""}<div class="cs-foot">${go}${stop}${gm ? "" : '<span class="cs-note">The GM advances camp time.</span>'}</div>`;
   }
 
   #watchTiming(p, i) {

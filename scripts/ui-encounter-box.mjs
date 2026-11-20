@@ -66,18 +66,14 @@ export class EncounterBox {
       const e = x.e, d = { actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] };
       const assets = assetStrip(d);
       const has = assets || e.pinned;
-      // The way back to the realm map shows whenever the box isn't folded for combat.
-      const nav = x.journey && !(combat && !open) ? `<div class="encbox-actions encbox-nav"><button data-act="carry-on" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude Encounter</button>
-              <span class="sp"></span><button data-act="map-all" class="primary" title="Everyone back to the realm map"><i class="fa-solid fa-users"></i> Back to the map</button><button data-act="map" title="View the realm map (only you)"><i class="fa-solid fa-eye"></i></button></div>` : "";
+      // The way back to the realm map is the top bar's (local-maps.mjs), as on every scene. Here: its
+      // own buttons in one row, and ending it when a journey waits, which shows even folded for combat.
+      const conclude = x.journey ? `<button data-act="carry-on" class="primary" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude</button>` : "";
+      const actions = open ? `${e.pinned ? `<button data-act="journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}<button data-act="card"><i class="fa-solid fa-id-card"></i> Card</button>` : "";
       return `<div class="encbox-row" data-i="${i}">
-        <div class="encbox-head"><i class="fa-solid fa-triangle-exclamation"></i><b>${esc(e.name ?? "Encounter")}</b>
-          ${x.journey ? `<span class="pill">Journey waiting</span>` : ""}
-</div>
-        ${open ? `<div class="encbox-body">${has ? assets : `<p class="hint">No actors, pictures or journal yet. Add them on its card.</p>`}
-          <div class="encbox-actions">
-            ${e.pinned ? `<button data-act="journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}
-            <button data-act="card"><i class="fa-solid fa-id-card"></i> Card</button>
-          </div></div>` : ""}${nav}</div>`;
+        <div class="encbox-head"><i class="fa-solid fa-triangle-exclamation"></i><b>${esc(e.name ?? "Encounter")}</b>${x.journey ? `<span class="pill">Journey waiting</span>` : ""}</div>
+        ${open ? `<div class="encbox-body">${has ? assets : `<p class="hint">No actors, pictures or journal yet. Add them on its card.</p>`}</div>` : ""}
+        ${actions || conclude ? `<div class="encbox-actions">${actions}<span class="sp"></span>${conclude}</div>` : ""}</div>`;
     };
     // The shell's header: its minimise folds away the actors, pictures and journal.
     const title = list.length === 1 ? list[0].e.name ?? "Encounter" : `${list.length} encounters`;
@@ -116,7 +112,5 @@ export class EncounterBox {
       ui.notifications.info(`KG Realms: ${e.name ?? "the encounter"} is over; the journey goes on.`);
       return this.refresh();
     }
-    if (act === "map") return x.journey?.view();
-    if (act === "map-all") return x.journey?.activate();
   }
 }

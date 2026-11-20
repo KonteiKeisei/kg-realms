@@ -1,6 +1,6 @@
 import {RealmDialog} from "./ui-theme.mjs";
-import {placeRegionalRectangle,regionalEntrances,regionalJourneyParts,adjustedEntrances,followCrossingRoads} from './regional-placement.mjs';
-import { compileRegions, affine, regionalPlaces } from './regional-maps.mjs';
+import {placeRegionalRectangle,regionalEntrances,regionalSections,settleSections,settleWaterSections,regionalJourneyParts,adjustedEntrances,followCrossingRoads} from './regional-placement.mjs';
+import { compileRegions, affine, regionalPlaces, linkProjection } from './regional-maps.mjs';
 import { sourceProjection } from './source-map.mjs';
 import { buildGraph, terrainLookup } from './travel.mjs';
 import { pointInBiome, biomeLookup } from './biomes.mjs';
@@ -15,7 +15,7 @@ import {sceneContextEntry} from './foundry-compat.mjs';
 const ID='kg-realms', KEY='regionalMaps';
 const clone=x=>structuredClone(x), esc=x=>foundry.utils.escapeHTML(String(x??''));
 export class RegionalMaps {
-  constructor(options){Object.assign(this,options);this.indexes={};this.networks=new Map();this.writes=Promise.resolve();this.loadErrors={};this.entryPoints={};}
+  constructor(options){Object.assign(this,options);this.indexes={};this.networks=new Map();this.writes=Promise.resolve();this.loadErrors={};this.entryPoints={};this.sections={};}
   get links(){return game.settings.get(ID,KEY)??{};}
   init(){
     game.settings.register(ID,KEY,{scope:'world',config:false,type:Object,default:{},onChange:()=>{this.networks.clear();this.onChange?.();}});
@@ -31,13 +31,27 @@ export class RegionalMaps {
     await Promise.allSettled([root,...links.map(l=>l.world)].map(w=>this.load(w)));
     if(this.loadErrors[id])throw this.loadErrors[id];
     if(links.length&&!this.loadErrors[root]){
-      const routes=await this.getRoutes(root,this.indexes[root]);
-      for(const link of links)if(this.indexes[link.world])this.entryPoints[link.world]=regionalEntrances(routes,link,this.indexes[root].sourceMap,this.indexes[link.world].sourceMap);
+      const routes=await this.getRoutes(root,this.indexes[root]),waters=await this.getWaterways?.(root)??{};
+      for(const link of links)if(this.indexes[link.world]){const args=[routes,link,this.indexes[root].sourceMap,this.indexes[link.world].sourceMap,waters];this.entryPoints[link.world]=regionalEntrances(...args);this.sections[link.world]=regionalSections(...args);}
     }
   }
   entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
-  followRoutes(world,routes){return this.links[world]?followCrossingRoads(routes,this.entrances(world)):routes;}
-  places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes);const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
+  followRoutes(world,routes){if(!this.links[world])return routes;const entries=this.entrances(world);return settleSections(followCrossingRoads(routes,entries),entries);}
+  /**
+   * A Regional map's roads with its realm sections (0.97.7): each realm road or trail through it, from
+   * crossing to crossing, under the map's own roads. Their edits and deletions are ordinary road edits.
+   */
+  withSections(world,routes){const add=this.links[world]?this.sections[world]?.roads??[]:[];if(!add.length)return routes;return {type:'FeatureCollection',...(routes??{}),features:[...(routes?.features??[]),...add.filter(f=>!(routes?.features??[]).some(g=>g.properties?.id===f.properties.id))]};}
+  /** Its realm waterway sections the same way, under its own waterways. */
+  waterSections(world){return this.links[world]?this.sections[world]?.waters??{}:{};}
+  settleWaters(world,waterways){return this.links[world]?settleWaterSections(waterways,this.entrances(world)):waterways;}
+  places(id){const list=regionalPlaces(id,w=>this.rawPlaces(w,this.indexes[w]?.places??[]),this.links,this.indexes,w=>this.getEdits?.(w)?.edits??{});const result=applyEdits(list,{edits:this.getEdits?.(id)?.edits??{}},"surface");
+    // A shared place on the realm: its realm alignment (a position edit made here) if it has one, else
+    // where its Regional map has it (0.97.7). An alignment is drawn on the realm only: the Regional map
+    // keeps its own position, and travel uses that.
+    const own=this.getEdits?.(id)?.edits??{},decided=new Map(list.filter(p=>p.regionalPosition||p.regionalWorld).map(p=>[p.id,p]));
+    for(const p of result){const d=decided.get(p.id);if(!d)continue;if(d.regionalPosition)p.regionalPosition=d.regionalPosition;
+      if(Number.isFinite(own[p.id]?.lon)&&Number.isFinite(own[p.id]?.lat))p.realmAligned=true;else{p.lon=d.lon;p.lat=d.lat;}}
     const deleted=new Set(this.getEdits?.(id)?.deleted??[]);
     for(let i=result.length-1;i>=0;i--){const p=result[i];if(deleted.has(p.id)||p.canonicalWorld&&(this.getEdits?.(p.canonicalWorld)?.deleted??[]).includes(p.canonicalId))result.splice(i,1);}
     for(const place of result)place.regionalMapEntry=false;
@@ -47,7 +61,10 @@ export class RegionalMaps {
       if(place&&!place.scene&&scene)place.regionalMapScene=scene.id;
     }
     const relevant=this.links[id]?[this.links[id]]:Object.values(this.links).filter(l=>l.parent===id);
-    for(const link of relevant)for(const entry of this.entrances(link.world)){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:'Linked realm/regional road crossing. Draw regional roads to this marker. Drag this marker on the regional map to align its trail. The realm-side crossing remains fixed.'});}return result;}
+    // Crossing markers (every kind of line): the GM's, while the map editor is open (showCrossings).
+    if(this.showCrossings?.()??true)for(const link of relevant)for(const entry of this.entrances(link.world)){const ll=id===link.world?entry.regionLL:entry.parentLL;result.push({id:entry.id,name:entry.name,lon:ll[0],lat:ll[1],kind:'site',class:'Site',rank:1,gold:true,visibility:'discovered',regionalEntry:true,summary:`Where this ${String(entry.kind??'Road').toLowerCase()} crosses the Regional map's edge. Draw the Regional map's ${entry.line==='water'?'line':'road'} to or from this marker. Drag the marker on the Regional map to line it up; the realm side stays fixed. Shown only while the map editor is open.`});}return result;}
+  /** Whether a map shows crossing markers at all (a Regional map, or a realm with one). */
+  hasCrossings(id){return !!this.links[id]||Object.values(this.links).some(l=>l.parent===id);}
   destinations(id){
     const out=this.places(id).filter(p=>!p.regionalEntry),byId=new Map(out.map((p,i)=>[p.id,i]));
     for(const link of Object.values(this.links).filter(l=>l.parent===id)){
@@ -119,8 +136,23 @@ export class RegionalMaps {
     }});
   }
   // Coordinate edits stay local. Metadata edits to an inherited place go to its canonical map.
+  // A shared place moved on its realm (0.97.7) is aligned there only: the drag stays a realm edit. If the
+  // Regional map had no position of its own for it (it took the realm's), the spot it had is saved there
+  // first, so nothing done on the realm ever moves the Regional map.
   reconcileEdits(world,before,after,all){
     const places=this.places(world),coordinate=new Set(['lon','lat','area','shape','areaClosed','follow','shore','biomeZone','removed']);
+    for(const p of places){
+      if(p.regionalWorld||p.regionalEntry)continue;
+      const old=before.edits?.[p.id]??{},next=after.edits?.[p.id]??{};
+      if((old.lon===next.lon&&old.lat===next.lat)||!Number.isFinite(next.lon)||!Number.isFinite(next.lat))continue;
+      const link=p.regionalPosition?this.links[p.regionalPosition]:Object.values(this.links).find(l=>l.parent===world&&pointInBiome([p.lon,p.lat],l.footprint));
+      if(!link||link.parent!==world)continue;
+      const theirs=all[link.world]?.edits?.[p.id];
+      if((Number.isFinite(theirs?.lon)&&Number.isFinite(theirs?.lat))||link.positions?.[p.id])continue;
+      const proj=linkProjection(link,this.indexes);if(!proj)continue;
+      const at=proj.toRegion(p.lon,p.lat),target=all[link.world]??={edits:{},added:{}};
+      (target.edits??={})[p.id]={...(target.edits[p.id]??{}),lon:+at[0].toFixed(6),lat:+at[1].toFixed(6)};
+    }
     for(const p of places){if(p.regionalEntry){if(this.links[world]){for(const key of Object.keys(after.edits?.[p.id]??{}))if(!['lon','lat'].includes(key))delete after.edits[p.id][key];}else delete after.edits?.[p.id];delete after.added?.[p.id];continue;}if(!p.canonicalWorld||p.canonicalWorld===world)continue;
       const old=before.edits?.[p.id]??{},next=after.edits?.[p.id]??{},target=all[p.canonicalWorld]??={edits:{},added:{}},dest=target.added?.[p.canonicalId]??((target.edits??={})[p.canonicalId]??={});
       for(const k of new Set([...Object.keys(old),...Object.keys(next)]))if(!coordinate.has(k)&&JSON.stringify(old[k])!==JSON.stringify(next[k])){if(next[k]===undefined)delete dest[k];else dest[k]=next[k];if(after.edits?.[p.id])delete after.edits[p.id][k];}
@@ -172,7 +204,7 @@ export class RegionalMaps {
     let placement;try{placement=await placeRegionalRectangle({parentScene,parentSheet:this.indexes[parent].sourceMap,regionalSheet:this.indexes[world].sourceMap,existing:sameParent,placeChoices:parentPlaces.filter(p=>placeLayer(p)==='realms'),placeId:place?.id??null,getLayer:this.getLayer,onStart:this.onPlacementStart});}finally{this.onPlacementEnd?.();}
     if(!placement)return;
     const link={...existing,world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,...placement,publish:existing?.publish??[]};
-    link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,this.indexes[world].sourceMap);
+    link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,this.indexes[world].sourceMap,await this.getWaterways?.(parent)??{});
     const all=clone(this.links);all[world]=link;
     compileRegions({...this.indexes[parent],id:parent},Object.values(all).filter(l=>l.parent===parent).map(l=>({link:l,data:this.indexes[l.world]})));
     if(!isPrimaryGM()||JSON.stringify(this.links)!==revision)throw Error('Regional settings changed. Reopen placement before saving.');
@@ -193,7 +225,7 @@ export class RegionalMaps {
     let draft;const revision=JSON.stringify(this.links);
     do{
       const result=await RealmDialog.wait({window:{title:`${scene.name}: regional map`},position:{width:660},rejectClose:false,
-        content:`<p>Regional map width: <b>${Math.round(child.width*child.milesPerPixel)} miles</b>. Change this in Realm world settings. This refines the picture alignment within its saved coverage; the domain or territory border is a separate shape.</p><div class="form-group"><label>Area</label><select name="placeId"><option value="">No linked place</option>${placeChoices.map(a=>`<option value="${esc(a.id)}" ${a.id===(draft?.placeId??selected?.id)?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><p>Match three non-collinear landmarks using image pixel coordinates. Pick on each map, switching scenes as needed. To resize or move coverage, return to Place rectangle on realm.</p><button type="button" data-fit>Reset alignment to coverage bounds</button><table><thead><tr><th>Landmark</th><th>Parent X / Y</th><th>Regional X / Y</th></tr></thead><tbody>${anchors.map((a,i)=>`<tr><td>${i+1}</td>${['parent','region'].map(side=>`<td><input aria-label="Landmark ${i+1} ${side} X" name="${side}-${i}-0" type="number" step="any" value="${draft?.[`${side}-${i}-0`]??a[side][0]}" style="width:90px"><input aria-label="Landmark ${i+1} ${side} Y" name="${side}-${i}-1" type="number" step="any" value="${draft?.[`${side}-${i}-1`]??a[side][1]}" style="width:90px"><button type="button" data-pick="${side}" data-i="${i}">Pick</button></td>`).join('')}</tr>`).join('')}</tbody></table><p data-pick-status role="status"></p><details><summary>Regional places to show approximately on the realm</summary>${raw.map(q=>`<label style="display:block"><input type="checkbox" name="publish-${esc(q.id)}" ${existing?.publish?.includes(q.id)?'checked':''}> ${esc(q.name)}</label>`).join('')||'<p>No regional-only places yet. Add them with the map editor and return here.</p>'}</details><p>Existing parent POIs inside the outline remain linked. Adjust their regional markers after saving. Journeys remain stored on ${esc(parentScene.name)}.</p>`,
+        content:`<p>Regional map width: <b>${Math.round(child.width*child.milesPerPixel)} miles</b>. Change this in Realm world settings. This refines the picture alignment within its saved coverage; the domain or territory border is a separate shape.</p><div class="form-group"><label>Area</label><select name="placeId"><option value="">No linked place</option>${placeChoices.map(a=>`<option value="${esc(a.id)}" ${a.id===(draft?.placeId??selected?.id)?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><p>Match three non-collinear landmarks using image pixel coordinates. Pick on each map, switching scenes as needed. To resize or move coverage, return to Place rectangle on realm.</p><button type="button" data-fit>Reset alignment to coverage bounds</button><table><thead><tr><th>Landmark</th><th>Parent X / Y</th><th>Regional X / Y</th></tr></thead><tbody>${anchors.map((a,i)=>`<tr><td>${i+1}</td>${['parent','region'].map(side=>`<td><input aria-label="Landmark ${i+1} ${side} X" name="${side}-${i}-0" type="number" step="any" value="${draft?.[`${side}-${i}-0`]??a[side][0]}" style="width:90px"><input aria-label="Landmark ${i+1} ${side} Y" name="${side}-${i}-1" type="number" step="any" value="${draft?.[`${side}-${i}-1`]??a[side][1]}" style="width:90px"><button type="button" data-pick="${side}" data-i="${i}">Pick</button></td>`).join('')}</tr>`).join('')}</tbody></table><p data-pick-status role="status"></p><p>Places made on this Regional map show on the realm too, where this map has them; so do realm places moved here. Existing parent POIs inside the outline remain linked. Adjust their regional markers after saving. Journeys remain stored on ${esc(parentScene.name)}.</p>`,
         render:(_e,dialog)=>{
           const el=dialog.element,form=el.querySelector('form');
           el.querySelector('[data-fit]').onclick=()=>{const a=defaults();a.forEach((v,i)=>['parent','region'].forEach(side=>v[side].forEach((n,j)=>form.elements[`${side}-${i}-${j}`].value=n)));};
@@ -207,8 +239,8 @@ export class RegionalMaps {
         buttons:[{action:'save',label:'Save regional map',callback:(_e,b)=>new foundry.applications.ux.FormDataExtended(b.form).object},{action:'cancel',label:'Cancel',callback:()=>null}]});
       if(!result||typeof result!=='object')return;draft=result;
       try{
-        const link={...existing,world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,placeId:result.placeId||null,footprint:clone(existing.footprint),anchors:[0,1,2].map(i=>Object.fromEntries(['parent','region'].map(side=>[side,[0,1].map(j=>Number(result[`${side}-${i}-${j}`]))]))),publish:raw.filter(q=>result[`publish-${q.id}`]).map(q=>q.id)};
-        link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,child);
+        const link={...existing,world,parent,parentScene:parentScene.id,scene:scene.id,title:scene.name,placeId:result.placeId||null,footprint:clone(existing.footprint),anchors:[0,1,2].map(i=>Object.fromEntries(['parent','region'].map(side=>[side,[0,1].map(j=>Number(result[`${side}-${i}-${j}`]))]))),publish:existing?.publish??[]};
+        link.entrances=regionalEntrances(await this.getRoutes(parent,this.indexes[parent]),link,this.indexes[parent].sourceMap,child,await this.getWaterways?.(parent)??{});
         const all=clone(this.links);all[world]=link;
         const preview=compileRegions({...this.indexes[parent],id:parent},Object.values(all).filter(l=>l.parent===parent).map(l=>({link:l,data:this.indexes[l.world],terrainAt:()=>({})})));
         if(!isPrimaryGM())throw Error('The primary GM changed. Reopen the dialog.');

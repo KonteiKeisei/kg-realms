@@ -1,4 +1,4 @@
-import {isPrimaryGM} from '../authority.mjs';
+import {isPrimaryGM,authorityChange} from '../authority.mjs';
 import {selectPartyTokens} from '../party-token.mjs';
 import {selectedParty,groupMembers} from '../party-groups.mjs';
 import {buildCityGraph,planCityRoute,joinCityPlans,snapToRoad,cityPosition,boardedCoaches,CITY_SPEEDS} from './routing.mjs';
@@ -77,7 +77,7 @@ export class CityTransit {
   game.settings.register(ID,'cityCarriageSound',{name:'Carriage ride sound',hint:'A looping sound for the carriage ride view: wheels, hooves, the road. Empty: the ride is silent.',scope:'world',config:true,type:String,filePicker:'audio',default:''});
   game.settings.register(ID,'cityCarriageVolume',{name:'Carriage ride volume',hint:'This client only. Also respects Foundry ambient volume.',scope:'client',config:true,type:Number,default:.35,range:{min:0,max:1,step:.05}});
     const authority=()=>{this.drive();this.overlay?.controls();this.onChange();};
-    Hooks.on('updateUser',authority);Hooks.on('updateSetting',setting=>{if(setting.key===`${ID}.primaryGM`)authority();});
+    Hooks.on('updateUser',(_user,changes)=>{if(authorityChange(changes))authority();});Hooks.on('userConnected',authority);Hooks.on('updateSetting',setting=>{if(setting.key===`${ID}.primaryGM`)authority();});
     Hooks.on('updateWorldTime',()=>{this.seenAt=performance.now();});
     Hooks.on('pauseGame',()=>{this.lastTick=performance.now();this.overlay?.sync(this.ride);});
     Hooks.on('ready',()=>this.sync(this.ride));

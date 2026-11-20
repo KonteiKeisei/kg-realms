@@ -2357,15 +2357,37 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-harvest-run :is(.cs-foot, .cs-actions, .cs-check .row, .cs-check .camp-ask, .cs-check .camp-check) > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; min-height: 44px; height: auto; padding: 8px 12px; line-height: 1.35; white-space: normal; overflow: visible; }
 .kgr-harvest-run .cs-chip.done.failed { color: var(--kgr-danger); border-color: var(--kgr-danger); }
 .kgr-harvest-run .cs-watch-outcome.hit { --die-fill: color-mix(in srgb, var(--kgr-danger) 20%, var(--kgr-surface)); }
-/* Harvest run: one block for each part, and a folded override. */
-.kgr-harvest-run .hr-part { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--kgr-line-2); border-radius: 8px; background: var(--kgr-surface); }
-.kgr-harvest-run .hr-part-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
-.kgr-harvest-run .hr-part-head b { font-size: 14px; }
-.kgr-harvest-run .hr-part .cs-people { gap: 0; }
-.kgr-harvest-run .hr-part .cs-person:last-child { border-bottom: 0; }
-.kgr-harvest-run .hr-override > summary { cursor: pointer; color: var(--kgr-muted-2); font-size: 12px; list-style: none; }
-.kgr-harvest-run .hr-override > summary::-webkit-details-marker { display: none; }
-.kgr-harvest-run .hr-override[open] > summary { margin-bottom: 6px; }
+/* Harvest run: the parts as one table, a row each: its DC, each person's roll, its result under its name. */
+.kgr-harvest-run .hr-title { gap: 2px; }
+.kgr-harvest-run .hr-title b { font-size: 22px; }
+.kgr-harvest-run .hr-table { width: 100%; margin: 0; border-collapse: collapse; background: var(--kgr-surface); border: 1px solid var(--kgr-line-2); border-radius: 8px; font-size: 13px; }
+.kgr-harvest-run .hr-table :is(th, td) { padding: 5px 8px; border: 0; border-top: 1px solid var(--kgr-line); text-align: left; vertical-align: middle; background: none; }
+.kgr-harvest-run .hr-table tr:first-child > * { border-top: 0; color: var(--kgr-muted-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.kgr-harvest-run .hr-table tr:first-child small { font-weight: 400; }
+.kgr-harvest-run .hr-table th[scope="row"] { font-weight: 400; }
+.kgr-harvest-run .hr-table th[scope="row"] > span { font-weight: 600; }
+.kgr-harvest-run .hr-table small { color: var(--kgr-muted-2); font-size: 12px; }
+.kgr-harvest-run .hr-table tr.off { opacity: 0.5; }
+.kgr-harvest-run .hr-table .hr-tick { width: 26px; text-align: center; }
+.kgr-harvest-run .hr-table .hr-tick input { margin: 0; }
+.kgr-harvest-run .hr-table .hr-dc { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kgr-harvest-run .hr-table td { white-space: nowrap; }
+.kgr-harvest-run .hr-out { display: block; margin-top: 2px; }
+.kgr-harvest-run .hr-out.ok b { color: var(--kgr-ok); }
+.kgr-harvest-run .hr-out.no b { color: var(--kgr-danger); }
+.kgr-harvest-run .hr-roll { display: inline-block; min-width: 30px; padding: 1px 6px; border: 1px solid var(--kgr-line-2); border-radius: 6px; text-align: center; font-weight: 700; color: var(--kgr-gold-text); font-variant-numeric: tabular-nums; }
+.kgr-harvest-run .hr-table tr.hr-rollrow > * { background: rgba(0, 0, 0, 0.18); }
+.kgr-harvest-run .hr-vs { font-size: 13px; }
+.kgr-harvest-run .hr-vs.ok { color: var(--kgr-ok); }
+.kgr-harvest-run .hr-vs.no { color: var(--kgr-danger); }
+.kgr-harvest-run .hr-table button { flex: none; width: auto; height: auto; min-height: 0; margin: 0 0 0 4px; line-height: 1.3; }
+.kgr-harvest-run .hr-table button.hr-rollbtn { margin: 0; padding: 3px 10px; font-size: 12px; }
+.kgr-harvest-run .hr-table button.hr-icon { padding: 2px 6px; font-size: 11px; color: var(--kgr-muted-2); background: none; border: 1px solid var(--kgr-line-2); border-radius: 6px; }
+.kgr-harvest-run .hr-table button.hr-icon.on { color: var(--kgr-accent); border-color: var(--kgr-accent); }
+.kgr-harvest-run .hr-table button.hr-link { padding: 0; font-size: 12px; background: none; border: 0; color: var(--kgr-accent); text-decoration: underline; }
+.kgr-harvest-run .hr-table tr.hr-ruling > td { border-top: 0; padding-top: 0; white-space: normal; }
+.kgr-harvest-run .hr-override { margin: 0; }
+.kgr-harvest-run .hr-help-note { margin: 0; font-size: 12px; }
 .kgr-harvest-run .cs-summary ul { margin: 4px 0 0; padding-left: 18px; }
 .kgr-harvest .hv-why { display: block; color: var(--kgr-muted); font-size: 11px; }
 /* Harvest: a party member's right-click menu (primary or secondary on every creature). */

@@ -13,6 +13,7 @@ import { placeLayer, placeClass, placeShape, placeOutline, recordIndex, areaKind
 import { biomeTypes, biomeForClass, zoneForPlace } from "./biomes.mjs";
 import { borderSelect, borderHome, followOf } from "./borders.mjs";
 import { ruleTooltip } from "./travel-rules.mjs";
+import { MapUndo, nothingToUndo } from "./undo-stack.mjs";
 // Drawing an area's border (0.77): how near (screen px) a click to the first corner closes it, and
 // how near a click must be to a corner or an edge to take it.
 const CLOSE_PX = 12, NODE_PX = 9, EDGE_PX = 7;
@@ -33,7 +34,7 @@ export class PinEditor {
     this.panel = null;
     this.openGroups = new Set();
     this.handlers = { pointerdown: (e) => this.#down(e), pointermove: (e) => this.#move(e), pointerup: (e) => this.#up(e), dblclick: (e) => { if (this.drawing) { this.#stop(e); this.#finishBorder(!!this.drawing.areaBorder); } } };
-    this.undoStack = [];
+    this.undoStack = new MapUndo(40);
     this.lastClick = null;
     // Esc steps back one level: stop adding, then let go of the place, then leave the editor.
     this.onKey = (e) => {
@@ -66,13 +67,13 @@ export class PinEditor {
   #remember() {
     const now = this.getEdits?.();
     if (!now) return;
-    this.undoStack.push(foundry.utils.deepClone(now));
-    if (this.undoStack.length > 40) this.undoStack.shift();
+    this.undoStack.push(this.getWorld?.(), foundry.utils.deepClone(now));
   }
 
+  /** Step back on this map only (undo-stack.mjs): another map's step never lands here. */
   async #undo() {
-    const prev = this.undoStack.pop();
-    if (!prev) return ui.notifications.info("KG Realms: nothing to undo on the places.");
+    const world = this.getWorld?.(), prev = this.undoStack.pop(world);
+    if (!prev) return nothingToUndo(this.undoStack, world, " on the places");
     await this.saveEdits(() => prev);
     if (this.selected && !this.getPlace(this.selected)) this.selected = null;
     this.#render();

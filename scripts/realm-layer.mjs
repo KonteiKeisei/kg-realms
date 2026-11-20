@@ -16,7 +16,7 @@ import { riverLabelFeatures, riverLabelLayer } from "./river-labels.mjs";
 /** Render this much extra on each side so short pans never show an empty edge. */
 const MARGIN = 0.15;
 /** How long the zoom stays still before what shows by zoom is decided again (the settle delay). */
-export const SETTLE_MS = 450;
+export const SETTLE_MS = 200;
 const PROTOCOL = "kgrealms";
 /**
  * Above the scene's effects (0.76): with "Names above effects" on, the map is drawn twice. The ground
@@ -98,7 +98,13 @@ export class RealmLayer {
 
   /** A planned journey's path ([lon, lat] list), or null to clear it. wet: whether each point is by water. */
   setJourney(coords, camps = [], wet = null, parts = null) {
-    this.journey = [coords, (camps??[]).filter(c=>c.kind!=='encounter'||globalThis.game?.user?.isGM), wet, parts];
+    const gm = !!globalThis.game?.user?.isGM, marks = (camps ?? []).filter((c) => c.kind !== 'encounter' || gm);
+    // The same line and markers as last time (most clock ticks): the map and the night glow stay as
+    // they are. Remembered only once the map is ready, so a call made before it loads is not lost.
+    const key = this.ready ? JSON.stringify([coords, marks, wet, parts, gm]) : null;
+    if (key && key === this.journeyKey) return;
+    this.journeyKey = key;
+    this.journey = [coords, marks, wet, parts];
     this.onJourneyChanged?.(parts?null:coords);
     this.#apply("journey", (map) => {
       const [line, marks, water, segments] = this.journey;
@@ -118,6 +124,11 @@ export class RealmLayer {
 
   /** Named biome polygons are an editor overlay; location inference does not depend on drawing. */
   setBiomes(zones, selected = null) {
+    // The same zones as last time (a click or a redraw that changed none): the map is left as it is.
+    // Remembered only once the map is ready, so a call made before it loads is not lost.
+    const key = this.ready ? JSON.stringify([zones, selected]) : null;
+    if (key && key === this.biomesKey) return;
+    this.biomesKey = key;
     this.biomes = zones ? [zones, selected] : null;
     this.#apply("biomes", (map) => {
       if (!map.getSource("biome-zones")) {
@@ -207,7 +218,7 @@ export class RealmLayer {
   scaleForZoom(zoom) { return (2 ** zoom * TILE_SIZE * 2) / this.frame.k; }
   /** Centres a spot, close enough that a place there shows whatever its rank; closer views stay as they are. */
   showSpot(lon, lat, duration = 700) {
-    const at = latLonToScene(this.frame, lat, lon), want = this.scaleForZoom(placeZooms().local + 0.01);
+    const at = latLonToScene(this.frame, lat, lon), want = this.scaleForZoom(placeZooms(this.options?.sourceMap ?? undefined).local + 0.01);
     return canvas.animatePan({ x: at.x, y: at.y, scale: Math.max(canvas.stage.scale.x, want), duration });
   }
 
@@ -244,6 +255,7 @@ export class RealmLayer {
     });
     if (this.areas) this.setAreas(this.areas);
     // A new style starts with empty overlays: put the roads, route and encounters back.
+    this.journeyKey = this.biomesKey = null;
     if (this.routes) this.setRoutes(this.routes);
     if (this.journey) this.setJourney(...this.journey);
     if (this.encounters) this.setEncounters(this.encounters);
@@ -262,6 +274,7 @@ export class RealmLayer {
     if(this.map.getLayer('kgr-terrain'))this.map.removeLayer('kgr-terrain');
     for(const m of this.#maps())m.setStyle(this.#style(this.#partOf(m)),{diff:true});
     this.#whenLoaded((m)=>{if(m===this.map)this.#mountTerrain();m.setGlobalStateProperty('editing',this.editing);m.setGlobalStateProperty('gm',!!globalThis.game?.user?.isGM);});
+    this.journeyKey=this.biomesKey=null;
     if(this.routes)this.setRoutes(this.routes);
     if(this.journey)this.setJourney(...this.journey);
     if(this.encounters)this.setEncounters(this.encounters);
@@ -507,6 +520,7 @@ export class RealmLayer {
   destroy() {
     this.generation++;
     this.ready = false;
+    this.journeyKey = this.biomesKey = null;
     clearTimeout(this.flashTimer);
     clearTimeout(this.settleTimer);
     this.flashTimer = null;

@@ -38,6 +38,16 @@ test("an interrupted reveal retains its identity and waits only its remaining ti
   x.release();assert.equal(await work,true);
 });
 
+test("the clock passing several watches rolls them all and saves them once (0.96.4)",async()=>{
+  const x=setup();x.camp.waitForWatch=()=>{throw Error("no reveal wait in a catch-up");};
+  x.hud.state.watch.scene.step="camp";Object.defineProperty(x.hud,"clock",{get:()=>13*3600});
+  const writes=x.hud.scene.writes.length;
+  x.camp.followClock(x.p);for(let i=0;i<20&&(x.camp.following||x.hud.scene.writes.length===writes);i++)await new Promise(setImmediate);
+  assert.equal(x.hud.scene.writes.length-writes,1,"one save for every watch passed");
+  assert.equal(x.state.watch.reveals[0].done,true);assert.equal(x.state.watch.reveals[1].done,true);
+  assert.equal(x.state.watch.scene.step,"w1");assert.equal(x.state.encounters[0].rest.rolls.length,2);
+});
+
 test("a primary GM can finish an interrupted reveal without mounting a carousel",async()=>{
   const x=setup();x.state.watch.scene.step="w0";
   x.state.watch.reveals={0:{id:"old-primary",campId:"camp",until:Date.now()+1000,done:false}};

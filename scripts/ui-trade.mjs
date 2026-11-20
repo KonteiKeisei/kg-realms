@@ -1,20 +1,43 @@
 import {RealmDialog} from "./ui-theme.mjs";
-import { TRADE_GROUPS, AVAILABILITY, tradePrice, tradeCoin, economyScale, tradeBasePrice, unscaleTradeBase, visibleTradeRows } from "./trade.mjs";
+import { TRADE_GROUPS, AVAILABILITY, tradePrice, tradeCoin, economyScale, tradeBasePrice, unscaleTradeBase, visibleTradeRows, tradeHome } from "./trade.mjs";
 const esc = s => foundry.utils.escapeHTML(String(s ?? ""));
 const icon = r => r.group === "specialties" ? "fa-wand-magic-sparkles" : ({ Food: "fa-wheat-awn", Drink: "fa-wine-bottle", "Raw material": "fa-tree", Luxury: "fa-gem" })[r.cat] ?? "fa-box-open";
 
+/**
+ * A region's summed-up row as this viewer may see it: the places it trades at that they can see (all,
+ * for the GM), and its price range across them. Null when none are visible.
+ */
+function regionRow(r, gm) {
+  const where = r.where.filter(w => gm || !w.hidden);
+  if (!where.length) return null;
+  const prices = where.map(w => w.gp);
+  return { ...r, where, low: Math.min(...prices), high: Math.max(...prices), hidden: where.every(w => w.hidden) };
+}
+
 export function tradeSection(market, gm = game.user.isGM, { compact = false } = {}) {
-  const visible = visibleTradeRows(market, gm);
+  const summary = !!market?.summary;
+  const visible = summary ? (market.rows ?? []).map(r => regionRow(r, gm)).filter(Boolean) : visibleTradeRows(market, gm);
   if (!market || (!gm && !visible.length && !market.houses.length)) return "";
+  const coin = (gp) => tradeCoin(gp * market.scale);
   const groups = Object.entries(TRADE_GROUPS).map(([group, label]) => {
     const rows = visible.filter(r => r.group === group);
     if (!rows.length) return "";
     return `<section class="kgt-group"><h5>${label}</h5><div class="kgt-pills">${rows.map(r => {
+      if (summary) {
+        // A region: the good's price range across its places, and where (cheapest first), read-only.
+        const price = r.low === r.high ? coin(r.low) : `${coin(r.low)} to ${coin(r.high)}`;
+        const tip = `<p><strong>${esc(r.name)}</strong>, per ${esc(r.unit)}</p>${r.where.map(w => `<p>${esc(w.name)}: <strong>${coin(w.gp)}</strong>. ${esc(w.availability)}.${gm && w.hidden ? " GM only." : ""}</p>`).join("")}${r.desc ? `<p>${esc(r.desc)}</p>` : ""}`;
+        return `<span class="kgt-pill kgt-region ${r.hidden ? "kgt-hidden" : ""}" data-trade-key="${esc(r.key)}" data-group="${group}" data-tooltip="${esc(tip)}" data-tooltip-direction="UP"><i class="fa-solid ${r.hidden ? "fa-eye-slash" : icon(r)}" aria-hidden="true"></i><span class="kgt-good-name">${esc(r.name)}${r.where.length > 1 ? ` <small>(${r.where.length})</small>` : ""}</span><span class="kgt-pill-price">${price}</span></span>`;
+      }
       const tip = `<p><strong>${esc(r.name)}</strong></p><p><strong>${tradeCoin(tradePrice(r, market.scale))}</strong> per ${esc(r.unit)}. ${esc(r.availability)}.</p><p>${tradeCoin(tradeBasePrice(r, market.scale))} economy-adjusted base x ${r.mod} local.</p>${r.supplier ? `<p>Supplier: ${esc(r.supplier)}.</p>` : ""}${r.desc ? `<p>${esc(r.desc)}</p>` : ""}${gm && r.hidden ? "<p>Hidden from players. GM only.</p>" : ""}${gm && r.source ? `<p>${esc(r.source)}</p>` : ""}`;
       return `<button type="button" class="kgt-pill ${r.hidden ? "kgt-hidden" : ""}" data-trade-key="${esc(r.key)}" data-group="${group}" data-act="trade-price" data-tooltip="${esc(tip)}" data-tooltip-direction="UP"><i class="fa-solid ${r.hidden ? "fa-eye-slash" : icon(r)}" aria-hidden="true"></i><span class="kgt-good-name">${esc(r.name)}</span><span class="kgt-pill-price">${tradeCoin(tradePrice(r, market.scale))}</span></button>`;
     }).join("")}${compact ? `<button type="button" class="kgt-more" data-act="trade-more" aria-label="More ${label.toLowerCase()} on the full card" data-tooltip="More ${label.toLowerCase()} on the full card" hidden>...</button>` : ""}</div></section>`;
   }).join("");
-  return `<section class="kgt-trade ${compact ? "kgt-compact" : ""}"><hr class="kgt-divider"><header class="kgt-heading"><h4><i class="fa-solid fa-coins"></i> Trade</h4>${gm ? `<button type="button" data-act="trade-edit"><i class="fa-solid fa-pen"></i> Edit trade</button>` : ""}</header><p class="kgt-meta">Economy x${market.scale} <span>Local price per listed unit</span></p>${groups}${market.houses.length ? `<p class="kgt-houses">Trading houses<br><strong>${market.houses.map(esc).join(" / ")}</strong></p>` : ""}${!groups && gm ? '<p class="hint">No trade information yet. Add goods or choose a settlement profile.</p>' : ""}${compact ? "" : '<div class="kgt-price-detail" hidden aria-live="polite"></div>'}</section>`;
+  const places = summary ? new Set(visible.flatMap(r => r.where.map(w => w.name))).size : 0;
+  const meta = summary ? `<p class="kgt-meta">Economy x${market.scale} <span>Across ${places} place${places === 1 ? "" : "s"} in this region: price range per listed unit</span></p>` : `<p class="kgt-meta">Economy x${market.scale} <span>Local price per listed unit</span></p>`;
+  // A region's summary is read-only: each place's own card is where its trade is edited.
+  const edit = gm && !summary ? `<button type="button" data-act="trade-edit"><i class="fa-solid fa-pen"></i> Edit trade</button>` : "";
+  return `<section class="kgt-trade ${compact ? "kgt-compact" : ""}"><hr class="kgt-divider"><header class="kgt-heading"><h4><i class="fa-solid fa-coins"></i> Trade${summary ? " in the region" : ""}</h4>${edit}</header>${meta}${groups}${market.houses.length ? `<p class="kgt-houses">Trading houses<br><strong>${market.houses.map(esc).join(" / ")}</strong></p>` : ""}${!groups && gm ? '<p class="hint">No trade information yet. Add goods or choose a settlement profile.</p>' : ""}${summary && gm ? '<p class="hint">Summed up from the places inside this region. Edit trade on each place\'s own card.</p>' : ""}${compact ? "" : '<div class="kgt-price-detail" hidden aria-live="polite"></div>'}</section>`;
 }
 
 /** Keep complete pills on one row and reserve room for the full-card link. No timers or writes. */
@@ -60,6 +83,8 @@ const economyHint = scale => `Base prices include this world's economy multiplie
 let Editor;
 export async function openTradeEditor({ service, world, place, changed }) {
   if (!game.user.isGM) return;
+  // The market of the map the place belongs to: edited from either map, saved to the same record.
+  ({ world, place } = tradeHome(world, place));
   const key = `${world}|${place.id}`, existing = windows.get(key);
   if (existing?.rendered) { existing.bringToFront?.(); return existing; }
   const market = await service.get(world, place);

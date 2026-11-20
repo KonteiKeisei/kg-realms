@@ -34,6 +34,14 @@ export const ROAD_RED_NIGHT='#e0533a';
  * from half its picture's full size, and its rank 4 places at the whole-map view.
  */
 export function placeZooms(sheet = SOURCE_MAP) {
+  // A Regional map (sheet.regional) is already a close view of a small area: every place shows from
+  // its whole-map view (the zoom at which the picture's longer side is about 1,024 screen px, a little
+  // further out than a typical whole-map view), its most important ones further out still. Its
+  // picture's own zooms would hide its keeps and castles until the view was a few dozen miles across.
+  if (sheet.regional) {
+    const whole = sheet.nativeZoom - Math.log2(Math.max(sheet.width, sheet.height) / 1024);
+    return { regional: Math.max(0.01, whole - 1.5), local: Math.max(0.02, whole - 0.5) };
+  }
   if ((sheet.detailZoom ?? sheet.nativeZoom) > sheet.nativeZoom) return { regional: 5.5, local: 7.5 };
   return { regional: sheet.nativeZoom - 2.5, local: sheet.nativeZoom - 1 };
 }

@@ -24,6 +24,24 @@ export function assetPath(src) {
   catch { return ""; }
 }
 
+/**
+ * Whether a scene update can change which local map picture a scene is drawn with: its background,
+ * its levels (v14) or its localMap flag, added, changed or removed (v13's "-=" key, or v14's
+ * deletion value under the same key). Nested changes and dotted keys both count.
+ */
+export function affectsLocalMap(changes) {
+  const plain = (v) => !!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+  const walk = (obj, prefix) => Object.entries(obj ?? {}).some(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (/^(background|levels|initialLevel)(\.|$)/.test(path)) return true;
+    if (/^flags\.(kg-realms\.(-=)?localMap|-=kg-realms)(\.|$)/.test(path)) return true;
+    // The module's flags replaced or deleted as a whole.
+    if (path === `flags.${ID}` && !plain(value)) return true;
+    return plain(value) && (path === "flags" || path === `flags.${ID}`) && walk(value, path);
+  });
+  return walk(changes, "");
+}
+
 export function sceneBackground(scene) {
   if (scene?.levels) {
     const level = scene.initialLevel ?? scene.firstLevel ?? scene.levels.contents?.[0];
@@ -301,7 +319,8 @@ export class LocalMapRenderer {
     Hooks.on("setup", refresh);
     Hooks.on("createScene", refresh);
     Hooks.on("updateScene", (scene, changes = {}) => {
-      this.#register(enabled, {defer: "background" in changes || "background.src" in changes});
+      // Journey snapshots, the weather and other modules' flags cannot change a scene's local map.
+      if (affectsLocalMap(changes)) this.#register(enabled, {defer: "background" in changes || "background.src" in changes});
       if (scene === canvas.scene && (changes.flags?.[ID]?.localMap?.seasons || changes.flags?.[ID]?.localMap?.tileAsset ||
           Object.keys(changes).some(key => key.startsWith(`flags.${ID}.localMap.seasons`)||key.startsWith(`flags.${ID}.localMap.tileAsset`)))) this.refreshSeason();
     });
