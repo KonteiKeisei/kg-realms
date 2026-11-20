@@ -96,29 +96,41 @@ export function installMonksMembers({ isScene }) {
   const show = (actor) => game.user.isGM || actor.isOwner
     || actor.testUserPermission(game.user, mtbSetting("minimum-ownership") || "LIMITED");
 
-  /** Monk's bar class, wrapped once: on a city scene its parties become their people. */
+  let logged = null; // the scene last reported in the console
+  /** The bar's parties become their people, in place. True when it worked. */
+  async function expandBar(app) {
+    if (!active() || !onCity() || !Array.isArray(app.entries)) return false;
+    try {
+      const parties = scenesParties(canvas.scene);
+      const entries = expandParties(app.entries, { parties, isParty, show });
+      // The new entries get their stats and pictures as Monk's own do.
+      for (const entry of entries) {
+        if (!entry.kgNew) continue;
+        delete entry.kgNew;
+        try { await app.updateEntry?.(entry, false); }
+        catch (err) { console.warn("KG parties | Monk's TokenBar: stats for", entry.name, err); }
+      }
+      app.entries = entries;
+      if (logged !== canvas.scene.id) {
+        logged = canvas.scene.id;
+        console.info(`KG parties | Monk's TokenBar: ${parties.length} parties on this scene, ${entries.filter((e) => e.kgParty).length} people listed`);
+      }
+      return true;
+    } catch (err) {
+      console.error("KG parties | Monk's TokenBar: listing party people failed", err);
+      return false;
+    }
+  }
+
+  /** Monk's bar class, wrapped once: on a wanted scene its parties become their people. (An older
+   * KG Cities copy marked its own wrap __kgCitiesMembers, for city scenes only: wrap over it.) */
   function patch(app) {
     const proto = Object.getPrototypeOf(app);
-    if (proto.__kgMonksMembers || proto.__kgCitiesMembers || typeof proto.getCurrentTokens !== "function") return false;
+    if (proto.__kgMonksMembers || typeof proto.getCurrentTokens !== "function") return false;
     const original = proto.getCurrentTokens;
     proto.getCurrentTokens = async function (...args) {
       const result = await original.apply(this, args);
-      if (!active() || !onCity() || !Array.isArray(this.entries)) return result;
-      try {
-        const parties = scenesParties(canvas.scene);
-        const entries = expandParties(this.entries, { parties, isParty, show });
-        // The new entries get their stats and pictures as Monk's own do.
-        for (const entry of entries) {
-          if (!entry.kgNew) continue;
-          delete entry.kgNew;
-          try { await this.updateEntry?.(entry, false); }
-          catch (err) { console.warn("kg-cities | Monk's TokenBar: stats for", entry.name, err); }
-        }
-        this.entries = entries;
-        console.debug(`kg-cities | Monk's TokenBar: ${parties.length} parties, ${entries.filter((e) => e.kgParty).length} people listed`);
-      } catch (err) {
-        console.error("kg-cities | Monk's TokenBar: listing party people failed", err);
-      }
+      await expandBar(this);
       return result;
     };
     proto.__kgMonksMembers = true;
@@ -163,6 +175,14 @@ export function installMonksMembers({ isScene }) {
     if (!active()) return;
     if (patch(app)) { app.refresh?.(); return; } // redraw with the people in
     if (!onCity()) return;
+    // A party entry is still on the bar (drawn before the wrap took hold, or by another copy's
+    // wrap): list its people now and draw again. Once per bar state, so a failure cannot loop.
+    if (app.entries?.some(isParty)) {
+      if (app.__kgRetried === app.entries) return;
+      app.__kgRetried = app.entries;
+      void expandBar(app).then((ok) => { if (ok) app.render?.(); });
+      return;
+    }
     const root = element instanceof HTMLElement ? element : element?.[0] ?? app?.element;
     for (const li of root?.querySelectorAll?.(`li.token.${MEMBER}[data-actor-id]`) ?? []) {
       if (li.dataset.kgBound) continue;

@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.96.8: party people on Monk's TokenBar, fixed
+
+- The people in each party now show on Monk's TokenBar on Realms scenes, as in KG Cities. In 0.96.5 and 0.96.6 a party that had never been split was not recognised as a party (its party record is only written on a split), so the bar showed the group's own token at most (and only with Monk's "show offline players" on), without the party picture.
+- The people also show when KG Cities' copy of this code hooked into the bar first.
+- The console says once per scene how many parties and people were put on the bar ("KG parties | Monk's TokenBar: ...").
+
 ## 0.96.6: the people in each party on Monk's TokenBar
 
 - On a scene with KG party tokens, Monk's TokenBar lists the people in each party instead of one entry per party. Each party's people sit together, with a small gap before the next party, and the bar updates as parties split, merge or change size. Hovering a person shows their party. Everyone in a party is listed whether or not their player is logged in (before, Monk's hid party entries unless it was set to show offline players).

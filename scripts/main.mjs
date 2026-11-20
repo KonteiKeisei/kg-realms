@@ -1,6 +1,6 @@
 import {RealmDialog} from "./ui-theme.mjs";
 import {registerPartyAppearance} from './party-appearance.mjs';
-import { installMonksPartyBar, isKgParty } from "./monks-bar.mjs";
+import { installMonksPartyBar, isKgParty, addPartyRule } from "./monks-bar.mjs";
 import { installMonksMembers } from "./monks-members.mjs";
 import {registerWindowAppearance} from './ui-theme.mjs';
 import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
@@ -77,6 +77,8 @@ Hooks.once("init", () => {localMapRenderer.install();mapAssets.install();});
 // Monk's TokenBar: the people in each party token on the scene, grouped by party; clicking one
 // selects and pans to their party.
 Hooks.once("init", () => {
+  // A Realms party is any group actor (its party record is only written when it splits).
+  addPartyRule((a) => a.type === "group");
   installMonksPartyBar();
   installMonksMembers({ isScene: (s) => s.tokens.some((t) => isKgParty(t.actor)) });
 });

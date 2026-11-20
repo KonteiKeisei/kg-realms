@@ -20,8 +20,16 @@ const GUARD = "__kgMonksPartyBar";
 /** A party's KG record, from either module. */
 export const partyMeta = (a) => a?.flags?.["kg-cities"]?.party ?? a?.flags?.["kg-realms"]?.party ?? null;
 
-/** A live KG party: a dnd5e group actor with a KG party record that is not retired. */
-export const isKgParty = (a) => a?.type === "group" && !!partyMeta(a) && !partyMeta(a)?.retired;
+// Extra party rules, shared by every copy of this file: KG Realms counts any group actor as a party
+// (its record is only written on a split), KG Cities needs the record.
+const partyRules = (globalThis.__kgPartyRules ??= []);
+/** Count actors passing rule(actor) as parties too. */
+export const addPartyRule = (rule) => { if (!partyRules.includes(rule)) partyRules.push(rule); };
+
+/** A live KG party: a dnd5e group actor with a KG party record (or passing a module's rule) that
+ * is not retired. */
+export const isKgParty = (a) => a?.type === "group" && !partyMeta(a)?.retired
+  && (!!partyMeta(a) || partyRules.some((rule) => { try { return !!rule(a); } catch { return false; } }));
 
 const isVehicle = (a) => a?.type === "vehicle" || !!a?.flags?.["kg-cities"]?.vehicle?.vehicle;
 
