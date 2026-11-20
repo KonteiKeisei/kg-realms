@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.96.6: the people in each party on Monk's TokenBar
+
+- On a scene with KG party tokens, Monk's TokenBar lists the people in each party instead of one entry per party. Each party's people sit together, with a small gap before the next party, and the bar updates as parties split, merge or change size. Hovering a person shows their party. Everyone in a party is listed whether or not their player is logged in (before, Monk's hid party entries unless it was set to show offline players).
+- Click a person to select their party's token and pan to it (shift-click adds it to the selection, ctrl-click targets it). Double-click opens the person's sheet, or asks their party for a roll when Monk's double-click is set to request a roll.
+- Someone with a token of their own on the scene keeps that token's entry.
+
 ## 0.96.5: parties on Monk's TokenBar
 
 - On any scene with a KG party token, Monk's TokenBar shows the party as one entry. Its picture shows the people inside the party. Requesting a roll for that entry asks the members, each once, without the party's vehicles.

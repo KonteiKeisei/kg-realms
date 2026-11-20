@@ -2399,3 +2399,7 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-hv-menu button > i { width: 16px; color: var(--kgr-accent); text-align: center; }
 .kgr-hv-menu button span { display: flex; flex-direction: column; }
 .kgr-hv-menu button small { color: var(--kgr-muted); font-size: 11px; }
+
+/* Monk's TokenBar: each party's people together, a gap before the next party (monks-members.mjs). */
+#tokenbar li.token.kg-member.kg-party-start:not(:first-child) { margin-left: 12px; }
+#tokenbar.vertical li.token.kg-member.kg-party-start:not(:first-child) { margin-left: 0; margin-top: 12px; }
