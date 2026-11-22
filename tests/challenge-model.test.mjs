@@ -2,7 +2,7 @@
 // the GM rules on, stages and the three endings.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride, calledApproaches, isCalled, callApproach, addMember, removeMember, unskipActor, stillToAct, everyoneActed } from "../scripts/challenge/model.mjs";
+import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride, addMember, removeMember, unskipActor, stillToAct, everyoneActed, assignRoll, unassignRoll, pendingRolls, pendingFor, pendingTerms, rollPending, gmRule } from "../scripts/challenge/model.mjs";
 import { normalizeChallenge, challengeProblems, startRun, canAct, recordRoll, requestSpell, ruleSpell, gmMark, skipActor, canAdvance, nextStage, endEarly, endingFor, rollTerms, contributions, actedIn } from "../scripts/challenge/model.mjs";
 
 const party = [{ id: "a", name: "Ash" }, { id: "b", name: "Bree" }, { id: "c", name: "Cole" }];
@@ -184,32 +184,6 @@ test("contributions list each character's marks and spells", () => {
   assert.deepEqual(contributions(r).find((x) => x.id === "c").others, ["Climbs the treant"]);
 });
 
-// 0.98.2: players see an approach only when the GM calls for rolls on it.
-test("a new run calls for nothing; the GM calls and stops calling for approaches", () => {
-  const r = run();
-  assert.deepEqual(calledApproaches(r), []);
-  assert.equal(callApproach(r, 1), true);
-  assert.equal(callApproach(r, 0), true);
-  assert.deepEqual(calledApproaches(r), [0, 1]);
-  assert.equal(isCalled(r, 1), true);
-  assert.equal(callApproach(r, 1, false), true);
-  assert.deepEqual(calledApproaches(r), [0]);
-  assert.equal(callApproach(r, 5), false, "no such approach");
-});
-
-test("calls are cleared at the next stage, and a run kept before calls existed has none", () => {
-  const r = run();
-  callApproach(r, 0);
-  nextStage(r);
-  assert.deepEqual(calledApproaches(r), []);
-  const old = run();
-  delete old.calls;
-  assert.deepEqual(calledApproaches(old), []);
-  assert.equal(isCalled(old, 0), false);
-  assert.equal(callApproach(old, 0), true);
-  assert.deepEqual(old.calls, [0]);
-});
-
 // 0.98.4: the GM chooses who takes part, and a skip can be taken back.
 test("a run starts with nobody taking part, the scene's characters kept as its roster", () => {
   const r = startRun(challenge(), party, { scene: "s1", runId: "r1" });
@@ -246,8 +220,77 @@ test("a skip is taken back: the character can act again this stage", () => {
   assert.equal(unskipActor(r, "c"), false, "a roll isn't a skip");
 });
 
-test("nothing can be called once the challenge is over", () => {
+// 0.98.6: the GM sets up rolls for each character, from an approach or of the GM's own.
+test("an approach set up for a character carries its skills and DC; rolled, it's their act", () => {
   const r = run();
-  endEarly(r);
-  assert.equal(callApproach(r, 0), false);
+  const p = assignRoll(r, "a", { approach: 0 });
+  assert.deepEqual([p.options, p.dc, p.approach], [["skill:nat", "skill:per"], 16, 0]);
+  assert.deepEqual(pendingFor(r, "a").map((x) => x.id), [p.id]);
+  const act = rollPending(r, p.id, { option: "skill:per", total: 17 });
+  assert.equal(act.success, true);
+  assert.equal(act.option, "skill:per");
+  assert.deepEqual(pendingRolls(r), []);
+  assert.deepEqual(r.used.a, ["skill:per"]);
+  assert.equal(r.succ, 1);
+});
+
+test("a character can have several rolls set up in one stage, each rolled once", () => {
+  const r = run();
+  const one = assignRoll(r, "a", { approach: 0 }), two = assignRoll(r, "a", { approach: 1 });
+  rollPending(r, one.id, { option: "skill:nat", total: 5 });
+  assert.equal(rollPending(r, one.id, { option: "skill:per", total: 20 }), null, "already rolled");
+  assert.equal(rollPending(r, two.id, { option: "skill:sur", total: 20 }).success, true);
+  assert.deepEqual([r.succ, r.fail], [1, 1]);
+});
+
+test("a set-up roll refuses a skill it doesn't offer, a used one, a missing total and an outsider", () => {
+  const r = run();
+  r.used.a = ["skill:nat"];
+  const p = assignRoll(r, "a", { approach: 0 });
+  assert.equal(rollPending(r, p.id, { option: "skill:ath", total: 20 }), null, "not offered");
+  assert.equal(rollPending(r, p.id, { option: "skill:nat", total: 20 }), null, "used up");
+  assert.equal(rollPending(r, p.id, { option: "skill:per", total: NaN }), null, "no total");
+  assert.equal(assignRoll(r, "zz", { approach: 0 }), null, "not taking part");
+  assert.equal(assignRoll(r, "a", { approach: 9 }), null, "no such approach");
+});
+
+test("the GM's own roll: valid skills only, DC kept in range, its note kept", () => {
+  const r = run();
+  const p = assignRoll(r, "b", { options: ["skill:ste", "skill:nope"], dc: 99, text: "Hides in the scree" });
+  assert.deepEqual([p.options, p.dc, p.approach, p.text], [["skill:ste"], 40, null, "Hides in the scree"]);
+  assert.equal(assignRoll(r, "b", { options: ["skill:nope"], dc: 10 }), null);
+  assert.equal(rollPending(r, p.id, { option: "skill:ste", total: 40 }).success, true);
+});
+
+test("a spell boost lowers a set-up roll's DC once", () => {
+  const r = run();
+  r.boosts.a = { dc: 2, spell: "Guidance" };
+  const p = assignRoll(r, "a", { approach: 0 });
+  assert.equal(pendingTerms(r, p).dc, 14);
+  assert.equal(rollPending(r, p.id, { option: "skill:nat", total: 14 }).success, true);
+  assert.equal(r.boosts.a, undefined);
+});
+
+test("set-up rolls go at the next stage, with a removed character, and none after the end", () => {
+  const r = run({ goal: { succ: 1, fail: 3, partial: 0 } });
+  const a = assignRoll(r, "a", { approach: 0 }), b = assignRoll(r, "b", { approach: 0 });
+  assert.equal(unassignRoll(r, b.id), true);
+  assignRoll(r, "c", { approach: 0 });
+  removeMember(r, "c");
+  assert.deepEqual(pendingRolls(r).map((p) => p.id), [a.id]);
+  const old = run(); delete old.pending;
+  assert.deepEqual(pendingRolls(old), [], "a run kept before 0.98.6");
+  rollPending(r, a.id, { option: "skill:nat", total: 20 });
+  assert.equal(r.result, "full");
+  assert.equal(assignRoll(r, "b", { approach: 0 }), null);
+  const s = run(); assignRoll(s, "a", { approach: 0 }); nextStage(s);
+  assert.deepEqual(pendingRolls(s), []);
+});
+
+test("the GM's ruling counts even after the character has acted this stage", () => {
+  const r = run();
+  recordRoll(r, { actor: "a", approach: 0, option: "skill:nat", total: 20 });
+  assert.equal(gmRule(r, "a", false, "Slips on the scree").success, false);
+  assert.deepEqual([r.succ, r.fail], [1, 1]);
+  assert.equal(gmRule(r, "zz", true), null);
 });

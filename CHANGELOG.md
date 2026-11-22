@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.98.6: skill challenges, rolls set up per character
+
+- Each approach is a card in the GM's panel: drag it onto a character to set up that roll for them this stage. Their player sees it at once as skill buttons with their bonus (and the DC if the challenge shows DCs), never the approach's text. Cards can be dropped at any time as the stage goes on, more than one per character.
+- A Something else card: dropped on a character, it opens a form on their row. Automatic gives Success and Failure; Roll sets up a roll of your own, any skill or ability check at the DC you choose. Then the note: shown on the card for Automatic, for the GM only with Roll.
+- A set-up roll shows on the character's row for the GM, with a button for each skill to roll it (the system's roll dialog) and an × to take it off. The player can roll it from their own box.
+- Roll all, in the GM's bar: rolls every set-up roll not yet rolled, one after another, each with the character's best skill on it, no dialogs. It stops as soon as the challenge is won or lost.
+- Moving on with rolls set up and not rolled asks first; they're dropped at the next stage. Removing a character drops theirs.
+- Gone: the Call for rolls button (0.98.3) and Roll for them. Setting up a roll replaces both.
+
 ## 0.98.5: skill challenges, add from the party or drag anyone in
 
 - The add list is the main party only: the player characters in the party tokens on the scene; with none there, dnd5e's primary party; else KG party 1; else the group with the most player characters. Not every character a player owns, and not a wagon or hireling in the party.

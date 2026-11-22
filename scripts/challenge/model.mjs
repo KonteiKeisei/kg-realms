@@ -138,7 +138,7 @@ export function startRun(challenge, roster, { now = 0, scene = "", runId = id(),
   return {
     id: runId, scene, name: c.name, hook: c.hook, goal: c.goal, rules: c.rules, stageEnd: c.stageEnd, stages: c.stages, outcomes: c.outcomes,
     roster: all, party: join ? all.map((p) => ({ ...p })) : [],
-    stage: 0, acts: [], used: {}, requests: {}, boosts: {}, calls: [], succ: 0, fail: 0, result: null, applied: {}, gives: {}, started: now
+    stage: 0, acts: [], used: {}, requests: {}, boosts: {}, pending: [], succ: 0, fail: 0, result: null, applied: {}, gives: {}, started: now
   };
 }
 
@@ -157,6 +157,7 @@ export function removeMember(run, actorId) {
   run.party = run.party.filter((x) => x.id !== actorId);
   delete run.requests?.[actorId];
   delete run.boosts?.[actorId];
+  run.pending = pendingRolls(run).filter((p) => p.actor !== actorId);
   return true;
 }
 
@@ -169,21 +170,84 @@ export function unskipActor(run, actorId) {
   return true;
 }
 
-/**
- * The approaches of this stage the GM is calling for rolls on (0.98.3): players see and roll only these.
- * A run kept before 0.98.3 has none.
- */
-export const calledApproaches = (run) => (Array.isArray(run?.calls) ? run.calls : []).filter((j) => Number.isInteger(j) && !!currentStage(run)?.approaches?.[j]);
-export const isCalled = (run, approachIndex) => calledApproaches(run).includes(Number(approachIndex));
+/* ------------------------------------------------------------------ set-up rolls (0.98.6) */
+//
+// In place of 0.98.3's calling for rolls on an approach for everyone, the GM sets up rolls for each character this stage: an approach card dropped on them, or a one-off
+// roll of the GM's own (a skill or check at a DC). A set-up roll is shown to that character's player,
+// who rolls it, or the GM rolls it. A character can have several in a stage, set up as play goes on.
+// Rolled, it becomes the character's act; those not rolled are dropped when the stage ends.
 
-/** The GM calls for rolls on an approach this stage (on = true), or stops calling for it. */
-export function callApproach(run, approachIndex, on = true) {
-  const j = Number(approachIndex);
-  if (run?.result || !currentStage(run)?.approaches?.[j]) return false;
-  const calls = new Set(calledApproaches(run));
-  if (on) calls.add(j); else calls.delete(j);
-  run.calls = [...calls].sort((x, y) => x - y);
-  return true;
+/** The rolls set up and not yet rolled. A run kept before 0.98.6 has none. */
+export const pendingRolls = (run) => (Array.isArray(run?.pending) ? run.pending : []);
+export const pendingFor = (run, actorId) => pendingRolls(run).filter((p) => p.actor === actorId);
+
+/**
+ * Set up a roll for a character: { approach } (an approach of this stage, by index) or
+ * { options, dc, text } (the GM's own). Returns the set-up roll, or null.
+ */
+export function assignRoll(run, actorId, { approach = null, options = null, dc = null, text = "" } = {}) {
+  if (!run || run.result || !member(run, actorId)) return null;
+  let roll;
+  if (approach != null) {
+    const a = currentStage(run)?.approaches?.[Number(approach)];
+    if (!a || !a.options.length) return null;
+    roll = { approach: Number(approach), options: [...a.options], dc: a.dc, text: "" };
+  } else {
+    const opts = [...new Set((Array.isArray(options) ? options : [options]).filter(validOption))].slice(0, 6);
+    if (!opts.length) return null;
+    roll = { approach: null, options: opts, dc: int(dc, 15, 1, 40), text: str(text, 500) };
+  }
+  const p = { id: id(), stage: run.stage, actor: actorId, ...roll };
+  run.pending = [...pendingRolls(run), p];
+  return p;
+}
+
+/** Take back a set-up roll. */
+export function unassignRoll(run, pendingId) {
+  const before = pendingRolls(run).length;
+  run.pending = pendingRolls(run).filter((p) => p.id !== pendingId);
+  return run.pending.length !== before;
+}
+
+/** The DC and advantage a set-up roll is made at, with any spell boost from the GM. */
+export function pendingTerms(run, p) {
+  const boost = run.boosts?.[p.actor] ?? null;
+  return { dc: Math.max(1, p.dc - (boost?.dc ?? 0)), advantage: !!boost?.adv };
+}
+
+/** Whether a set-up roll's option can be rolled: not over, still in, offered, and not used up. */
+export function canRollPending(run, p, option) {
+  if (!run || run.result || !p || !member(run, p.actor)) return false;
+  if (!p.options.includes(option)) return false;
+  return !(run.rules.noRepeat && (run.used[p.actor] ?? []).includes(option));
+}
+
+/** A set-up roll rolled: its total is the character's act. Returns the act, or null. */
+export function rollPending(run, pendingId, { option, total }) {
+  const p = pendingRolls(run).find((x) => x.id === pendingId);
+  if (!p || !Number.isFinite(total) || !canRollPending(run, p, option)) return null;
+  const { dc } = pendingTerms(run, p), success = total >= dc;
+  const act = { stage: run.stage, actor: p.actor, name: member(run, p.actor).name, kind: "roll", approach: p.approach, option, total, dc, success, note: "" };
+  run.acts.push(act);
+  run.used[p.actor] = [...(run.used[p.actor] ?? []), option];
+  delete run.boosts[p.actor];
+  run.pending = pendingRolls(run).filter((x) => x.id !== pendingId);
+  if (success) run.succ += 1; else run.fail += 1;
+  settle(run);
+  return act;
+}
+
+/**
+ * The GM rules on something a character did, as a success or failure with a note: the Something else
+ * card's Automatic. Unlike gmOverride, they may already have acted this stage. Returns the act, or null.
+ */
+export function gmRule(run, actorId, success, note = "") {
+  if (!run || run.result || !member(run, actorId)) return null;
+  const act = { stage: run.stage, actor: actorId, name: member(run, actorId).name, kind: "gm", approach: null, option: null, total: null, dc: null, success: !!success, note: str(note, 300) };
+  run.acts.push(act);
+  if (success) run.succ += 1; else run.fail += 1;
+  settle(run);
+  return act;
 }
 /** The characters who have acted in a stage (rolled, had a spell count, or were skipped). */
 export const actedIn = (run, stage = run.stage) => new Set(run.acts.filter((a) => a.stage === stage && a.actor).map((a) => a.actor));
@@ -304,7 +368,7 @@ export function endingFor(run) {
 /** On to the next stage, or the ending after the last. */
 export function nextStage(run) {
   if (run.result) return run;
-  run.requests = {}; run.boosts = {}; run.calls = [];
+  run.requests = {}; run.boosts = {}; run.pending = [];
   if (run.stage >= run.stages.length - 1) { run.result = endingFor(run); return run; }
   run.stage += 1;
   return run;

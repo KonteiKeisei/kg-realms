@@ -7,12 +7,12 @@
 // it stands in the scene, one at a time, so two arriving together can't undo each other.
 //
 // A player's view (0.98.2): the tracks, the stages by number, and who has acted. No read-aloud text,
-// no approaches, no spells: nothing that guides them. When the GM calls for rolls on an approach, its
-// skills or checks show for their own character that hasn't acted, with their bonus (a used one
-// crossed out, the DC if the challenge shows DCs), and "Use a spell instead". The GM's: everything,
-// with every DC, a Call button on each approach, each character's state, rulings on spell requests,
-// roll for or skip anyone, a success or failure of their own, next stage and end early. At the end,
-// the result for everyone; the outcome's text and effects, and the buttons to apply them, for the GM.
+// no approaches, no spells: nothing that guides them. Their own character's set-up rolls show as
+// skill buttons with their bonus (a used one crossed out, the DC if the challenge shows DCs), and
+// "Use a spell instead". The GM's: everything, with every DC; each approach a card to drag onto a
+// character, and a Something else card (0.98.6); each character's set-up rolls (roll one, or Roll
+// all), rulings on spell requests, skip, a success or failure of their own, next stage and end early.
+// At the end, the result for everyone; the outcome's text and effects, and applying them, for the GM.
 //
 // Who takes part (0.98.4): nobody at the start. The GM adds the main party's player characters with a
 // click (0.98.5), or anyone else by dragging an actor or a group from the Actors directory onto the
@@ -23,9 +23,10 @@
 import { shellHead, movable, placeKept } from "../ui-shell.mjs";
 import { isPrimaryGM } from "../authority.mjs";
 import {
-  RESULTS, SPELL_EFFECTS, optionLabel, startRun, currentStage, actedIn, canAct, rollTerms, recordRoll, requestSpell,
-  ruleSpell, gmMark, gmOverride, skipActor, canAdvance, everyoneActed, nextStage, endEarly, contributions,
-  calledApproaches, isCalled, callApproach, addMember, removeMember, unskipActor, stillToAct
+  RESULTS, SPELL_EFFECTS, SKILLS, ABILITIES, optionLabel, startRun, currentStage, actedIn, canAct, requestSpell,
+  ruleSpell, gmMark, skipActor, canAdvance, everyoneActed, nextStage, endEarly, contributions,
+  addMember, removeMember, unskipActor, stillToAct,
+  pendingRolls, pendingFor, assignRoll, unassignRoll, pendingTerms, canRollPending, rollPending, gmRule
 } from "./model.mjs";
 import { applyEffect, effectLine, postSummary } from "./effects.mjs";
 import { sceneParties, groupMembers, partyMeta } from "../party-groups.mjs";
@@ -35,6 +36,9 @@ const SOCKET = `module.${ID}`;
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const signed = (n) => `${n >= 0 ? "+" : ""}${n}`;
 const playersOf = (actor) => Array.from(game.users ?? []).filter((u) => u.active && !u.isGM && actor?.testUserPermission?.(u, "OWNER"));
+/** The drag type of an approach card or the Something else card (never text/plain: Foundry's own drops ignore it). */
+const CARD = "application/x-kgr-sc-card";
+const ALL_OPTIONS = [...Object.keys(SKILLS).map((k) => `skill:${k}`).sort((a, b) => optionLabel(a).localeCompare(optionLabel(b))), ...Object.keys(ABILITIES).map((k) => `check:${k}`)];
 
 /** The bonus an actor rolls an option with. */
 export function optionBonus(actor, key) {
@@ -101,9 +105,15 @@ export function sceneRun(scene) {
 
 export class ChallengeRun {
   constructor() {
-    this.el = null; this.min = false; this.previewRun = null; this.asPlayer = false; this.actingFor = null; this.spellFor = null; this.overrideFor = null;
-    this.busy = new Set(); this.queue = Promise.resolve(); this.html = "";
+    this.el = null; this.min = false; this.previewRun = null; this.asPlayer = false; this.spellFor = null;
+    // The Something else form open on a character's row (0.98.6), and what's in it, kept across redraws.
+    this.elseFor = null; this.elseForm = null;
+    // Set-up rolls being rolled here, by id; a card drag under way (a redraw would end it).
+    this.busy = new Set(); this.dragging = false; this.renderLater = false; this.rollingAll = false;
+    this.queue = Promise.resolve(); this.html = "";
   }
+
+  #resetLocal() { this.spellFor = null; this.elseFor = null; this.elseForm = null; }
 
   /** The run under way on a scene (the viewed one by default). */
   activeRun(scene = canvas?.scene) { return sceneRun(scene); }
@@ -118,7 +128,7 @@ export class ChallengeRun {
 
   async start(scene, challenge, party) {
     const run = startRun(challenge, party, { now: game.time.worldTime, scene: scene.id, runId: foundry.utils.randomID() });
-    this.previewRun = null; this.asPlayer = false; this.min = false; this.actingFor = null;
+    this.previewRun = null; this.asPlayer = false; this.min = false; this.#resetLocal();
     await scene.setFlag(ID, "challengeRun", JSON.stringify(run));
     // The hook is the GM's to read out: the card everyone sees has only the name and the goal.
     ChatMessage.create({ speaker: { alias: run.name }, content: `<div class="kgr-challenge-card"><h3>${esc(run.name)}</h3><p><small>Skill challenge: ${run.goal.succ} successes before ${run.goal.fail} failures.</small></p></div>` });
@@ -128,7 +138,7 @@ export class ChallengeRun {
   /** A test run of the builder's draft for this GM: the GM's view, kept nowhere, nothing applied. */
   preview(challenge, party) {
     this.previewRun = startRun(challenge, party, { scene: canvas?.scene?.id ?? "", runId: "preview" });
-    this.asPlayer = false; this.min = false; this.actingFor = null; this.overrideFor = null; this.spellFor = null;
+    this.asPlayer = false; this.min = false; this.#resetLocal();
     this.render();
   }
 
@@ -154,7 +164,7 @@ export class ChallengeRun {
   }
 
   async end(scene = this.scene) {
-    if (this.previewRun) { this.previewRun = null; this.asPlayer = false; this.actingFor = null; this.overrideFor = null; this.close(); return this.render(); }
+    if (this.previewRun) { this.previewRun = null; this.asPlayer = false; this.#resetLocal(); this.close(); return this.render(); }
     if (game.user.isGM && scene?.getFlag(ID, "challengeRun") !== undefined) await scene.unsetFlag(ID, "challengeRun");
     this.close();
   }
@@ -162,12 +172,19 @@ export class ChallengeRun {
   /** A player's message, on the primary GM's client. */
   receive(m, userId) {
     if (!isPrimaryGM() || typeof m?.scene !== "string") return;
-    const scene = game.scenes.get(m.scene), user = game.users.get(userId ?? m.user), actor = game.actors.get(m.actor);
-    if (!scene || !user || !actor || !actor.testUserPermission(user, "OWNER")) return;
+    const scene = game.scenes.get(m.scene), user = game.users.get(userId ?? m.user);
+    if (!scene || !user) return;
     if (m.type === "challenge-roll") {
-      // A player rolls only on an approach the GM is calling for.
-      return this.change((run) => run.id === m.run && run.stage === m.stage && isCalled(run, m.approach) && recordRoll(run, { actor: actor.id, approach: m.approach, option: m.option, total: Number(m.total) }), scene, { live: true });
+      // A player rolls only a roll the GM set up, for a character that player owns: the character, the
+      // skills and the DC come from the run, not the message.
+      return this.change((run) => {
+        const p = run.id === m.run && pendingRolls(run).find((x) => x.id === m.pending);
+        if (!p || !game.actors.get(p.actor)?.testUserPermission(user, "OWNER")) return null;
+        return rollPending(run, p.id, { option: m.option, total: Number(m.total) });
+      }, scene, { live: true });
     }
+    const actor = game.actors.get(m.actor);
+    if (!actor || !actor.testUserPermission(user, "OWNER")) return;
     if (m.type === "challenge-spell") {
       return this.change((run) => run.id === m.run && requestSpell(run, { actor: actor.id, spell: m.spell, text: m.text }), scene, { live: true }).then((ok) => {
         if (ok) ui.notifications.info(`KG Realms: ${actor.name} asks for ${m.spell} to count.`);
@@ -177,33 +194,54 @@ export class ChallengeRun {
 
   /* ---------------------------------------------------------------- rolling, either side */
 
-  /** Who rolls for a character on this client: its online player; the GM when there's none, or always when picking for them. */
-  #rollsHere(actor) {
-    if (!actor) return false;
-    if (this.previewRun) return game.user.isGM;
-    if (game.user.isGM) return this.actingFor === actor.id || !playersOf(actor).length;
-    return actor.isOwner;
-  }
-
-  async #roll(actorId, approach, option) {
-    const run = this.run, actor = game.actors.get(actorId), stage = currentStage(run);
-    if (!run || !actor || !stage || this.busy.has(actorId) || !canAct(run, actorId, option).ok) return;
-    const terms = rollTerms(run, actorId, approach);
-    this.busy.add(actorId); this.render();
+  /**
+   * Roll a set-up roll with one of its skills: the system's roll (with its dialog, unless Roll all),
+   * then the GM records it, or a player sends it to the GM. Returns whether it was rolled.
+   */
+  async #rollPending(pendingId, option, { dialog = true } = {}) {
+    const run = this.run, p = pendingRolls(run).find((x) => x.id === pendingId), actor = game.actors.get(p?.actor);
+    if (!run || !p || !actor || this.busy.has(pendingId) || !canRollPending(run, p, option)) return false;
+    const terms = pendingTerms(run, p);
+    this.busy.add(pendingId); this.render();
     try {
       const showDC = game.user.isGM || run.rules.showDC;
-      // The roll's card is public: the stage by number, never its title.
+      // The roll's card is public: the stage by number and the skill, never the stage's title or the approach's text.
       const flavor = `${run.name}: stage ${run.stage + 1}, ${optionLabel(option)}${terms.advantage ? " (advantage)" : ""}`;
-      const total = await rollOption(actor, option, { dc: showDC ? terms.dc : null, advantage: terms.advantage, flavor, chat: !this.previewRun, dialog: true });
-      if (total == null) return;
-      const msg = { actor: actorId, approach, option, total };
-      if (game.user.isGM) await this.change((r) => r.id === run.id && r.stage === run.stage && recordRoll(r, msg));
-      else game.socket.emit(SOCKET, { type: "challenge-roll", scene: this.scene.id, run: run.id, stage: run.stage, user: game.user.id, ...msg });
-      if (this.actingFor === actorId) this.actingFor = null;
+      const total = await rollOption(actor, option, { dc: showDC ? terms.dc : null, advantage: terms.advantage, flavor, chat: !this.previewRun, dialog });
+      if (total == null) return false;
+      if (game.user.isGM) return !!(await this.change((r) => r.id === run.id && rollPending(r, pendingId, { option, total })));
+      game.socket.emit(SOCKET, { type: "challenge-roll", scene: this.scene.id, run: run.id, pending: pendingId, option, total, user: game.user.id });
+      return true;
     } catch (err) {
       console.error(`${ID} | skill challenge roll:`, err);
       ui.notifications.error(`KG Realms: the roll did not go through: ${err.message}`);
-    } finally { this.busy.delete(actorId); this.render(); }
+      return false;
+    } finally { this.busy.delete(pendingId); this.render(); }
+  }
+
+  /** The skill Roll all uses for a set-up roll: the character's best that isn't used up, or null. */
+  #bestOption(run, p) {
+    const actor = game.actors.get(p.actor);
+    return p.options.filter((o) => canRollPending(run, p, o)).sort((a, b) => optionBonus(actor, b) - optionBonus(actor, a))[0] ?? null;
+  }
+
+  /** The GM rolls every set-up roll not yet rolled, one after another, each with the character's best skill; stops at the end. */
+  async #rollAll() {
+    if (this.rollingAll) return;
+    this.rollingAll = true;
+    const skipped = [];
+    try {
+      for (const id of pendingRolls(this.run).map((p) => p.id)) {
+        const run = this.run;
+        if (!run || run.result) break;
+        const p = pendingRolls(run).find((x) => x.id === id);
+        if (!p || this.busy.has(id)) continue;
+        const option = this.#bestOption(run, p);
+        if (!option) { skipped.push(run.party.find((m) => m.id === p.actor)?.name ?? "someone"); continue; }
+        await this.#rollPending(id, option, { dialog: false });
+      }
+    } finally { this.rollingAll = false; this.render(); }
+    if (skipped.length) ui.notifications.warn(`KG Realms: not rolled, every skill on it is used up: ${skipped.join(", ")}. Take it off or set up another.`);
   }
 
   #askSpell(actorId) {
@@ -229,17 +267,53 @@ export class ChallengeRun {
       this.el.setAttribute("aria-label", "Skill challenge");
       this.el.addEventListener("click", (e) => { const b = e.target.closest("[data-sc]"); if (b && !b.disabled) { e.preventDefault(); this.#click(b); } });
       this.el.addEventListener("change", (e) => { const t = e.target; if (t.dataset?.scGive !== undefined) this.change((r) => { r.gives[t.dataset.scGive] = t.value; return true; }); });
-      // The GM drops an actor (or a group) from the Actors directory anywhere on the panel to add them.
+      // The Something else form's fields, kept on this client as they're typed, so a redraw keeps them.
+      const keepElse = (e) => { const t = e.target; if (t.closest?.("[data-sc-else]") && this.elseForm && t.name) this.elseForm[t.name] = t.value; };
+      this.el.addEventListener("input", keepElse);
+      this.el.addEventListener("change", keepElse);
       const dropOk = () => game.user.isGM && this.gmView && !this.run?.result;
-      this.el.addEventListener("dragover", (e) => { if (!dropOk()) return; e.preventDefault(); this.el.classList.add("sc-dropping"); });
-      this.el.addEventListener("dragleave", (e) => { if (!this.el.contains(e.relatedTarget)) this.el.classList.remove("sc-dropping"); });
-      this.el.addEventListener("drop", (e) => { this.el.classList.remove("sc-dropping"); if (!dropOk()) return; e.preventDefault(); this.#drop(e).catch((err) => { console.error(`${ID} | skill challenge drop:`, err); ui.notifications.error(`KG Realms: that could not be added: ${err.message}`); }); });
+      const isCard = (e) => Array.from(e.dataTransfer?.types ?? []).includes(CARD);
+      const clearTargets = () => this.el.querySelectorAll(".sc-target").forEach((x) => x.classList.remove("sc-target"));
+      // An approach card, or the Something else card, dragged onto a character (0.98.6).
+      this.el.addEventListener("dragstart", (e) => {
+        const card = e.target.closest?.("[data-sc-card]");
+        if (!card || !dropOk()) return;
+        e.dataTransfer.setData(CARD, card.dataset.scCard);
+        e.dataTransfer.effectAllowed = "copy";
+        this.dragging = true; this.el.classList.add("sc-carding");
+      });
+      this.el.addEventListener("dragend", () => {
+        this.dragging = false; this.el.classList.remove("sc-carding"); clearTargets();
+        if (this.renderLater) { this.renderLater = false; this.render(); }
+      });
+      // The GM drops an actor (or a group) from the Actors directory anywhere on the panel to add them.
+      this.el.addEventListener("dragover", (e) => {
+        if (!dropOk()) return;
+        if (isCard(e)) {
+          const row = e.target.closest?.("[data-sc-person]");
+          clearTargets();
+          if (!row) return;
+          e.preventDefault(); e.dataTransfer.dropEffect = "copy"; row.classList.add("sc-target");
+          return;
+        }
+        e.preventDefault(); this.el.classList.add("sc-dropping");
+      });
+      this.el.addEventListener("dragleave", (e) => { if (!this.el.contains(e.relatedTarget)) { this.el.classList.remove("sc-dropping"); clearTargets(); } });
+      this.el.addEventListener("drop", (e) => {
+        this.el.classList.remove("sc-dropping"); clearTargets();
+        if (!dropOk()) return;
+        e.preventDefault();
+        if (isCard(e)) return this.#dropCard(e.dataTransfer.getData(CARD), e.target.closest?.("[data-sc-person]")?.dataset.scPerson);
+        this.#drop(e).catch((err) => { console.error(`${ID} | skill challenge drop:`, err); ui.notifications.error(`KG Realms: that could not be added: ${err.message}`); });
+      });
       movable(this.el, "challenge-run", { redock: () => this.#place() });
       document.body.append(this.el);
     }
-    // Don't redraw over a spell request being typed (its text fields only: a button keeps focus after a click).
+    // Not in the middle of dragging a card: a redraw would drop it. Once it ends.
+    if (this.dragging) { this.renderLater = true; return; }
+    // Don't redraw over a spell request or a note being typed (its fields only: a button keeps focus after a click).
     const f = document.activeElement;
-    if (this.el.contains(f) && f.matches?.("[data-sc-spellform] input, [data-sc-keep] input")) {
+    if (this.el.contains(f) && f.matches?.("[data-sc-spellform] input, [data-sc-keep] input, [data-sc-keep] select")) {
       if (!this.waitBlur) { this.waitBlur = true; f.addEventListener("blur", () => { this.waitBlur = false; this.render(); }, { once: true }); }
       return;
     }
@@ -279,17 +353,15 @@ export class ChallengeRun {
       const sub = i < run.stage ? `${acts.filter((a) => a.success).length} ✓ ${acts.filter((a) => !a.success).length} ✗` : i === run.stage ? "now" : "";
       return `<div class="sc-round ${i < run.stage ? "done" : i === run.stage ? "now" : ""}"><b>${gm ? esc(s.title) : `Stage ${i + 1}`}</b><small>${esc(sub)}</small></div>`;
     }).join("");
-    // The GM's alone: the read-aloud text, the approaches (with a Call button each) and the spells.
+    // The GM's alone: the read-aloud text, the approach cards (dragged onto a character) and the spells.
     let gmOnly = "";
     if (gm) {
-      const approaches = stage.approaches.map((a, j) => {
-        const on = isCalled(run, j);
-        return `<div class="sc-appr ${on ? "called" : ""}"><b>${esc(a.options.map(optionLabel).join(" or "))}</b><span class="sc-dc">DC ${a.dc}</span><span>${esc(a.text)}</span>
-          <button type="button" data-sc="call" data-appr="${j}" class="sc-call ${on ? "on" : ""}" aria-pressed="${on}" title="${on ? "Players can roll this now: click to stop calling for it" : "Call for these rolls: the players see these skills and can roll them"}"><i class="fa-solid ${on ? "fa-bullhorn" : "fa-hand-pointer"}"></i> ${on ? "Calling" : "Call for rolls"}</button></div>`;
-      }).join("");
+      const grip = `<i class="fa-solid fa-grip-vertical sc-grip" aria-hidden="true"></i>`;
+      const approaches = stage.approaches.map((a, j) => `<div class="sc-appr sc-card" draggable="true" data-sc-card="${j}" title="Drag onto a character to set up this roll for them"><b>${grip}${esc(a.options.map(optionLabel).join(" or "))}</b><span class="sc-dc">DC ${a.dc}</span><span>${esc(a.text)}</span></div>`).join("");
+      const other = `<div class="sc-appr sc-card sc-else-card" draggable="true" data-sc-card="else" title="Drag onto a character: a success or failure you decide, or a roll you set up"><b>${grip}Something else</b><span></span><span>They try something the stage doesn't list: decide it, or set up a roll of your own.</span></div>`;
       const spells = stage.spells.length ? `<p class="sc-note"><i class="fa-solid fa-wand-sparkles"></i> Spells that count here: ${esc(stage.spells.join(", "))} (${esc(SPELL_EFFECTS[stage.spellEffect].toLowerCase())}).${stage.spellNote ? ` ${esc(stage.spellNote)}` : ""}</p>` : "";
       gmOnly = `${run.stage === 0 && run.hook ? `<p class="sc-read">${esc(run.hook)}</p>` : ""}${stage.read ? `<p class="sc-read">${esc(stage.read)}</p>` : ""}
-      <div class="sc-sec"><span class="sc-lbl">Approaches <small>(players see only what you call for)</small></span>${approaches}</div>${spells}`;
+      <div class="sc-sec"><span class="sc-lbl">Approaches <small>(drag a card onto a character: their player sees only the skills, never the text)</small></span>${approaches}${other}</div>${spells}`;
     }
     return `${this.#tracks(run)}<div class="sc-rounds">${rounds}</div>
       ${gmOnly}
@@ -332,19 +404,27 @@ export class ChallengeRun {
     if (!added) ui.notifications.info(`KG Realms: ${people.length === 1 ? `${people[0].name} is` : "they are"} already taking part.`);
   }
 
-  /** The approach picker for one character on this client: their own, or the one the GM picks for. */
+  /**
+   * A set-up roll's skill buttons, each with the character's bonus (a used one crossed out). For the GM
+   * on the character's row, and for the player in their own box: skill names and the DC, nothing else.
+   */
+  #rollButtons(run, p) {
+    const actor = game.actors.get(p.actor), busy = this.busy.has(p.id) || this.rollingAll;
+    return p.options.map((o) => {
+      const used = run.rules.noRepeat && (run.used[p.actor] ?? []).includes(o);
+      return `<button type="button" data-sc="roll" data-pending="${p.id}" data-option="${o}" ${used || busy ? "disabled" : ""} class="${used ? "used" : ""}" title="${used ? `${esc(optionLabel(o))} is already used in this challenge` : `Roll ${esc(optionLabel(o))}`}">${esc(optionLabel(o))} <b>${signed(optionBonus(actor, o))}</b>${used ? " <small>used</small>" : ""}</button>`;
+    }).join("");
+  }
+
+  /** A player's own character: the rolls the GM set up for them, and asking for a spell. */
   #picker(run, actor) {
-    const stage = currentStage(run), terms = (j) => rollTerms(run, actor.id, j), boost = run.boosts?.[actor.id];
-    const gm = this.gmView, showDC = gm || run.rules.showDC, busy = this.busy.has(actor.id);
-    // The GM rolling for someone picks from every approach; a player only from those called for, by skill name alone.
-    const shown = gm ? stage.approaches.map((_, j) => j) : calledApproaches(run);
-    if (!shown.length && !gm) return `<div class="sc-mine"><b class="sc-turn">${esc(actor.name)}</b><p class="sc-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting for the GM to call for a roll.</p>${this.#spellAsk(run, actor, boost)}</div>`;
-    const rows = shown.map((j) => [stage.approaches[j], j]).map(([a, j]) => `<div class="sc-pick"><span>${esc(gm ? a.text || a.options.map(optionLabel).join(" or ") : a.options.map(optionLabel).join(" or "))}${showDC ? ` <b class="sc-dc">DC ${terms(j).dc}</b>` : ""}</span><span class="sc-opts">${a.options.map((o) => {
-      const used = run.rules.noRepeat && (run.used[actor.id] ?? []).includes(o);
-      return `<button type="button" data-sc="roll" data-actor="${actor.id}" data-appr="${j}" data-option="${o}" ${used || busy ? "disabled" : ""} class="${used ? "used" : ""}" title="${used ? `${esc(optionLabel(o))} is already used in this challenge` : ""}">${esc(optionLabel(o))} <b>${signed(optionBonus(actor, o))}</b>${used ? " <small>used</small>" : ""}</button>`;
-    }).join("")}</span></div>`).join("");
+    const boost = run.boosts?.[actor.id], showDC = run.rules.showDC, mine = pendingFor(run, actor.id);
     const boostNote = boost ? `<p class="sc-boost"><i class="fa-solid fa-wand-sparkles"></i> ${esc(boost.spell)}: your next roll is ${boost.adv ? "with advantage" : `at DC −${boost.dc}`}.</p>` : "";
-    return `<div class="sc-mine"><b class="sc-turn">${gm && this.actingFor === actor.id ? `Rolling for ${esc(actor.name)}` : `Your move, ${esc(actor.name)}`}</b>${boostNote}${rows}${this.#spellAsk(run, actor, boost)}${gm && this.actingFor ? `<button type="button" data-sc="act-for" data-actor="">Done</button>` : ""}</div>`;
+    const rows = mine.map((p) => `<div class="sc-pick"><span>${this.busy.has(p.id) ? "Rolling… " : ""}${showDC ? `<b class="sc-dc">DC ${pendingTerms(run, p).dc}</b>` : ""}</span><span class="sc-opts">${this.#rollButtons(run, p)}</span></div>`).join("");
+    const acts = run.acts.filter((a) => a.stage === run.stage && a.actor === actor.id).map((a) => `<p class="sc-done">${esc(this.#actText(a, showDC))}</p>`).join("");
+    const wait = mine.length ? "" : `<p class="sc-wait"><i class="fa-solid fa-hourglass-half"></i> ${run.requests?.[actor.id] ? `Waiting for the GM to rule on ${esc(run.requests[actor.id].spell)}.` : "Waiting for the GM to call for a roll."}</p>`;
+    const spell = canAct(run, actor.id).ok && !run.requests?.[actor.id] ? this.#spellAsk(run, actor, boost) : "";
+    return `<div class="sc-mine"><b class="sc-turn">${mine.length ? `Your move, ${esc(actor.name)}` : esc(actor.name)}</b>${boostNote}${acts}${rows}${wait}${spell}</div>`;
   }
 
   /** "Use a spell instead", and its form. The stage's spells are suggested to the GM only. */
@@ -358,22 +438,24 @@ export class ChallengeRun {
   }
 
   #mine(run) {
-    if (this.gmView) {
-      const actor = this.actingFor ? game.actors.get(this.actingFor) : null;
-      return actor && canAct(run, actor.id).ok ? this.#picker(run, actor) : "";
-    }
-    // A player (or the GM testing, in the players' view): their characters in the challenge that can act now, and the state of the others.
-    // A test shows the first character's view, as their player would see it.
+    if (this.gmView) return "";
+    // A player (or the GM testing, in the players' view): their own characters in the challenge.
+    // A test shows the first character's, as their player would see it.
     const mine = (this.isPreview ? run.party.slice(0, 1) : run.party).map((p) => game.actors.get(p.id)).filter((a) => a && (this.isPreview || a.isOwner));
-    if (!mine.length) return "";
-    return mine.map((actor) => {
-      if (run.requests?.[actor.id]) return `<p class="sc-wait"><i class="fa-solid fa-hourglass-half"></i> ${esc(actor.name)}: waiting for the GM to rule on ${esc(run.requests[actor.id].spell)}.</p>`;
-      if (!canAct(run, actor.id).ok) {
-        const act = run.acts.find((a) => a.stage === run.stage && a.actor === actor.id);
-        return act ? `<p class="sc-done">${esc(actor.name)}: ${esc(this.#actText(act, run.rules.showDC))}</p>` : "";
-      }
-      return this.#rollsHere(actor) || this.isPreview ? this.#picker(run, actor) : "";
-    }).join("");
+    return mine.map((actor) => this.#picker(run, actor)).join("");
+  }
+
+  /** The Something else form on a character's row: decide it (Success or Failure), or set up a roll; a note either way. */
+  #elseForm(run, p) {
+    const f = this.elseForm ?? { mode: "auto", option: "", dc: "15", note: "" }, roll = f.mode === "roll";
+    const tab = (mode, label) => `<button type="button" data-sc="else-mode" data-mode="${mode}" class="${f.mode === mode ? "on" : ""}" aria-pressed="${f.mode === mode}">${label}</button>`;
+    const pick = roll ? `<label class="sc-else-field"><span class="sc-lbl">Skill or check</span><select name="option"><option value="">Choose…</option>${ALL_OPTIONS.map((o) => `<option value="${o}" ${f.option === o ? "selected" : ""}>${esc(optionLabel(o))}</option>`).join("")}</select></label>
+        <label class="sc-else-field dc"><span class="sc-lbl">DC</span><input name="dc" type="number" min="1" max="40" value="${esc(f.dc)}"></label>` : "";
+    const go = roll ? `<button type="button" data-sc="else-roll" data-actor="${p.id}" class="primary">Set up the roll</button>`
+      : `<button type="button" data-sc="else-ok" data-actor="${p.id}" data-ok="1" class="primary">Success</button><button type="button" data-sc="else-ok" data-actor="${p.id}" data-ok="0">Failure</button>`;
+    return `<div class="sc-else" data-sc-keep data-sc-else="${p.id}"><span class="sc-else-tabs" role="group" aria-label="Something else">${tab("auto", "Automatic")}${tab("roll", "Roll")}</span>${pick}
+      <input name="note" maxlength="300" value="${esc(f.note)}" placeholder="${roll ? "What they're trying (for you, not shown to players)" : "What they did (shown on the card)"}">
+      <span class="sc-else-btns">${go}<button type="button" data-sc="else-cancel">Cancel</button></span></div>`;
   }
 
   #actText(a, showDC) {
@@ -383,31 +465,61 @@ export class ChallengeRun {
     return `${optionLabel(a.option)} ${a.total}${showDC ? ` vs DC ${a.dc}` : ""}: ${a.success ? "success" : "failure"}`;
   }
 
+  /**
+   * A character's row: what they did this stage, and for the GM the rolls set up for them (each rolled
+   * with a skill button, or taken off), a spell request to rule on, the Something else form, Skip, and
+   * taking them out. The GM drops a card on the row to set up a roll. Players see only what was done.
+   */
   #person(run, p, acted) {
-    const gm = this.gmView, actor = game.actors.get(p.id), act = run.acts.find((a) => a.stage === run.stage && a.actor === p.id), req = run.requests?.[p.id];
+    const gm = this.gmView, actor = game.actors.get(p.id), req = run.requests?.[p.id];
+    const acts = run.acts.filter((a) => a.stage === run.stage && a.actor === p.id), mine = pendingFor(run, p.id);
     const used = (run.used[p.id] ?? []).map(optionLabel).join(", ");
     const face = p.img ? `<img src="${esc(p.img)}" alt="">` : esc(p.name.slice(0, 1));
-    let state;
-    const other = gm ? `<button type="button" data-sc="override" data-actor="${p.id}" title="They did something the stage doesn't list: you decide">Something else</button>` : "";
-    if (!act && gm && this.overrideFor === p.id) state = `<div class="sc-override" data-sc-keep data-sc-override="${p.id}">
-        <input name="note" maxlength="300" placeholder="What they did instead (shown on the card)">
-        <span class="sc-override-btns"><button type="button" data-sc="override-ok" data-actor="${p.id}" data-ok="1" class="primary">Success</button><button type="button" data-sc="override-ok" data-actor="${p.id}" data-ok="0">Failure</button><button type="button" data-sc="override-cancel">Cancel</button></span></div>`;
-    else if (act) state = `<span class="sc-roll ${act.success === true ? "ok" : act.success === false ? "no" : ""}">${esc(this.#actText(act, gm || run.rules.showDC))}</span>${gm && act.kind === "skip" ? `<button type="button" data-sc="unskip" data-actor="${p.id}" title="Take back the skip: they can act this stage">Undo skip</button>` : ""}`;
-    else if (req) state = gm ? `<span class="sc-ask"><b>Asks for ${esc(req.spell)}</b>${req.text ? `<small>“${esc(req.text)}”</small>` : ""}</span>
-        <button type="button" data-sc="rule" data-actor="${p.id}" data-d="allow" class="primary">Allow: ${{ auto: "success", dc2: "DC −2", adv: "advantage" }[currentStage(run).spellEffect]}</button>
+    const done = acts.map((a) => `<span class="sc-roll ${a.success === true ? "ok" : a.success === false ? "no" : ""}">${esc(this.#actText(a, gm || run.rules.showDC))}</span>${gm && a.kind === "skip" ? `<button type="button" data-sc="unskip" data-actor="${p.id}" title="Take back the skip: they can act this stage">Undo skip</button>` : ""}`).join("");
+    let lines = "";
+    if (gm) {
+      const stage = currentStage(run);
+      lines += mine.map((x) => {
+        const what = x.approach != null ? stage.approaches[x.approach]?.options.map(optionLabel).join(" or ") ?? "Roll" : `Something else${x.text ? `: ${x.text}` : ""}`;
+        return `<div class="sc-set"><span class="sc-set-what" title="${esc(x.approach != null ? stage.approaches[x.approach]?.text ?? "" : x.text)}"><i class="fa-solid fa-dice-d20"></i> ${esc(what)} <b class="sc-dc">DC ${pendingTerms(run, x).dc}</b>${this.busy.has(x.id) ? ` <span class="sc-muted">rolling…</span>` : ""}</span>
+          <span class="sc-opts">${this.#rollButtons(run, x)}</span><button type="button" data-sc="unset" data-pending="${x.id}" class="sc-unset" title="Take this roll off" aria-label="Take this roll off"><i class="fa-solid fa-xmark"></i></button></div>`;
+      }).join("");
+      if (req) lines += `<div class="sc-set"><span class="sc-ask"><b>Asks for ${esc(req.spell)}</b>${req.text ? `<small>“${esc(req.text)}”</small>` : ""}</span>
+        <span class="sc-opts"><button type="button" data-sc="rule" data-actor="${p.id}" data-d="allow" class="primary">Allow: ${{ auto: "success", dc2: "DC −2", adv: "advantage" }[currentStage(run).spellEffect]}</button>
         ${currentStage(run).spellEffect !== "dc2" ? `<button type="button" data-sc="rule" data-actor="${p.id}" data-d="dc2">DC −2</button>` : ""}
-        <button type="button" data-sc="rule" data-actor="${p.id}" data-d="deny">Not enough</button>${other}` : `<span class="sc-muted">Waiting for the GM to rule on ${esc(req.spell)}</span>`;
-    else if (this.busy.has(p.id)) state = `<span class="sc-muted">Rolling…</span>`;
-    else state = `<span class="sc-muted">${actor && playersOf(actor).length ? "Choosing…" : "No player online"}</span>${gm ? `<button type="button" data-sc="act-for" data-actor="${p.id}">Roll for them</button>${other}<button type="button" data-sc="skip" data-actor="${p.id}">Skip</button>` : ""}`;
+        <button type="button" data-sc="rule" data-actor="${p.id}" data-d="deny">Not enough</button></span></div>`;
+      if (this.elseFor === p.id) lines += this.#elseForm(run, p);
+    }
+    let state = done;
+    if (!done && !mine.length && !req) state = gm ? `<span class="sc-muted sc-hint">${actor && playersOf(actor).length ? "Drop a card here" : "No player online: drop a card, roll it here"}</span>` : "";
+    if (!gm && !done && mine.length) state = `<span class="sc-muted">Has a roll to make</span>`;
+    if (!gm && !done && req) state = `<span class="sc-muted">Asked for a spell</span>`;
+    const skip = gm && !acts.length && !mine.length ? `<button type="button" data-sc="skip" data-actor="${p.id}" class="sc-skip" title="Nothing from them this stage">Skip</button>` : "";
     const remove = gm ? `<button type="button" data-sc="remove" data-actor="${p.id}" class="sc-remove" title="Take ${esc(p.name)} out of the challenge: what they already did still counts" aria-label="Remove ${esc(p.name)}"><i class="fa-solid fa-xmark"></i></button>` : "";
-    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}"><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}${remove}</span></div>`;
+    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}" ${gm ? `data-sc-person="${p.id}"` : ""}><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}${skip}${remove}</span>${lines ? `<div class="sc-lines">${lines}</div>` : ""}</div>`;
+  }
+
+  /** A card dropped on a character: an approach set up for them, or the Something else form opened on their row. */
+  #dropCard(card, actorId) {
+    const run = this.run;
+    if (!run || !actorId || !run.party.some((p) => p.id === actorId)) return;
+    if (card === "else") {
+      this.elseFor = actorId; this.elseForm = { mode: "auto", option: "", dc: "15", note: "" };
+      this.render();
+      return this.el?.querySelector(`[data-sc-else="${actorId}"] [name=note]`)?.focus();
+    }
+    const j = Number(card);
+    if (!Number.isInteger(j)) return;
+    return this.change((r) => assignRoll(r, actorId, { approach: j }));
   }
 
   #gmBar(run) {
-    const last = run.stage >= run.stages.length - 1, waiting = stillToAct(run).length;
+    const last = run.stage >= run.stages.length - 1, waiting = stillToAct(run).length, set = pendingRolls(run).length;
     const blocked = !canAdvance(run);
+    const state = !run.party.length ? "Nobody is taking part." : `${everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}${set ? ` ${set} roll${set === 1 ? "" : "s"} set up, not rolled.` : ""}`;
+    const rollAll = set ? `<button type="button" data-sc="roll-all" class="sc-rollall" ${this.rollingAll ? "disabled" : ""} title="Roll every set-up roll now, each with the character's best skill on it, no dialogs"><i class="fa-solid fa-dice"></i> ${this.rollingAll ? "Rolling…" : `Roll all ${set}`}</button>` : "";
     return `<div class="sc-gmbar"><span class="sc-marknote" data-sc-keep><input name="marknote" maxlength="300" placeholder="Note for a group mark (optional)"></span><button type="button" data-sc="mark" data-ok="1">+ Success</button><button type="button" data-sc="mark" data-ok="0">+ Failure</button>
-      <span class="sc-muted grow">${!run.party.length ? "Nobody is taking part." : everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}</span>
+      <span class="sc-muted grow">${state}</span>${rollAll}
       <button type="button" data-sc="end-early">End early</button>
       <button type="button" data-sc="next" class="primary" ${blocked ? "disabled" : ""}>${last ? "Finish" : "Next stage"}</button></div>`;
   }
@@ -459,7 +571,7 @@ export class ChallengeRun {
     if (!run) return;
     switch (b.dataset.sc) {
       case "min": this.min = !this.min; return this.render();
-      case "roll": return this.#roll(a, Number(b.dataset.appr), b.dataset.option);
+      case "roll": return this.#rollPending(b.dataset.pending, b.dataset.option);
       case "spell": this.spellFor = a; this.render(); return this.el.querySelector(`[data-sc-spellform="${a}"] [name=spell]`)?.focus();
       case "spell-cancel": this.spellFor = null; document.activeElement?.blur?.(); return this.render();
       case "send-spell": return this.#askSpell(a);
@@ -471,10 +583,21 @@ export class ChallengeRun {
     }
     if (!game.user.isGM) return;
     switch (b.dataset.sc) {
-      case "view-as": this.asPlayer = !this.asPlayer; this.actingFor = null; this.overrideFor = null; this.spellFor = null; return this.render();
-      case "call": {
-        const j = Number(b.dataset.appr);
-        return this.change((r) => callApproach(r, j, !isCalled(r, j)));
+      case "view-as": this.asPlayer = !this.asPlayer; this.#resetLocal(); return this.render();
+      case "unset": return this.change((r) => unassignRoll(r, b.dataset.pending));
+      case "roll-all": return this.#rollAll();
+      case "else-mode": if (this.elseForm) this.elseForm.mode = b.dataset.mode; return this.render();
+      case "else-cancel": this.elseFor = null; this.elseForm = null; document.activeElement?.blur?.(); return this.render();
+      case "else-ok": {
+        const note = this.elseForm?.note?.trim() ?? "";
+        this.elseFor = null; this.elseForm = null; document.activeElement?.blur?.();
+        return this.change((r) => gmRule(r, a, b.dataset.ok === "1", note));
+      }
+      case "else-roll": {
+        const f = this.elseForm ?? {};
+        if (!f.option) return ui.notifications.warn("KG Realms: choose the skill or check first.");
+        this.elseFor = null; this.elseForm = null; document.activeElement?.blur?.();
+        return this.change((r) => assignRoll(r, a, { options: [f.option], dc: Number(f.dc), text: (f.note ?? "").trim() }));
       }
       case "add": {
         const p = this.#candidates(run).find((x) => x.id === a);
@@ -485,12 +608,10 @@ export class ChallengeRun {
         return this.change((r) => list.map((p) => addMember(r, p)).some(Boolean));
       }
       case "remove": {
-        if (this.actingFor === a) this.actingFor = null;
-        if (this.overrideFor === a) this.overrideFor = null;
+        if (this.elseFor === a) { this.elseFor = null; this.elseForm = null; }
         return this.change((r) => removeMember(r, a));
       }
       case "unskip": return this.change((r) => unskipActor(r, a));
-      case "act-for": this.actingFor = a || null; return this.render();
       case "rule": return this.change((r) => ruleSpell(r, a, b.dataset.d));
       case "skip": return this.change((r) => skipActor(r, a));
       case "mark": {
@@ -498,14 +619,15 @@ export class ChallengeRun {
         document.activeElement?.blur?.();
         return this.change((r) => gmMark(r, b.dataset.ok === "1", note));
       }
-      case "override": this.overrideFor = a; this.actingFor = null; this.render(); return this.el.querySelector(`[data-sc-override="${a}"] [name=note]`)?.focus();
-      case "override-cancel": this.overrideFor = null; document.activeElement?.blur?.(); return this.render();
-      case "override-ok": {
-        const note = this.el.querySelector(`[data-sc-override="${a}"] [name=note]`)?.value?.trim() ?? "";
-        this.overrideFor = null; document.activeElement?.blur?.();
-        return this.change((r) => gmOverride(r, a, b.dataset.ok === "1", note));
+      case "next": {
+        const set = pendingRolls(run).length;
+        if (set) {
+          const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Move on" }, content: `<p>${set} roll${set === 1 ? " is" : "s are"} set up and not rolled. Move on anyway? ${set === 1 ? "It is" : "They are"} dropped.</p>` });
+          if (!ok) return null;
+        }
+        this.elseFor = null; this.elseForm = null;
+        return this.change((r) => nextStage(r) && true);
       }
-      case "next": return this.change((r) => nextStage(r) && true);
       case "end-early": {
         const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "End the challenge early" }, content: `<p>End it now with ${run.succ} successes and ${run.fail} failures? The outcome follows from those.</p>` });
         return ok ? this.change((r) => endEarly(r) && true) : null;

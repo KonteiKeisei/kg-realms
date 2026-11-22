@@ -89,11 +89,35 @@
 .kgr-challenge-run .sc-read { margin: 0; padding: 10px 12px; background: var(--kgr-accent-soft); border-radius: 6px; font-size: 14px; line-height: 1.5; }
 .kgr-challenge-run .sc-read.big { font-size: 15px; }
 .kgr-challenge-run .sc-sec { display: flex; flex-direction: column; gap: 6px; }
-.kgr-challenge-run .sc-appr { display: grid; grid-template-columns: 150px 50px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; background: var(--kgr-surface); border: 1px solid var(--kgr-line); border-radius: 6px; }
+.kgr-challenge-run .sc-appr { display: grid; grid-template-columns: 170px 50px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 8px; background: var(--kgr-surface); border: 1px solid var(--kgr-line); border-radius: 6px; }
 .kgr-challenge-run .sc-appr > span:nth-child(3) { color: var(--kgr-muted-2); }
-.kgr-challenge-run .sc-appr.called { border-color: var(--kgr-accent); background: var(--kgr-accent-soft); }
-.kgr-challenge-run .sc-call { white-space: nowrap; width: auto; }
-.kgr-challenge-run .sc-call.on { border-color: var(--kgr-accent); color: var(--kgr-accent); font-weight: 600; }
+/* 0.98.6: approach cards, dragged onto a character. */
+.kgr-challenge-run .sc-card { cursor: grab; user-select: none; }
+.kgr-challenge-run .sc-card:hover { border-color: var(--kgr-accent); }
+.kgr-challenge-run .sc-card:active { cursor: grabbing; }
+.kgr-challenge-run .sc-grip { margin-right: 7px; color: var(--kgr-muted-2); font-size: 11px; }
+.kgr-challenge-run .sc-else-card { border-style: dashed; }
+.kgr-challenge-run.sc-carding [data-sc-person] { outline: 1px dashed var(--kgr-line-2); outline-offset: -1px; border-radius: 6px; }
+.kgr-challenge-run [data-sc-person].sc-target { outline: 2px solid var(--kgr-accent); background: var(--kgr-accent-soft); }
+.kgr-challenge-run .sc-person { flex-wrap: wrap; }
+.kgr-challenge-run .sc-lines { flex: 1 0 100%; display: flex; flex-direction: column; gap: 5px; padding: 0 0 4px 46px; }
+.kgr-challenge-run .sc-set { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--kgr-line-2); border-radius: 6px; background: var(--kgr-surface); }
+.kgr-challenge-run .sc-set-what { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kgr-challenge-run .sc-set-what > i { color: var(--kgr-accent); margin-right: 3px; }
+.kgr-challenge-run .sc-opts { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+.kgr-challenge-run .sc-opts > button { width: auto; white-space: nowrap; }
+.kgr-challenge-run .sc-unset, .kgr-challenge-run .sc-skip { width: auto; flex: 0 0 auto; }
+.kgr-challenge-run .sc-unset { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--kgr-muted-2); }
+.kgr-challenge-run .sc-hint { font-style: italic; }
+.kgr-challenge-run .sc-else { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; padding: 6px; border: 1px dashed var(--kgr-accent); border-radius: 6px; }
+.kgr-challenge-run .sc-else > input[name=note] { flex: 1 1 100%; }
+.kgr-challenge-run .sc-else-tabs { display: inline-flex; flex: 1 1 100%; gap: 4px; }
+.kgr-challenge-run .sc-else-tabs > button { width: auto; }
+.kgr-challenge-run .sc-else-tabs > button.on { border-color: var(--kgr-accent); color: var(--kgr-accent); font-weight: 600; background: var(--kgr-accent-soft); }
+.kgr-challenge-run .sc-else-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 180px; }
+.kgr-challenge-run .sc-else-field.dc { flex: 0 0 70px; }
+.kgr-challenge-run .sc-else-btns { display: inline-flex; gap: 6px; flex: 1 1 100%; }
+.kgr-challenge-run .sc-else-btns > button, .kgr-challenge-run .sc-rollall { width: auto; white-space: nowrap; }
 .kgr-challenge-run .sc-lbl small { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .kgr-challenge-run .sc-preview { display: flex; align-items: center; gap: 8px; }
 .kgr-challenge-run .sc-preview > span { flex: 1; }
