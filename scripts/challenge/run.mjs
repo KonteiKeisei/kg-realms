@@ -14,8 +14,9 @@
 // roll for or skip anyone, a success or failure of their own, next stage and end early. At the end,
 // the result for everyone; the outcome's text and effects, and the buttons to apply them, for the GM.
 //
-// Who takes part (0.98.4): nobody at the start. The GM adds characters (those on the scene, then any
-// a player owns) and can take them out again; a skip can be taken back for the stage.
+// Who takes part (0.98.4): nobody at the start. The GM adds the main party's player characters with a
+// click (0.98.5), or anyone else by dragging an actor or a group from the Actors directory onto the
+// panel, and can take them out again; a skip can be taken back for the stage.
 //
 // A test run (the builder's "Test this challenge"): the GM's view of the draft, kept nowhere, rolls
 // quiet, effects not applied, with a switch to see the players' view of it.
@@ -27,6 +28,7 @@ import {
   calledApproaches, isCalled, callApproach, addMember, removeMember, unskipActor, stillToAct
 } from "./model.mjs";
 import { applyEffect, effectLine, postSummary } from "./effects.mjs";
+import { sceneParties, groupMembers, partyMeta } from "../party-groups.mjs";
 
 const ID = "kg-realms";
 const SOCKET = `module.${ID}`;
@@ -61,6 +63,33 @@ export async function rollOption(actor, key, { dc = null, advantage = false, fla
     if (chat) await roll.toMessage({ flavor, speaker: ChatMessage.getSpeaker({ actor }) });
     return roll.total;
   }
+}
+
+/**
+ * The main party's player characters (0.98.5): the members of the party tokens on the scene; with
+ * none there, of dnd5e's primary party; with none set, of party 1 of the KG parties; else the group
+ * with the most player characters in it. Only characters
+ * a player owns: not a wagon or a hireling.
+ */
+export function mainPartyCharacters(scene) {
+  let groups = sceneParties(scene).map((t) => t.actor);
+  if (!groups.length) {
+    let primary = null;
+    try { primary = game.settings.get("dnd5e", "primaryParty")?.actor ?? null; } catch { /* not this system's setting */ }
+    if (primary?.type === "group") groups = [primary];
+  }
+  if (!groups.length) {
+    const kg = Array.from(game.actors ?? []).filter((a) => a.type === "group" && partyMeta(a) && !partyMeta(a).retired).sort((a, b) => (partyMeta(a).number ?? 1) - (partyMeta(b).number ?? 1));
+    if (kg.length) groups = [kg[0]];
+  }
+  if (!groups.length) {
+    // A plain group of player characters, the one with the most of them.
+    const scored = Array.from(game.actors ?? []).filter((a) => a.type === "group").map((g) => [g, groupMembers(g).filter((a) => a.type === "character" && a.hasPlayerOwner).length]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    if (scored.length) groups = [scored[0][0]];
+  }
+  const out = new Map();
+  for (const g of groups) for (const a of groupMembers(g)) if (a.type === "character" && a.hasPlayerOwner) out.set(a.id, a);
+  return [...out.values()];
 }
 
 /** The run on a scene, or null. */
@@ -200,6 +229,11 @@ export class ChallengeRun {
       this.el.setAttribute("aria-label", "Skill challenge");
       this.el.addEventListener("click", (e) => { const b = e.target.closest("[data-sc]"); if (b && !b.disabled) { e.preventDefault(); this.#click(b); } });
       this.el.addEventListener("change", (e) => { const t = e.target; if (t.dataset?.scGive !== undefined) this.change((r) => { r.gives[t.dataset.scGive] = t.value; return true; }); });
+      // The GM drops an actor (or a group) from the Actors directory anywhere on the panel to add them.
+      const dropOk = () => game.user.isGM && this.gmView && !this.run?.result;
+      this.el.addEventListener("dragover", (e) => { if (!dropOk()) return; e.preventDefault(); this.el.classList.add("sc-dropping"); });
+      this.el.addEventListener("dragleave", (e) => { if (!this.el.contains(e.relatedTarget)) this.el.classList.remove("sc-dropping"); });
+      this.el.addEventListener("drop", (e) => { this.el.classList.remove("sc-dropping"); if (!dropOk()) return; e.preventDefault(); this.#drop(e).catch((err) => { console.error(`${ID} | skill challenge drop:`, err); ui.notifications.error(`KG Realms: that could not be added: ${err.message}`); }); });
       movable(this.el, "challenge-run", { redock: () => this.#place() });
       document.body.append(this.el);
     }
@@ -266,22 +300,36 @@ export class ChallengeRun {
   }
 
   /**
-   * Who the GM can add (0.98.4): the characters who were on the scene when it started, then every
-   * character a player owns, less those already in.
+   * Who the GM can add with a click (0.98.5): the player characters of the main party, less those
+   * already in. Anyone else is dragged in from the Actors directory.
    */
   #candidates(run) {
-    const out = [], seen = new Set(run.party.map((p) => p.id));
-    const take = (p) => { if (p?.id && !seen.has(p.id)) { seen.add(p.id); out.push({ id: p.id, name: p.name, img: p.img }); } };
-    (run.roster ?? []).forEach(take);
-    Array.from(game.actors ?? []).filter((a) => a.type === "character" && a.hasPlayerOwner).sort((x, y) => x.name.localeCompare(y.name)).forEach(take);
-    return out;
+    const seen = new Set(run.party.map((p) => p.id));
+    return mainPartyCharacters(game.scenes?.get(run.scene) ?? canvas?.scene).filter((a) => !seen.has(a.id)).map((a) => ({ id: a.id, name: a.name, img: a.img }));
   }
 
+  /** The main party's members not yet in, as one row of chips, and where to drop anyone else. */
   #addable(run) {
     const list = this.#candidates(run);
-    if (!list.length) return "";
-    const rows = list.map((p) => `<div class="sc-person out"><span class="cs-face">${p.img ? `<img src="${esc(p.img)}" alt="">` : esc(String(p.name ?? "?").slice(0, 1))}</span><span class="sc-who"><b>${esc(p.name)}</b></span><span class="sc-state"><button type="button" data-sc="add" data-actor="${p.id}"><i class="fa-solid fa-plus"></i> Add</button></span></div>`).join("");
-    return `<div class="sc-sec"><span class="sc-lbl">Not taking part <button type="button" data-sc="add-all" class="sc-addall">Add everyone</button></span>${rows}</div>`;
+    const chips = list.map((p) => `<button type="button" data-sc="add" data-actor="${p.id}" class="sc-chip" title="Add ${esc(p.name)}"><span class="cs-face">${p.img ? `<img src="${esc(p.img)}" alt="">` : esc(String(p.name ?? "?").slice(0, 1))}</span><span>${esc(p.name)}</span><i class="fa-solid fa-plus"></i></button>`).join("");
+    return `<div class="sc-sec sc-adds" data-sc-drop><span class="sc-lbl">Add from the party${list.length > 1 ? ` <button type="button" data-sc="add-all" class="sc-addall">Add all ${list.length}</button>` : ""}</span>
+      ${chips ? `<div class="sc-chips">${chips}</div>` : ""}
+      <p class="sc-drop"><i class="fa-solid fa-hand-holding"></i> ${list.length ? "Anyone else: drag" : run.party.length ? "Everyone in the party is in. Anyone else: drag" : "No party found on this scene. Drag"} an actor (or a group) from the Actors directory onto this panel.</p></div>`;
+  }
+
+  /** An actor (or a group's members) dropped on the panel, by the GM: added to the challenge. */
+  async #drop(event) {
+    let data;
+    try { data = JSON.parse(event.dataTransfer?.getData("text/plain") || "{}"); } catch { return; }
+    if (data?.type !== "Actor") return;
+    const actor = data.uuid ? await fromUuid(data.uuid) : game.actors.get(data.id);
+    if (!actor) return;
+    if (actor.pack) return ui.notifications.warn(`KG Realms: ${actor.name} is in a compendium. Import it into the world first.`);
+    const people = actor.type === "group" ? groupMembers(actor) : [actor];
+    if (!people.length) return ui.notifications.warn(`KG Realms: ${actor.name} has nobody in it.`);
+    const list = people.map((a) => ({ id: a.id, name: a.name, img: a.img }));
+    const added = await this.change((r) => list.map((p) => addMember(r, p)).some(Boolean));
+    if (!added) ui.notifications.info(`KG Realms: ${people.length === 1 ? `${people[0].name} is` : "they are"} already taking part.`);
   }
 
   /** The approach picker for one character on this client: their own, or the one the GM picks for. */

@@ -1,5 +1,11 @@
 # KG Realms changelog
 
+## 0.98.5: skill challenges, add from the party or drag anyone in
+
+- The add list is the main party only: the player characters in the party tokens on the scene; with none there, dnd5e's primary party; else KG party 1; else the group with the most player characters. Not every character a player owns, and not a wagon or hireling in the party.
+- Anyone else: drag an actor from the Actors directory onto the challenge panel. Drag a group to add all its members.
+- The add list is one row of small portrait chips, with "Add all", in place of a long list of rows with an Add button each.
+
 ## 0.98.4: skill challenges, the GM chooses who takes part
 
 - A skill challenge now starts with nobody taking part. The GM's panel lists who can be added: the characters on the scene, then every character a player owns. Each has an Add button, and there is Add everyone.

@@ -121,9 +121,14 @@
 .kgr-challenge-run .sc-state { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .kgr-challenge-run .sc-state > .sc-remove { margin-left: auto; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--kgr-muted-2); }
 .kgr-challenge-run .sc-state > .sc-remove:hover { color: var(--kgr-danger); border-color: var(--kgr-danger); }
-.kgr-challenge-run .sc-person.out { min-height: 38px; opacity: 0.85; }
-.kgr-challenge-run .sc-person.out .cs-face { width: 28px; height: 28px; flex-basis: 28px; filter: grayscale(0.6); }
-.kgr-challenge-run .sc-person.out .sc-state { justify-content: flex-end; }
+.kgr-challenge-run .sc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kgr-challenge-run .sc-chip { width: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 3px; border-radius: 15px; white-space: nowrap; }
+.kgr-challenge-run .sc-chip .cs-face { width: 24px; height: 24px; flex-basis: 24px; border-width: 1px; font-size: 11px; }
+.kgr-challenge-run .sc-chip > i { font-size: 10px; color: var(--kgr-accent); }
+.kgr-challenge-run .sc-chip:hover { border-color: var(--kgr-accent); }
+.kgr-challenge-run .sc-drop { margin: 0; padding: 5px 9px; border: 1px dashed var(--kgr-line-2); border-radius: 6px; color: var(--kgr-muted-2); font-size: 12px; }
+.kgr-challenge-run.sc-dropping { outline: 2px dashed var(--kgr-accent); outline-offset: -4px; }
+.kgr-challenge-run.sc-dropping .sc-drop { border-color: var(--kgr-accent); color: var(--kgr-accent); }
 .kgr-challenge-run .sc-lbl > .sc-addall { margin-left: 8px; width: auto; padding: 1px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
 .kgr-challenge-run .sc-roll { padding: 3px 9px; border: 1px solid var(--kgr-line-2); border-radius: 6px; background: var(--kgr-surface); }
 .kgr-challenge-run .sc-roll.ok { border-color: var(--kgr-ok); } .kgr-challenge-run .sc-roll.no { border-color: var(--kgr-danger); }
