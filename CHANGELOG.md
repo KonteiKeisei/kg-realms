@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.98.9: success and failure buttons on their tracks
+
+- Skill challenges: the GM's + Success and + Failure buttons are on the Successes and Failures tracks at the top of the panel, not in the bar at the bottom. The bar keeps the optional note, used by the next one pressed.
+
 ## 0.98.8: test a challenge as any character's player
 
 - Test this challenge, players' view: an "As the player of" list picks which character's player you're looking as. Before, it always showed the first character in the challenge, so a roll set up for anyone else could not be seen or tried from their side.

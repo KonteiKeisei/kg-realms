@@ -75,6 +75,9 @@
 .kgr-challenge-run .sc-tracks.small > span { display: inline-flex; gap: 4px; }
 .kgr-challenge-run .sc-track { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; background: var(--kgr-surface); border: 1px solid var(--kgr-line-2); border-radius: 6px; }
 .kgr-challenge-run .sc-track > span[role=img] { display: flex; flex-wrap: wrap; gap: 5px; }
+.kgr-challenge-run .sc-track:has(> .sc-mark) { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 10px; align-items: center; }
+.kgr-challenge-run .sc-track:has(> .sc-mark) > :not(.sc-mark) { grid-column: 1; }
+.kgr-challenge-run .sc-track > .sc-mark { grid-column: 2; grid-row: 1 / span 2; width: auto; white-space: nowrap; }
 .kgr-challenge-run .sc-track b { letter-spacing: 0; font-size: 13px; }
 .kgr-challenge-run b.ok { color: var(--kgr-ok); } .kgr-challenge-run b.no { color: var(--kgr-danger); }
 .kgr-challenge-run .sc-pip { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--kgr-line-2); }

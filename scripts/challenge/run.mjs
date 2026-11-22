@@ -340,8 +340,10 @@ export class ChallengeRun {
   #tracks(run, small = false) {
     const pips = (n, of, cls) => Array.from({ length: of }, (_, i) => `<span class="sc-pip ${cls} ${i < n ? "on" : ""}"></span>`).join("");
     if (small) return `<span class="sc-tracks small"><span role="img" aria-label="${run.succ} of ${run.goal.succ} successes">${pips(run.succ, run.goal.succ, "ok")}</span><span role="img" aria-label="${run.fail} of ${run.goal.fail} failures">${pips(run.fail, run.goal.fail, "no")}</span></span>`;
-    return `<div class="sc-tracks"><div class="sc-track"><span class="sc-lbl">Successes <b class="ok">${run.succ} / ${run.goal.succ}</b></span><span role="img" aria-label="${run.succ} of ${run.goal.succ} successes">${pips(run.succ, run.goal.succ, "ok")}</span></div>
-      <div class="sc-track"><span class="sc-lbl">Failures <b class="no">${run.fail} / ${run.goal.fail}</b></span><span role="img" aria-label="${run.fail} of ${run.goal.fail} failures">${pips(run.fail, run.goal.fail, "no")}</span></div></div>`;
+    // The GM's own success or failure sits on its track (0.98.9): nobody's roll, with the note from the GM bar if there is one.
+    const mark = (ok) => this.gmView && !run.result ? `<button type="button" data-sc="mark" data-ok="${ok ? 1 : 0}" class="sc-mark" title="Add a ${ok ? "success" : "failure"} that is nobody's roll">+ ${ok ? "Success" : "Failure"}</button>` : "";
+    return `<div class="sc-tracks"><div class="sc-track"><span class="sc-lbl">Successes <b class="ok">${run.succ} / ${run.goal.succ}</b></span><span role="img" aria-label="${run.succ} of ${run.goal.succ} successes">${pips(run.succ, run.goal.succ, "ok")}</span>${mark(true)}</div>
+      <div class="sc-track"><span class="sc-lbl">Failures <b class="no">${run.fail} / ${run.goal.fail}</b></span><span role="img" aria-label="${run.fail} of ${run.goal.fail} failures">${pips(run.fail, run.goal.fail, "no")}</span>${mark(false)}</div></div>`;
   }
 
   #html(run) {
@@ -529,7 +531,7 @@ export class ChallengeRun {
     const blocked = !canAdvance(run);
     const state = !run.party.length ? "Nobody is taking part." : `${everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}${set ? ` ${set} roll${set === 1 ? "" : "s"} set up, not rolled.` : ""}`;
     const rollAll = set ? `<button type="button" data-sc="roll-all" class="sc-rollall" ${this.rollingAll ? "disabled" : ""} title="Roll every set-up roll now, each with the character's best skill on it, no dialogs"><i class="fa-solid fa-dice"></i> ${this.rollingAll ? "Rolling…" : `Roll all ${set}`}</button>` : "";
-    return `<div class="sc-gmbar"><span class="sc-marknote" data-sc-keep><input name="marknote" maxlength="300" placeholder="Note for a group mark (optional)"></span><button type="button" data-sc="mark" data-ok="1">+ Success</button><button type="button" data-sc="mark" data-ok="0">+ Failure</button>
+    return `<div class="sc-gmbar"><span class="sc-marknote" data-sc-keep><input name="marknote" maxlength="300" placeholder="Note for your next + Success or + Failure (optional)"></span>
       <span class="sc-muted grow">${state}</span>${rollAll}
       <button type="button" data-sc="end-early">End early</button>
       <button type="button" data-sc="next" class="primary" ${blocked ? "disabled" : ""}>${last ? "Finish" : "Next stage"}</button></div>`;
