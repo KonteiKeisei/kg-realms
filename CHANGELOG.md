@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.98.8: test a challenge as any character's player
+
+- Test this challenge, players' view: an "As the player of" list picks which character's player you're looking as. Before, it always showed the first character in the challenge, so a roll set up for anyone else could not be seen or tried from their side.
+
 ## 0.98.7: checkboxes lined up
 
 - Fixed: in the skill challenge builder's Rules, each checkbox's tick sat off its box. Foundry draws a checkbox as a box and a tick sized by its own checkbox size, and only the box was resized. Both are now the same size. The same fix for the checkboxes in the camp's duties and sharing, and the trade editor's visibility.

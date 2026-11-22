@@ -114,6 +114,7 @@ export class ChallengeRun {
   }
 
   #resetLocal() { this.spellFor = null; this.elseFor = null; this.elseForm = null; }
+  // viewAs (the test's players' view: whose player) is kept across switching views, and reset with a new test.
 
   /** The run under way on a scene (the viewed one by default). */
   activeRun(scene = canvas?.scene) { return sceneRun(scene); }
@@ -138,7 +139,7 @@ export class ChallengeRun {
   /** A test run of the builder's draft for this GM: the GM's view, kept nowhere, nothing applied. */
   preview(challenge, party) {
     this.previewRun = startRun(challenge, party, { scene: canvas?.scene?.id ?? "", runId: "preview" });
-    this.asPlayer = false; this.min = false; this.#resetLocal();
+    this.asPlayer = false; this.viewAs = null; this.min = false; this.#resetLocal();
     this.render();
   }
 
@@ -266,7 +267,11 @@ export class ChallengeRun {
       this.el.className = "kgr-ui kgr-panel kgr-challenge-run";
       this.el.setAttribute("aria-label", "Skill challenge");
       this.el.addEventListener("click", (e) => { const b = e.target.closest("[data-sc]"); if (b && !b.disabled) { e.preventDefault(); this.#click(b); } });
-      this.el.addEventListener("change", (e) => { const t = e.target; if (t.dataset?.scGive !== undefined) this.change((r) => { r.gives[t.dataset.scGive] = t.value; return true; }); });
+      this.el.addEventListener("change", (e) => {
+        const t = e.target;
+        if (t.dataset?.scGive !== undefined) this.change((r) => { r.gives[t.dataset.scGive] = t.value; return true; });
+        if (t.dataset?.scViewas !== undefined) { this.viewAs = t.value; this.spellFor = null; t.blur(); this.render(); }
+      });
       // The Something else form's fields, kept on this client as they're typed, so a redraw keeps them.
       const keepElse = (e) => { const t = e.target; if (t.closest?.("[data-sc-else]") && this.elseForm && t.name) this.elseForm[t.name] = t.value; };
       this.el.addEventListener("input", keepElse);
@@ -341,8 +346,11 @@ export class ChallengeRun {
 
   #html(run) {
     if (this.min) return this.#head(run);
-    const banner = this.isPreview ? `<p class="sc-preview"><i class="fa-solid fa-flask"></i> <span>Test run: rolls are quiet, and nothing is saved, posted or applied.${this.asPlayer ? " This is what the players see." : ""}</span>
-      <button type="button" data-sc="view-as">${this.asPlayer ? "Back to the GM's view" : "See the players' view"}</button></p>` : "";
+    // In the players' view of a test, which character's player is looking (0.98.8).
+    const seen = this.#viewedAs(run);
+    const pick = this.asPlayer && run.party.length ? `<label class="sc-viewas">As the player of <select data-sc-viewas>${run.party.map((p) => `<option value="${p.id}" ${p.id === seen?.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>` : "";
+    const banner = this.isPreview ? `<p class="sc-preview"><i class="fa-solid fa-flask"></i> <span>Test run: rolls are quiet, and nothing is saved, posted or applied.${this.asPlayer ? ` This is what ${run.party.length ? "that character's player sees" : "the players see"}.` : ""}</span>
+      ${pick}<button type="button" data-sc="view-as">${this.asPlayer ? "Back to the GM's view" : "See the players' view"}</button></p>` : "";
     return `${this.#head(run)}<div class="sc-body">${banner}${run.result ? this.#outcome(run) : this.#stage(run)}</div>`;
   }
 
@@ -440,10 +448,13 @@ export class ChallengeRun {
   #mine(run) {
     if (this.gmView) return "";
     // A player (or the GM testing, in the players' view): their own characters in the challenge.
-    // A test shows the first character's, as their player would see it.
-    const mine = (this.isPreview ? run.party.slice(0, 1) : run.party).map((p) => game.actors.get(p.id)).filter((a) => a && (this.isPreview || a.isOwner));
+    // A test shows the one the GM picked, as their player would see it.
+    const mine = (this.isPreview ? [this.#viewedAs(run)].filter(Boolean) : run.party).map((p) => game.actors.get(p.id)).filter((a) => a && (this.isPreview || a.isOwner));
     return mine.map((actor) => this.#picker(run, actor)).join("");
   }
+
+  /** The character whose player the GM is looking as, in a test's players' view: the one picked, else the first. */
+  #viewedAs(run) { return run.party.find((p) => p.id === this.viewAs) ?? run.party[0] ?? null; }
 
   /** The Something else form on a character's row: decide it (Success or Failure), or set up a roll; a note either way. */
   #elseForm(run, p) {

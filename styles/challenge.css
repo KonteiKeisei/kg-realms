@@ -123,6 +123,9 @@
 .kgr-challenge-run .sc-preview { display: flex; align-items: center; gap: 8px; }
 .kgr-challenge-run .sc-preview > span { flex: 1; }
 .kgr-challenge-run .sc-preview > button { width: auto; white-space: nowrap; }
+.kgr-challenge-run .sc-preview { flex-wrap: wrap; }
+.kgr-challenge-run .sc-viewas { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--kgr-text); }
+.kgr-challenge-run .sc-viewas select { width: auto; height: 28px; }
 .kgr-challenge-run .sc-dc { color: var(--kgr-gold-text); font-weight: 600; white-space: nowrap; }
 .kgr-challenge-run .sc-note, .kgr-challenge-run .sc-boost, .kgr-challenge-run .sc-wait, .kgr-challenge-run .sc-done { margin: 0; color: var(--kgr-muted-2); }
 .kgr-challenge-run .sc-boost { color: var(--kgr-accent); }
