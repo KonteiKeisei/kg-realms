@@ -1,5 +1,74 @@
 # KG Realms changelog
 
+## 0.97.9: watch rolls without the die
+
+- A watch's encounter roll is made in the background and its result shown at once, as a line (such as '3 on 1d4 · A quiet watch.', in red when something lurks). The tumbling die and its two-second wait are gone. The die was restarted by every clock redraw, timed against each computer's own clock (so players saw it late, skip or land at once), and redrawn every frame with a shadow over the blurred panel.
+
+## 0.97.8: grouped stops and stop names
+
+- Stops in a row that show the same name share one header on the Route tab, folded, with their number range, how many stops, the miles between them and their days. Open it to see each stop with its own controls. The History tab lists such a run as one line.
+- Every stop's card has a **Name** field. A name you give is kept as written and never replaced by the road's name. Stops already behind the party can be renamed too: a name is not part of the route.
+
+## 0.97.7: travel panel tabs and road names
+
+- With four or five tabs (History, and Camp while camped) the travel panel's tabs size to their labels and drop their icons, so 'Encounters' and its count no longer get cut off.
+- Stops named only for where they stand ('Near Phandalin', a stop put where the party was) show the road that reaches them and the next named stop, such as 'On the High Road, towards Wave Echo Cave' or 'Overland, swamp, towards Leilon', on the Route and History tabs. Their stored names are kept (hover shows them).
+
+## 0.97.6: travel panel fixes
+
+- Dropdowns in the travel panel open again, and clicking in the panel no longer shrinks it. The panel's redraw could reuse its resize pull tab as the panel body, so every press in the panel started a resize.
+- **From here on** (pace and how the party travels) is now always at the top of the Route tab while a journey is under way, not only while the party is moving. A change applies from where the party is.
+- **History**: stops already passed move to their own tab, one thin line each (day, stop, miles). The Route tab starts at the way ahead, with a link to the History.
+- A stop put where the party stands is named from the road it is on and the stop ahead, such as 'On the High Road, towards Phandalin', instead of 'Near Phandalin'.
+
+## 0.97.5: performance with players online
+
+- Players' clients no longer ask the GM to work the journey out again after every redraw. A live capture with 5 players showed a request about every 0.6 seconds all session, each costing the GM about half a second, so the GM's client was busy about half the time. A player now asks only while the GM's route is missing or out of date.
+- A player using the GM's route no longer redraws the whole route on every character change. It took any change to a character (hit points, an item, an effect) for a change of speed, then asked the GM again.
+- The GM's client works journeys out again on a character change only when walking speed, load or favored terrain changed, not on every hit point, resource or effect change.
+
+## 0.97.4: pace and way of travel from here on
+
+- While the party travels, the day card has **From here on**: Slow, Normal or Fast pace, and how the party travels. A change applies from where the party is to the end of the journey, until changed again. The way already travelled keeps the pace and way it was travelled with. (The same settings in Setup work the same way during a journey.)
+- A wagon or coach journey no longer breaks when a stop is put where the party stands while it is off the road (on the way to or from a stop away from the roads). The leg to or from that stop may leave the road, as the party did. Before, it showed 'No way found' and the route line disappeared.
+- Within 6 minutes of a stop, the party counts as at it, so changing a setting there no longer adds another stop beside it.
+
+## 0.97.3: changing pace during a journey
+
+- Changing the pace, hours on the road or the way of travel during a journey now applies from where the party is. A stop marks where they stand, and every leg already travelled keeps the settings it was travelled with. Before, the whole route was retimed: a slower pace turned the hours already travelled into fewer miles, and the party moved back along the route, past camps already made.
+- Undo steps from before such a change are dropped, since they would bring back the old timing of the way travelled.
+
+## 0.97.2: travel panel pull tab
+
+- The travel panel and map editor can no longer be made shorter than their header, tabs, pinned rows and footer. A too-short saved height made those spill past the bottom edge, squash the route list and hide the resize grip.
+- The resize grip is now a pull tab hanging under the panel's bottom edge, easy to see and grab. Drag it to resize; double-click it to fit the content.
+
+## 0.97.1: skill challenge GM override
+
+- **Something else**: when a character does something no approach lists, the GM clicks "Something else" on their row, notes what they did, and gives it a success or a failure. It counts as that character's act for the stage (even over a pending spell request), uses up no skill, and its note shows on the panel and the summary card. Every stage has it.
+- The GM's own **+ Success** and **+ Failure** take an optional note too.
+- **The encounter box** on a scene with a skill challenge has a Skill challenge button: it opens the builder, or, while one is under way, brings its panel back up.
+
+## 0.97.0: skill challenges
+
+- **Skill challenges** on a Site or local map (a theater or battlemap scene): the party needs a number of successes before a number of failures, across stages run in order. Open the builder from the Token tools ("Skill challenge"), the Scenes sidebar's menu or Scene Config.
+- **The builder**: the name, a hook read aloud at the start, the goal (successes before failures, and partial success from a set number when the last stage ends) and the rules: **No repeats** (a character uses each skill or check once in the whole challenge), **Spells can count** (players can ask; the GM decides), **Show DCs to players**, **Everyone must act** (before a stage can end). Each stage has its read-aloud text and its approaches: one or more skills or ability checks at one DC, and what each does in the scene. A stage can list spells that count, and what an allowed spell does: an automatic success, DC −2, or advantage. Each ending (full success, partial success, failure) has its text and its effects: items (drop them in), journal entries, damage with a save, exhaustion and time.
+- **Import and Export** in the builder save a challenge as a `.json` file and load one back, onto any scene or into another world. An imported challenge's items and journals keep their links; any this world doesn't have are named, and marked "not found" on their outcome, so you can drop in your own.
+- **Running it**: one panel at the top for the GM and the players on that scene. Everyone sees the success and failure tracks, the stages, and the stage's text and approaches. Each player picks how their character helps, with their own bonus on each skill (a used one is crossed out), and rolls with the system's dialog. They can ask for a spell to count instead; the GM allows it, lowers the DC by 2, or says it's not enough. The GM sees every DC and everyone's state, rolls for anyone (a character with no player online shows "No player online"), skips anyone, adds a success or failure of their own, moves to the next stage and can end it early.
+- **The ending** shows for everyone: full success at the goal, failure at the failure limit, and when the last stage ends without either, partial success from its threshold, else failure. The GM gives items to a chosen character, posts a card with dnd5e's save and damage buttons, adds exhaustion to everyone, moves the clock on, and posts a summary card with who did what and any journal links.
+- The challenge is kept on its scene; the one under way is too, so a GM's reload or a player joining late picks it up where it is. Only a GM changes it: a player's roll and spell request go to the primary GM, who checks them.
+- Macros: `game.modules.get("kg-realms").api.challenges.open(scene)`, `.run(scene)` and `.end(scene)`.
+
+## 0.96.9: map levels, and the party as its members on Site maps
+
+- Every scene now has a map level: **Realm**, **Region**, **Place** (a local map) or **Site**. A Site is a local map marked as one (a "Site map" checkbox in Scene Config, or "Make site map" in the scene directory) or any scene with no KG level at all: a cave, a tavern, a battlemap. A local map marked Site keeps its places and its way back. Scene Config shows each scene's level.
+- On a Site map the party is its members' own tokens, each with their own vision, darkvision and rotation. When the party token is placed there, each member gets a token on a free square around it (not through walls, not on another token; a member already on the scene keeps theirs) and the party token is hidden. It stays as the party's place for travel, the HUD and Monk's TokenBar, and keeps up with the party.
+- **Linked**, the members follow whoever is moved (by the GM or by a player), in a line behind them along the squares the leader crossed, so nobody cuts through a wall. A member who would have to cross a wall to join the line (after a deploy, say) stays where they are, with a note saying so. Moving several of one party at once, or anyone in a running combat, moves only those tokens.
+- **Deploy** (on a member's HUD, the unlink button) lets everyone move on their own; **Link** joins them up again where they stand.
+- **Split or merge** from a member's HUD: select members of two parties to merge them. Whoever is in a party is linked to it, so a split takes its people with it.
+- A scene can show the party token instead ("The party on a Site map" in Scene Config): the tokens made for the members go and the party token comes back in the middle of them. If any of them are in a running combat, it asks first. A party token already on a Site map before this version has "Bring out the members" on its HUD.
+- Macros: `game.modules.get("kg-realms").api.parties.link(token)`, `.unlink(token)` and `.level(scene)`.
+
 ## 0.96.8: party people on Monk's TokenBar, fixed
 
 - The people in each party now show on Monk's TokenBar on Realms scenes, as in KG Cities. In 0.96.5 and 0.96.6 a party that had never been split was not recognised as a party (its party record is only written on a split), so the bar showed the group's own token at most (and only with Monk's "show offline players" on), without the party picture.

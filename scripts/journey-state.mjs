@@ -1,4 +1,4 @@
-export const ROUTE_FIELDS = ["waypoints", "stays", "legModes", "legMethods", "legVessels", "method", "methodMph", "pace", "hours", "start"];
+export const ROUTE_FIELDS = ["waypoints", "stays", "legModes", "legMethods", "legVessels", "method", "methodMph", "pace", "hours", "start", "legTravel", "legWays", "coachMph"];
 
 /** Camp checks and progress never change the route geometry. */
 export function needsRouteRefresh(changes) {

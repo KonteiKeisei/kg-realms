@@ -44,6 +44,8 @@ export class PartyManager {
     const proto=clone(a.prototypeToken?.toObject?.()??a.toObject().prototypeToken??{});delete proto._id;
     createdActor=b=await Actor.create({name:`${base} ${number}`,type:'group',img:a.img,folder:a.folder?.id??null,ownership:clone(a.ownership),prototypeToken:{...proto,actorLink:true,name:`${base} ${number}`},system:{members:rRows},flags:{[ID]:{party:meta(family,base,number,true)}}},{renderSheet:false});
     const data=clone(leftToken.toObject());delete data._id;delete data._stats;delete data.delta;
+    // On a Site map the party token is a hidden stand-in: the new party's starts as the original was before it hid.
+    const site=data.flags?.[ID]?.siteParty;if(data.flags?.[ID]){delete data.flags[ID].siteParty;delete data.flags[ID].deployed;delete data.flags[ID].normalLook;}if(site)data.hidden=!!site.wasHidden;
     Object.assign(data,{actorId:b.id,actorLink:true,name:`${base} ${number}`,x:leftToken.x+scene.grid.size*(leftToken.width??1)+12,y:leftToken.y});
     const d=scene.dimensions;data.x=Math.min(d.sceneX+d.sceneWidth-(data.width??1)*scene.grid.size,Math.max(d.sceneX,data.x));
     data.flags={...(data.flags??{}),[ID]:{...(data.flags?.[ID]??{}),partyFamily:family}};

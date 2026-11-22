@@ -1063,6 +1063,11 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 .kgr-camp-scene .cs-watch-harmless { margin: 0; max-width: min(48ch, 100%); overflow-wrap: anywhere; color: var(--kgr-text); font: inherit; }
 @keyframes kgr-watch-tumble { 0% { transform: perspective(500px) translateY(-24px) rotateX(520deg) rotateY(-400deg) rotateZ(-80deg) scale(.7); } 55% { transform: perspective(500px) translateY(-12px) rotateX(180deg) rotateY(-90deg) rotateZ(22deg); } 85% { transform: perspective(500px) translateY(6px) rotateX(-15deg) rotateY(8deg) rotateZ(-6deg); } 100% { transform: perspective(500px) translateY(0) rotateX(0) rotateY(0) rotateZ(0) scale(1); } }
 @keyframes kgr-watch-faces { to { transform: translateY(-660px); } }
+/* 0.97.9: no die; the watch's result as a line. */
+.kgr-camp-scene :is(.cs-watch-reveal, .cs-watch-results) { min-height: 0; padding: 10px 6px; gap: 12px; }
+.kgr-camp-scene .cs-watch-outcome { gap: 4px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--die-color), transparent 55%); border-radius: 8px; background: color-mix(in srgb, var(--die-color), transparent 90%); }
+.kgr-camp-scene .cs-watch-roll-label { font-variant-numeric: tabular-nums; }
+.kgr-camp-scene .cs-watch-pending { margin: 0; color: var(--kgr-muted-2); text-align: center; }
 @keyframes kgr-watch-pulse { 0%,100% { opacity: 1; } 50% { opacity: .65; text-shadow: 0 0 24px currentColor; } }
 @media (prefers-reduced-motion: reduce) { .kgr-camp-scene :is(.rolling .cs-watch-die, .cs-watch-faces, .landed .cs-watch-number) { animation: none; } }
 .kgr-party-picker { display: flex; flex: 1; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 44px; padding: 8px; border: 1px dashed currentColor; border-radius: 6px; }
@@ -1078,9 +1083,33 @@ body.kgr-theme-holy .kgr-ui { --kgr-fatigue: #a24c0b; }
 @media (max-width: 600px) { .kgr-camp-scene, .kgr-camp-scene.held, .kgr-camp-scene.min { top: 8px; bottom: auto; width: calc(100vw - 16px); max-height: calc(100vh - 66px); } .kgr-camp-scene .cs-body { max-height: calc(var(--kgr-camp-height, calc(100vh - 66px)) - 2px); padding: 12px; } }
 /* A panel's height grip (float-panel.mjs): a bar along the bottom edge to drag. A panel given a
    height keeps it, its body scrolling inside. */
-.kgr-grip { position: absolute; left: 0; right: 0; bottom: -3px; height: 9px; cursor: ns-resize; z-index: 2; }
-.kgr-grip::after { content: ""; position: absolute; left: 50%; bottom: 4px; width: 36px; height: 3px; margin-left: -18px; border-radius: 2px; background: var(--kgr-line-2); opacity: 0.6; }
-.kgr-grip:hover::after, .resizing > .kgr-grip::after { background: var(--kgr-accent); opacity: 1; }
+/* 0.97.4: pace and way of travel from here on, on the travel panel's day card. */
+.kgr-travel .tr-onward { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.kgr-travel .tr-onward .tr-cap { flex: 1 1 100%; margin: 0; }
+.kgr-travel .tr-onward .seg { flex: 1 1 180px; }
+.kgr-travel .tr-onward .seg button { flex: 1 1 0; }
+.kgr-travel .tr-onward select { flex: 1 1 140px; min-width: 0; height: 30px; }
+/* 0.97.7: four or five tabs (History, and Camp in camp) share the width by their labels, without icons. */
+.kgr-ui.kgr-travel .kgr-tabs:has(> button:nth-child(4)) > button { flex: 1 1 auto; padding: 0 6px; gap: 4px; font-size: 12.5px; }
+.kgr-ui.kgr-travel .kgr-tabs:has(> button:nth-child(4)) > button > i { display: none; }
+.kgr-ui.kgr-travel .kgr-tabs > button > small { flex: 0 0 auto; }
+/* 0.97.8: stops in a row with the same name, under one header; a stop's name field. */
+.kgr-travel .stop-name { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--kgr-muted-2); }
+.kgr-travel .stop-name input { flex: 1 1 auto; min-width: 0; height: 28px; }
+.kgr-travel .tr-group { display: flex; flex-direction: column; gap: 6px; border-left: 3px solid var(--kgr-accent); border-radius: 6px; background: var(--kgr-surface); }
+.kgr-travel .tr-group.done { opacity: 0.7; }
+.kgr-travel .tr-group-head .n { white-space: nowrap; }
+.kgr-travel .tr-group-body { display: flex; flex-direction: column; gap: 6px; padding: 0 0 6px 10px; }
+/* 0.97.6: the History tab, one thin line per stop passed. */
+.kgr-travel .tr-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.kgr-travel .tr-hist li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 3px 2px; border-bottom: 1px solid var(--kgr-line); font-size: 12px; }
+.kgr-travel .tr-hist li:last-child { border-bottom: 0; }
+.kgr-travel .tr-hist .d, .kgr-travel .tr-hist .m { color: var(--kgr-muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kgr-travel .tr-hist b { font-weight: 600; color: var(--kgr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kgr-grip { position: absolute; left: 0; right: 0; bottom: -14px; height: 18px; cursor: ns-resize; z-index: 3; }
+/* 0.97.2: a pull tab hanging under the bottom edge, so it can't hide behind the panel's content. */
+.kgr-grip::after { content: ""; position: absolute; left: 50%; top: 3px; width: 56px; height: 11px; margin-left: -28px; box-sizing: border-box; border: 1px solid var(--kgr-line-2); border-top: 0; border-radius: 0 0 7px 7px; background: linear-gradient(var(--kgr-muted-2), var(--kgr-muted-2)) center 3px / 26px 1px no-repeat, linear-gradient(var(--kgr-muted-2), var(--kgr-muted-2)) center 6px / 26px 1px no-repeat, var(--kgr-panel); box-shadow: 0 3px 6px var(--kgr-shadow); }
+.kgr-grip:hover::after, .resizing > .kgr-grip::after { border-color: var(--kgr-accent); background: linear-gradient(var(--kgr-accent), var(--kgr-accent)) center 3px / 26px 1px no-repeat, linear-gradient(var(--kgr-accent), var(--kgr-accent)) center 6px / 26px 1px no-repeat, var(--kgr-panel); }
 .kgr-travel > .body, .kgr-editor > .body { flex: 1 1 auto; min-height: 0; }
 .kgr-travel.resizing, .kgr-editor.resizing { user-select: none; }
 .kgr-editor > header { user-select: none; }

@@ -62,6 +62,9 @@ export class EncounterBox {
     const combat = !!game.combat?.started && game.combat.scene?.id === canvas.scene?.id;
     if (combat !== this.inCombat) { this.inCombat = combat; this.combatOpen = false; }
     const open = combat ? this.combatOpen : this.open;
+    // 0.97.1: the scene's skill challenge, when it has one, on the first row (shown even folded).
+    const sc = this.challenge?.(canvas.scene);
+    const scBtn = sc ? `<button data-act="challenge" class="${sc.running ? "primary" : ""}" title="${esc(sc.running ? `${sc.name} is under way: show its panel` : `Open ${sc.name} to start it`)}"><i class="fa-solid fa-dice-d20"></i> ${sc.running ? "Challenge (running)" : "Skill challenge"}</button>` : "";
     const one = (x, i) => {
       const e = x.e, d = { actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] };
       const assets = assetStrip(d);
@@ -70,10 +73,11 @@ export class EncounterBox {
       // own buttons in one row, and ending it when a journey waits, which shows even folded for combat.
       const conclude = x.journey ? `<button data-act="carry-on" class="primary" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude</button>` : "";
       const actions = open ? `${e.pinned ? `<button data-act="journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}<button data-act="card"><i class="fa-solid fa-id-card"></i> Card</button>` : "";
+      const extra = i === 0 ? scBtn : "";
       return `<div class="encbox-row" data-i="${i}">
         <div class="encbox-head"><i class="fa-solid fa-triangle-exclamation"></i><b>${esc(e.name ?? "Encounter")}</b>${x.journey ? `<span class="pill">Journey waiting</span>` : ""}</div>
         ${open ? `<div class="encbox-body">${has ? assets : `<p class="hint">No actors, pictures or journal yet. Add them on its card.</p>`}</div>` : ""}
-        ${actions || conclude ? `<div class="encbox-actions">${actions}<span class="sp"></span>${conclude}</div>` : ""}</div>`;
+        ${actions || conclude || extra ? `<div class="encbox-actions">${actions}${extra}<span class="sp"></span>${conclude}</div>` : ""}</div>`;
     };
     // The shell's header: its minimise folds away the actors, pictures and journal.
     const title = list.length === 1 ? list[0].e.name ?? "Encounter" : `${list.length} encounters`;
@@ -100,6 +104,7 @@ export class EncounterBox {
     const e = x.e, act = b.dataset.act;
     if (act === "toggle") { if (this.inCombat) this.combatOpen = !this.combatOpen; else this.open = !this.open; return this.refresh(); }
     if (act === "card") return this.openCard?.(x.ref);
+    if (act === "challenge") return this.openChallenge?.(canvas.scene);
     if (act === "journal") return openPinned(e.pinned);
     if (act === "actor-n") return openDoc((e.actors ?? [e.actor])[Number(b.dataset.i)]);
     if (act === "pic") return new foundry.applications.apps.ImagePopout({ src: e.images[Number(b.dataset.i)], window: { title: e.name } }).render(true);

@@ -32,9 +32,10 @@ import {writeJourney} from './journey-write.mjs';
 import {writeQueue} from './write-queue.mjs';
 import {requestCoalescer} from './sync-requests.mjs';
 import {journeyKey} from './journey-state.mjs';
-import {focusedScene,partyScene,journeyScenes,sceneParties,partyLabel} from './party-groups.mjs';
+import {focusedScene,partyScene,journeyScenes,sceneParties,partyLabel,partyMeta} from './party-groups.mjs';
 import {PartyManager} from './party-manager.mjs';
 import {PartyPortraits,PartyInterface} from './party-ui.mjs';
+import {SiteParty,sceneLevel} from './party-battlemap.mjs';
 import { latLonToScene, makeFrame, sceneToLatLon, aspect, worldFloor } from "./geo.mjs";
 import { isPrimaryGM, primaryGMChoices, userChangeMatters } from "./authority.mjs";
 import { needsRouteRefresh, ROUTE_FIELDS, onlyJourneyProgress } from "./journey-state.mjs";
@@ -95,7 +96,8 @@ import { biomeLookup, biomeTypes, biomeFlag, onlyBiomeFlagChanged, mergeBiomeCon
 import { followCrossingWaters } from "./regional-placement.mjs";
 import { hazardVisible, isRiverHazard, isHazard, hazardSubtype, HAZARD_TYPES } from "./river-hazards.mjs";
 import { EncounterBox, heldEncounterId } from "./ui-encounter-box.mjs";
-import { HarvestWindow, isDowned } from "./harvest/ui-harvest.mjs";
+import { HarvestWindow, isDowned, harvestParty } from "./harvest/ui-harvest.mjs";
+import { installChallenges } from "./challenge/index.mjs";
 import { HarvestRun } from "./harvest/run.mjs";
 import { spoilFood, repairHarvestIcons } from "./harvest/items.mjs";
 import { advancedWatchesMenu } from "./ui-camp.mjs";
@@ -284,7 +286,9 @@ const partyManager=new PartyManager({before:scene=>syncJourney(scene,{force:true
 cityTravel.partyManager=partyManager;
 const partyPortraits=new PartyPortraits(),partyInterface=new PartyInterface(partyManager);
 const partyTokenFit=new PartyTokenFit({isParty:t=>sceneParties(canvas.scene).some(p=>p.id===t.document?.id||p===t.document||p===t)});
-Hooks.once('init',()=>{registerPartyAppearance(()=>partyPortraits.fitStrokes());partyPortraits.install();partyInterface.install();partyTokenFit.install();});
+// On Site maps the party is its members' own tokens (party-battlemap.mjs); split and merge from a member open the usual window.
+const siteParty=new SiteParty({busy:id=>cityTravel.fleet.busy(id),editParties:docs=>{docs.sort((a,b)=>(partyMeta(a.actor)?.number??1)-(partyMeta(b.actor)?.number??1));return partyInterface.open(docs[0],docs[1]??null,docs.slice(2));}});
+Hooks.once('init',()=>{registerPartyAppearance(()=>partyPortraits.fitStrokes());partyPortraits.install();partyInterface.install();partyTokenFit.install();siteParty.install();});
 Hooks.once("init", () => {localMaps.install();cityTravel.install();});
 // Biome climates (biome-climate.mjs): added to each calendar, and the settlement takes its place's.
 Hooks.once("init", () => game.settings.register(MODULE_ID, "biomeClimatesAdded", { scope: "world", config: false, type: Object, default: {} }));
@@ -902,6 +906,9 @@ const harvest = new HarvestWindow({ hud });
 const harvestRun = new HarvestRun();
 // A player who joins or reloads during a harvest is sent it again.
 Hooks.once("ready", () => { if (!game.user.isGM) setTimeout(() => HarvestRun.askAgain(), 1500); });
+// Skill challenges (0.97.0): built on a Site or local map, run in one panel for the GM and the party,
+// who are the same people a harvest on that scene would take.
+const challenges = installChallenges({ party: harvestParty, sceneLevel, onChange: (scene) => { if (scene.id === canvas?.scene?.id) refreshEncounterBox(); } });
 // Harvested items made with an icon Foundry doesn't have (0.96.0 to the 0.97.0 test build) get their real one.
 Hooks.once("ready", () => { if (isPrimaryGM()) repairHarvestIcons(game.actors).then((n) => { if (n) ui.notifications.info(`KG Realms: fixed the icons of ${n} harvested item${n === 1 ? "" : "s"}.`); }).catch((err) => console.warn(`${MODULE_ID} | harvest icons:`, err)); });
 Hooks.on("renderTokenHUD", (app, html) => {
@@ -928,7 +935,7 @@ const checkSpoilage = foundry.utils.debounce(async () => {
   } catch (err) { console.error(`${MODULE_ID} | spoilage:`, err); ui.notifications.error(`KG Realms: spoilage could not be checked: ${err.message}`); }
 }, 1000);
 
-const encounterBox = new EncounterBox({ worldEncounters: () => setting("encounters") ?? {}, openCard: (ref) => openCard(ref), onJourneyChanged: (scene) => syncJourney(scene, { force: true }) });
+const encounterBox = new EncounterBox({ worldEncounters: () => setting("encounters") ?? {}, openCard: (ref) => openCard(ref), challenge: (scene) => challenges.about(scene), openChallenge: (scene) => challenges.openFrom(scene), onJourneyChanged: (scene) => syncJourney(scene, { force: true }) });
 const refreshEncounterBox = () => (regionOf(canvas.scene) ? encounterBox.close() : encounterBox.refresh());
 const pins = new PinEditor({
   // The map being edited, so each Ctrl+Z step only lands on the map it was taken on (undo-stack.mjs).
@@ -1329,7 +1336,7 @@ Hooks.once("init", () => {
     generate: () => openGenerator(),
     /** Local maps: make(scene), settings(scene), convert(scene, place). */
     localMaps,
-    parties:{groups:(scene=canvas.scene)=>sceneParties(scene),focus:(id,scene=canvas.scene)=>focusParty(id,scene),split:token=>partyInterface.open(token.document??token),merge:(left,right)=>partyInterface.open(left.document??left,right.document??right)},
+    parties:{groups:(scene=canvas.scene)=>sceneParties(scene),focus:(id,scene=canvas.scene)=>focusParty(id,scene),split:token=>partyInterface.open(token.document??token),merge:(left,right)=>partyInterface.open(left.document??left,right.document??right),link:party=>siteParty.setLinked(party.document??party,true),unlink:party=>siteParty.setLinked(party.document??party,false),level:(scene=canvas.scene)=>sceneLevel(scene)},
     localMapRenderer: { status: () => localMapRenderer.status() },
     settlementTransit:{open:(target,scene=canvas.scene)=>cityTravel.open(scene,target),editRoads:()=>cityTravel.openRoads(),preview:(target,mode='walk',scene=canvas.scene)=>cityTravel.fleet.selected(scene).preview(scene,target,mode),start:(target,options,scene=canvas.scene)=>cityTravel.fleet.selected(scene).start(scene,target,options),status:()=>structuredClone(cityTravel.fleet.state())},
     mapAssets,
@@ -1621,6 +1628,8 @@ Hooks.once("ready", () => game.socket.on(`module.${MODULE_ID}`, (m, userId) => {
     if (game.user.isGM) harvest.receive(m, userId); else harvestRun.receive(m, userId);
     return;
   }
+  // A skill challenge: a player's roll or spell request, for the primary GM.
+  if (challenges.receive(m, userId)) return;
   if (m?.type === "request-sync") {
     const from = userId ?? m.user;
     if (isPrimaryGM() && typeof from === "string" && typeof m.scene === "string") answerSync(`${from}:${m.scene}`, from, m.scene);
@@ -1675,6 +1684,7 @@ Hooks.on("renderSceneConfig", (app, html) => {
   if (!game.user.isGM) return;
   const scene = app.document ?? app.object, root = html instanceof HTMLElement ? html : html?.[0];
   scenePartyPicker(root, scene);
+  siteParty.sceneConfig(root, scene);
   sceneMapPicture(root, scene);
   localMapPicture(root,scene);
 });
@@ -1686,7 +1696,17 @@ Hooks.once("ready", async () => {
 });
 // A character's speed or load changed (an item picked up or dropped): the travel panel's speed and
 // its encumbered warning follow.
+// 0.97.5: hit points, resources and effects change all the time in play; only walking speed, load
+// and favored terrain matter to travel, so journeys are worked out again only when those change.
+let partyTravelKey = null;
+const partyTravelSignature = () => JSON.stringify(Array.from(game.actors ?? []).filter((a) => a.type === "character" || a.type === "group").map((a) => {
+  const s = a.system ?? {}, enc = s.attributes?.encumbrance;
+  return [a.id, s.attributes?.movement, enc?.value, enc?.max, enc?.pct, a.type === "group" ? (s.members ?? []).map((m) => m.actor?.id ?? m.id ?? m) : null, a.statuses ? [...a.statuses].filter((x) => /encumber|exhaust|prone|grappled|restrained/.test(x)) : null];
+}).concat([hud.scene ? hud.favoredTerrains() : null]));
 const partyChanged = foundry.utils.debounce(() => {
+  const key = partyTravelSignature();
+  if (key === partyTravelKey) { hud.el && hud.render(); return; }
+  partyTravelKey = key;
   syncViewedJourneys();
   if (!hud.el) return;
   // A speed other than the route was worked out with changes its days; else only the line.

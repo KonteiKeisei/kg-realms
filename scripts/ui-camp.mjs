@@ -1497,7 +1497,9 @@ export class CampPanel {
       reveal = { id: foundry.utils.randomID(), campId, until: Date.now() + WATCH_ROLL_MS, dice: Array(count).fill(die), done: false };
       await this.write({ reveals: { ...this.watch.reveals, [i]: reveal }, scene: { ...this.watch.scene, night: p.night, step: i < 0 ? "night" : `w${i}`, hold: false } });
     }
-    await this.waitForWatch(Math.max(0, Math.min(WATCH_ROLL_MS, reveal.until - Date.now())));
+    // 0.97.9: no die to watch tumble; the result follows straight away. (Still a turn of the event
+    // loop, so a camp replaced or handed over meanwhile is noticed below.)
+    await this.waitForWatch(0);
     return valid() && (!this.commandContext || this.commandContext.valid()) && this.watch.campId === campId && this.watch.reveals?.[i]?.id === reveal.id;
   }
   waitForWatch(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -1780,7 +1782,7 @@ export class CampPanel {
     const reveal = i != null ? this.watch.reveals?.[i] : null, rolling = !!reveal && reveal.campId === this.watch.campId && !reveal.done;
     const waiting = this.#awaitingWatchResult(i), hidden = !gm && !!this.#setting("hideEncounterRolls");
     let body;
-    if (rolling) body = rollingWatchHtml(reveal, reveal.dice ?? [Math.max(1, this.plan().watches.length - i + 1)], { hidden });
+    if (rolling) body = rollingWatchHtml(reveal);
     else if (waiting) body = watchResultsHtml(reveal.results, { hidden });
     else if (p.status === "encounter" && p.camp) body = this.#sceneEncounter(p);
     else if (step === "camp") body = this.#sceneCamp(p);

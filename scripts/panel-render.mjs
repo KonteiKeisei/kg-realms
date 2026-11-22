@@ -31,8 +31,12 @@ export function renderPanel(root, html) {
   // Lightweight non-DOM render fixtures still receive the exact generated markup.
   if (!template.content) { root.innerHTML = html; return; }
   template.innerHTML = html;
+  // The resize grip has listeners and is owned by heightGrip, outside generated markup. It stays out
+  // of the diff (0.97.6): a plain div, it could be matched to the panel's body and reused as it,
+  // listener and all, so every press in the panel started a resize (dropdowns wouldn't open, and a
+  // click shrank the panel).
   const grip = root.querySelector(":scope > .kgr-grip");
-  // The resize grip has listeners and is owned by heightGrip, outside generated markup.
-  if (grip) template.content.append(grip.cloneNode(true));
+  grip?.remove();
   syncChildren(root, template.content);
+  if (grip) root.append(grip);
 }

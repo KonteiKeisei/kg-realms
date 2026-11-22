@@ -467,11 +467,13 @@ export function methodSpeed(method, { pace = "normal", rules = "2014", trailRule
  * ends it goes overland. A crewed ship sails round the clock: its stretch of the journey is in
  * `sail` ([{ from, to }] travel hours), where the party does not stop to camp.
  */
-export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: how = [], seaPlan = null, mode = "best", rules = "2014", pace = "normal", hoursPerDay = 8, trailRule = false, terrainAt = () => PLAINS, milesPerPixel, encounters = [], baseMph = 3, segments = null } = {}) {
+export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: how = [], seaPlan = null, mode = "best", rules = "2014", pace: legPace = "normal", hoursPerDay: legHours = 8, trailRule = false, terrainAt = () => PLAINS, milesPerPixel, encounters = [], baseMph = 3, segments = null } = {}) {
   const legs = [], days = [], path = [], ground = { road: 0, trail: 0, offroad: 0, water: 0 }, track = [], legEnds = [], sail = [];
   let clock = 0;
   for (let i = 0; i + 1 < waypoints.length; i++) {
     const from = waypoints[i], to = waypoints[i + 1], h = how[i] ?? {};
+    // A leg already travelled keeps the pace and hours it was travelled at (0.97.3).
+    const pace = h.pace ?? legPace, hoursPerDay = h.hoursPerDay ?? legHours;
     let plan = null, sched = null, perDay = hoursPerDay;
     if (h.sea && seaPlan) {
       plan = seaPlan(from, to, h.sea.vessel);
@@ -483,7 +485,9 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
     }
     const flying = h.method?.key === "flying";
     // legModes: "direct" across country; null, "road" (the ship turned down) or "sea" (not port to port): the roads.
-    const m = METHODS[h.method?.key]?.roadsOnly ? "roadsOnly" : flying || legModes[i] === "direct" ? "direct" : mode;
+    // A stop put where the party stood (h.pinned) may be off the road, on a wagon's walk to or from a
+    // stop: a roads-only leg to or from it may leave the road, as the party did there (0.97.4).
+    const m = METHODS[h.method?.key]?.roadsOnly ? (h.pinned ? "roads" : "roadsOnly") : flying || legModes[i] === "direct" ? "direct" : mode;
     let bySea = !!plan, autoSea = false;
     if (!plan) {
       plan = planJourney(graph, from, to, { mode: m, rules, pace, trailRule, terrainAt: flying ? () => PLAINS : terrainAt, milesPerPixel, hookPx: 2000, segments });

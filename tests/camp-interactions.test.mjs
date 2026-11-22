@@ -51,12 +51,12 @@ test("a real 1 stays on its result until the GM continues, without rerolling",as
   await x.click("watch-continue",{reveal:reveal.id});assert.equal(x.state.watch.reveals[0].seen,true);assert.equal(calls,1);assert.equal(x.hud.progress().status,"encounter");
 });
 
-test("landed dice show the actual result, red harmless failures and no hidden GM detail",()=>{
+test("a watch result shows the actual roll, red harmless failures and no hidden GM detail (0.97.9: no die)",()=>{
   setup();assert.match(watchResultsHtml([ambientWatchResult(4,1,()=>0)]),/Harmless failure/);
-  assert.match(watchResultsHtml([{die:4,roll:3}]),/>3<\/span>/);
+  assert.match(watchResultsHtml([{die:4,roll:3}]),/>3 on 1d4</);
   assert.match(watchResultsHtml([{die:4,roll:1}]),/Something lurks just beyond the firelight/);
   assert.doesNotMatch(watchResultsHtml([{die:4,roll:1,text:"secret"}],{hidden:true}),/secret|Something lurks|Rolled 1/);
-  assert.match(rollingWatchHtml({id:"roll",until:Date.now()+2000},[4]),/duration:2000ms/);
+  assert.match(rollingWatchHtml({id:"roll"}),/Resolving the watch/);assert.doesNotMatch(watchResultsHtml([{die:4,roll:3}]),/cs-watch-die|animation/);
 });
 
 test("an automatic alarm succeeds without requesting a roll and records the GM's reason",async()=>{

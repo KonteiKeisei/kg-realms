@@ -15,10 +15,10 @@ function setup(){
   return{camp,hud,state,p,rolls:()=>rolls,release:()=>release(),delay:()=>delay};
 }
 
-test("watch outcomes stay unpublished during the two-second reveal, and a completed watch does not replay",async()=>{
+test("watch outcomes are published straight after the reveal is saved (0.97.9: no die), and a completed watch does not replay",async()=>{
   const x=setup();const action=x.camp.click({dataset:{camp:"scene-next",step:"w0"}});
   await new Promise(setImmediate);
-  assert.ok(x.delay()>1900&&x.delay()<=2000);assert.equal(x.rolls(),0);
+  assert.equal(x.delay(),0);assert.equal(x.rolls(),0);
   assert.equal(x.state.watch.scene.step,"w0");assert.equal(x.state.watch.reveals[0].done,false);
   assert.deepEqual(x.state.encounters[0].rest.rolls,[]);
   x.release();await action;assert.equal(x.rolls(),1);assert.equal(x.state.watch.reveals[0].done,true);
@@ -31,10 +31,10 @@ test("a replacement camp cannot receive dice or outcomes from an unfinished reve
   x.release();await action;assert.equal(x.rolls(),0);assert.equal(x.state.watch.scene.step,"camp");
 });
 
-test("an interrupted reveal retains its identity and waits only its remaining time",async()=>{
+test("an interrupted reveal retains its identity and finishes at once",async()=>{
   const x=setup();x.state.watch.reveals={0:{id:"previous-gm",campId:"camp",until:Date.now()+1000,done:false}};
   const work=x.camp.revealWatch(x.p,0);await new Promise(setImmediate);
-  assert.ok(x.delay()>0&&x.delay()<=1000);assert.equal(x.state.watch.reveals[0].id,"previous-gm");
+  assert.equal(x.delay(),0);assert.equal(x.state.watch.reveals[0].id,"previous-gm");
   x.release();assert.equal(await work,true);
 });
 

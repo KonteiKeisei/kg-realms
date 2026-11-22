@@ -13,7 +13,13 @@ export function applyHeight(el, h) {
   if (h > 0) {
     const top = el.getBoundingClientRect().top;
     const available = Math.max(0, window.innerHeight - top - 8);
-    el.style.height = `${Math.min(available, Math.max(MIN_H, h))}px`;
+    // Only the body scrolls: never shorter than everything else (header, tabs, pinned rows, footer)
+    // plus a little of the body, or those spill out past the bottom edge and cover the grip.
+    let fixed = 0;
+    for (const c of el.children ?? []) if (!c.matches(".body, .kgr-grip") && getComputedStyle(c).position !== "absolute") fixed += c.offsetHeight;
+    const min = Math.max(MIN_H, fixed + 80);
+    // The screen still wins: a panel never runs off the bottom of the window.
+    el.style.height = `${Math.min(available, Math.max(min, h))}px`;
     el.style.maxHeight = "none";
   } else { el.style.height = ""; el.style.maxHeight = ""; }
   el.classList.toggle("kgr-sized", h > 0);
