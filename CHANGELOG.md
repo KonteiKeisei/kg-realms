@@ -1,5 +1,10 @@
 # KG Realms changelog
 
+## 0.98.2: Flash Token Bar 5e, parties always listed
+
+- Flash Token Bar 5e: the parties are always on its Group tab, on every scene, wherever their token is. Any other group (an encounter) shows only when it, or one of its members, has a token on the scene.
+- Fixed: every actor and group in the world could show on Flash's bar on every scene. While Flash built its Group tab, its "Only show actors with tokens" setting read as off for everything, so saving Flash's settings window then could store it off. It now reads off only inside Flash's group building, never for its settings window. KG QoL 1.12.1 turns the setting back on.
+
 ## 0.98.1: Flash Token Bar 5e parties open
 
 - Flash Token Bar 5e: parties start open, their people listed under them, and a click on one of the people (not only the party) selects the party's token and pans to it, as on Monk's TokenBar.

@@ -2,16 +2,21 @@
 // them (monks-members.mjs). The same file in KG Cities (city scenes) and KG Realms (any scene with a
 // party token); nothing runs unless Flash Token Bar 5e is active. On a wanted scene:
 //  - the bar opens on its Group tab (once per scene visit; the GM can still pick another tab);
-//  - every party with a token on the scene is listed there, open, its people under it, with one
+//  - on every scene (0.98.2 / 0.17.8), the parties are always on the Group tab, wherever their token
+//    is; any other group (an encounter) only when it, or one of its members, has a token on the scene;
+//  - every party is listed there, open, its people under it, with one
 //    picture of them (its vehicles left out); its people are its members, ready for a roll request;
 //  - a plain click on a party, or on one of its people, picks just that (shift adds, as Flash does),
 //    selects the party's token and pans to it, as Monk's TokenBar does.
 // Why: Flash's "show only PCs with a token" (on by default) drops a group when none of its MEMBERS
 // has a token, and party members ride inside the party token. While Flash builds its Group tab on a
-// wanted scene that one setting reads false; the rows are then trimmed to groups really on the scene.
+// wanted scene, that one setting reads false inside Flash's processGroupActor only (0.98.2 / 0.17.8:
+// it read false for every caller meanwhile, so Flash's settings window could save it off, and then
+// every group and actor in the world showed on every scene); the rows are then trimmed to groups
+// really on the scene.
 // Checked against Flash Token Bar 5e 1.30.9. Restored from KG Cities 0.17.2 (KG Cities 0.17.6, KG Realms 0.98.0).
 
-import { isKgParty, partyPicture } from "./monks-bar.mjs";
+import { isKgParty, partyMeta, partyPicture } from "./monks-bar.mjs";
 
 const FLASH = "flash-rolls-5e";
 const MENU_ID = "flash-rolls-menu";
@@ -44,7 +49,7 @@ export function installFlashParties({ isScene }) {
   // "Show only PCs with a token" reads false while Flash builds its Group tab on a wanted scene.
   const get = game.settings.get;
   game.settings.get = function (namespace, key, ...rest) {
-    if (forcing > 0 && namespace === FLASH && key === TOKEN_ONLY) return false;
+    if (forcing > 0 && namespace === FLASH && key === TOKEN_ONLY && /processGroupActor/.test(new Error().stack ?? "")) return false;
     return get.call(this, namespace, key, ...rest);
   };
 
@@ -54,10 +59,12 @@ export function installFlashParties({ isScene }) {
   const partyOf = (el) => partyToken(el?.closest?.(".actor-group, [data-group-id]")?.dataset?.actorId ?? el?.closest?.("[data-group-id]")?.dataset?.groupId);
   const goTo = (token) => { if (!token) return; token.control({ releaseOthers: true }); canvas.animatePan({ x: token.center.x, y: token.center.y, duration: 250 }); };
 
-  /** Groups on this scene: a party token of the group itself, or a member's own token. Retired ones never. */
+  /** Groups shown: a party always (retired ones never); any other group when it, or a member, has a token on this scene. */
   function onScene(row, scene) {
     const actor = game.actors.get(row.id);
-    if (!actor || !isKgParty(actor)) return (row.members ?? []).some((m) => m.tokenId) && !!actor;
+    if (!actor) return false;
+    if (isKgParty(actor)) return true;
+    if (actor.type === "group" && partyMeta(actor)?.retired) return false;
     if (scene.tokens.some((t) => t.actorId === row.id && (game.user.isGM || !t.hidden))) return true;
     return (row.members ?? []).some((m) => m.tokenId);
   }
@@ -67,9 +74,10 @@ export function installFlashParties({ isScene }) {
     if (proto.__kgFlashParties) return false;
     const original = proto._prepareContext;
     proto._prepareContext = async function (options) {
-      if (!wanted() || !canvas.scene.tokens.some((t) => isKgParty(t.actor))) return original.call(this, options);
+      if (!canvas?.scene) return original.call(this, options);
       const scene = canvas.scene;
-      if (groupTabFor !== scene.id) { groupTabFor = scene.id; this.currentTab = "group"; }
+      // The Group tab opens by itself on a scene with a party token; elsewhere the tab stays as left.
+      if (groupTabFor !== scene.id && wanted() && scene.tokens.some((t) => isKgParty(t.actor))) { groupTabFor = scene.id; this.currentTab = "group"; }
       if (this.currentTab !== "group") return original.call(this, options);
       // Parties start open, their people listed under them; the GM's own folding is kept as Flash keeps it.
       this.groupExpansionStates ??= {};
@@ -93,7 +101,7 @@ export function installFlashParties({ isScene }) {
     // does. A party's click also selects its token and pans to it, as on Monk's TokenBar.
     const click = proto._onActorClick;
     if (click) proto._onActorClick = function (event) {
-      if (wanted() && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target?.closest?.(".actor-select")) {
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey && !event.target?.closest?.(".actor-select")) {
         const el = event.currentTarget, keep = new Set();
         if (el?.classList?.contains("actor-group")) {
           const row = (this._lastPreparedContext?.groups ?? []).find((g) => g.id === el.dataset.actorId);
@@ -129,9 +137,9 @@ export function installFlashParties({ isScene }) {
     if (!wanted()) groupTabFor = null;
     refresh();
   });
-  for (const hook of ["createToken", "deleteToken", "createActor", "deleteActor"]) Hooks.on(hook, () => wanted() && refresh());
+  for (const hook of ["createToken", "deleteToken", "createActor", "deleteActor"]) Hooks.on(hook, () => refresh());
   Hooks.on("updateActor", (actor, changes) => {
-    if (actor.type !== "group" || !wanted()) return;
+    if (actor.type !== "group") return;
     const u = foundry.utils;
     if (u.hasProperty(changes, "system.members") || u.hasProperty(changes, "flags.kg-cities.party") || u.hasProperty(changes, "flags.kg-realms.party") || "name" in changes || "img" in changes) refresh();
   });
