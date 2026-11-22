@@ -1,5 +1,12 @@
 # KG Realms changelog
 
+## 0.98.3: skill challenges that don't guide the players
+
+- Skill challenges: players see only the successes and failures, the stages by number (Stage 1, Stage 2, and so on) and who has acted. The hook, each stage's read-aloud text and title, the approaches, the spells that count and the outcome's text and effects are the GM's alone. The GM still sees everything.
+- Call for rolls: each approach in the GM's panel has a Call for rolls button. Only then do the players see its skills or checks (Nature or Persuasion, say) on their own character, with the DC if the challenge shows DCs, never the approach's description. With nothing called, a player sees "Waiting for the GM to call for a roll." Calls clear at the next stage, and a player's roll on an approach not called for is refused. The GM's "Roll for them" can still pick any approach.
+- Public chat no longer names stages: a roll's card says "stage 2", and the card when a challenge starts shows only its name and goal, not its hook. "Use a spell instead" no longer suggests the stage's spells to players.
+- Test this challenge, in the builder (in place of Preview as a player): runs the draft as it stands, saved or not, in the GM's view. Rolls are quiet, and nothing is saved, posted or applied: an effect's button only marks it tried. A switch shows the players' view of it. With no party tokens on the scene, the player characters stand in. It is off while a challenge is running on the scene.
+
 ## 0.98.2: Flash Token Bar 5e, parties always listed
 
 - Flash Token Bar 5e: the parties are always on its Group tab, on every scene, wherever their token is. Any other group (an encounter) shows only when it, or one of its members, has a token on the scene.

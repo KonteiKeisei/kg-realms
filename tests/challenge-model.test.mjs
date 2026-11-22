@@ -2,7 +2,7 @@
 // the GM rules on, stages and the three endings.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride } from "../scripts/challenge/model.mjs";
+import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride, calledApproaches, isCalled, callApproach } from "../scripts/challenge/model.mjs";
 import { normalizeChallenge, challengeProblems, startRun, canAct, recordRoll, requestSpell, ruleSpell, gmMark, skipActor, canAdvance, nextStage, endEarly, endingFor, rollTerms, contributions, actedIn } from "../scripts/challenge/model.mjs";
 
 const party = [{ id: "a", name: "Ash" }, { id: "b", name: "Bree" }, { id: "c", name: "Cole" }];
@@ -182,4 +182,36 @@ test("contributions list each character's marks and spells", () => {
   assert.deepEqual(c.find((x) => x.id === "b").spells, ["Speak with Plants"]);
   gmOverride(r, "c", true, "Climbs the treant");
   assert.deepEqual(contributions(r).find((x) => x.id === "c").others, ["Climbs the treant"]);
+});
+
+// 0.98.2: players see an approach only when the GM calls for rolls on it.
+test("a new run calls for nothing; the GM calls and stops calling for approaches", () => {
+  const r = run();
+  assert.deepEqual(calledApproaches(r), []);
+  assert.equal(callApproach(r, 1), true);
+  assert.equal(callApproach(r, 0), true);
+  assert.deepEqual(calledApproaches(r), [0, 1]);
+  assert.equal(isCalled(r, 1), true);
+  assert.equal(callApproach(r, 1, false), true);
+  assert.deepEqual(calledApproaches(r), [0]);
+  assert.equal(callApproach(r, 5), false, "no such approach");
+});
+
+test("calls are cleared at the next stage, and a run kept before calls existed has none", () => {
+  const r = run();
+  callApproach(r, 0);
+  nextStage(r);
+  assert.deepEqual(calledApproaches(r), []);
+  const old = run();
+  delete old.calls;
+  assert.deepEqual(calledApproaches(old), []);
+  assert.equal(isCalled(old, 0), false);
+  assert.equal(callApproach(old, 0), true);
+  assert.deepEqual(old.calls, [0]);
+});
+
+test("nothing can be called once the challenge is over", () => {
+  const r = run();
+  endEarly(r);
+  assert.equal(callApproach(r, 0), false);
 });

@@ -102,7 +102,7 @@ export class ChallengeBuilder {
           <button type="button" data-cb="export" title="Save this challenge as a .json file"><i class="fa-solid fa-file-export"></i> Export</button>
           <input type="file" accept=".json,application/json" data-cb-file hidden>
         </span>
-        <button type="button" data-cb="preview" ${problems.length ? "disabled" : ""}>Preview as a player</button>
+        <button type="button" data-cb="preview" ${problems.length || running ? "disabled" : ""} title="${running ? "Finish or close the running challenge first" : "Run through it as the GM, with a switch to the players' view: rolls are quiet and nothing is saved, posted or applied"}"><i class="fa-solid fa-flask"></i> Test this challenge</button>
         <button type="button" data-cb="save">Save</button>
         ${running ? `<button type="button" data-cb="open-run" class="primary">Open the running challenge</button>` : `<button type="button" data-cb="start" class="primary" ${problems.length ? "disabled" : ""}>Start challenge</button>`}
       </footer>`;
@@ -256,7 +256,7 @@ export class ChallengeBuilder {
       case "import": return this.el.querySelector("[data-cb-file]")?.click();
       case "export": return this.#export();
       case "save": return this.#save();
-      case "preview": return this.runner.preview(normalizeChallenge(d), this.#party());
+      case "preview": return this.#test();
       case "start": return this.#start();
       case "open-run": return this.runner.show();
       default: return;
@@ -310,6 +310,15 @@ export class ChallengeBuilder {
   }
 
   #party() { return this.partyOf(this.scene).map((a) => ({ id: a.id, name: a.name, img: a.img })); }
+
+  /** A test run of the draft as it stands, saved or not. With nobody on the scene, the players' characters stand in. */
+  #test() {
+    if (challengeProblems(this.draft).length || this.runner.activeRun(this.scene)) return;
+    let party = this.#party();
+    if (!party.length) party = Array.from(game.users ?? []).filter((u) => !u.isGM && u.character).map((u) => u.character).filter((a, i, all) => all.indexOf(a) === i).map((a) => ({ id: a.id, name: a.name, img: a.img }));
+    if (!party.length) return ui.notifications.warn("KG Realms: there's nobody to test with. Put the party token or a player character's token on this scene, or give a player a character.");
+    this.runner.preview(normalizeChallenge(this.draft), party);
+  }
 
   async #start() {
     if (challengeProblems(this.draft).length) return;

@@ -6,16 +6,22 @@
 // it may act, the option is offered and unused) and writes the run. Each change is made on the run as
 // it stands in the scene, one at a time, so two arriving together can't undo each other.
 //
-// A player's view: the tracks, the stage's text and approaches (DCs if the challenge shows them), and
-// for their own character that hasn't acted, a button for each skill or check with their bonus (a used
-// one crossed out), and "Use a spell instead". The GM's: the same with every DC, each character's
-// state, rulings on spell requests, roll for or skip anyone, a success or failure of their own, next
-// stage and end early. At the end, the outcome for everyone and the GM's buttons to apply it.
+// A player's view (0.98.2): the tracks, the stages by number, and who has acted. No read-aloud text,
+// no approaches, no spells: nothing that guides them. When the GM calls for rolls on an approach, its
+// skills or checks show for their own character that hasn't acted, with their bonus (a used one
+// crossed out, the DC if the challenge shows DCs), and "Use a spell instead". The GM's: everything,
+// with every DC, a Call button on each approach, each character's state, rulings on spell requests,
+// roll for or skip anyone, a success or failure of their own, next stage and end early. At the end,
+// the result for everyone; the outcome's text and effects, and the buttons to apply them, for the GM.
+//
+// A test run (the builder's "Test this challenge"): the GM's view of the draft, kept nowhere, rolls
+// quiet, effects not applied, with a switch to see the players' view of it.
 import { shellHead, movable, placeKept } from "../ui-shell.mjs";
 import { isPrimaryGM } from "../authority.mjs";
 import {
   RESULTS, SPELL_EFFECTS, optionLabel, startRun, currentStage, actedIn, canAct, rollTerms, recordRoll, requestSpell,
-  ruleSpell, gmMark, gmOverride, skipActor, canAdvance, everyoneActed, nextStage, endEarly, contributions
+  ruleSpell, gmMark, gmOverride, skipActor, canAdvance, everyoneActed, nextStage, endEarly, contributions,
+  calledApproaches, isCalled, callApproach
 } from "./model.mjs";
 import { applyEffect, effectLine, postSummary } from "./effects.mjs";
 
@@ -63,7 +69,7 @@ export function sceneRun(scene) {
 
 export class ChallengeRun {
   constructor() {
-    this.el = null; this.min = false; this.previewRun = null; this.actingFor = null; this.spellFor = null; this.overrideFor = null;
+    this.el = null; this.min = false; this.previewRun = null; this.asPlayer = false; this.actingFor = null; this.spellFor = null; this.overrideFor = null;
     this.busy = new Set(); this.queue = Promise.resolve(); this.html = "";
   }
 
@@ -71,22 +77,26 @@ export class ChallengeRun {
   activeRun(scene = canvas?.scene) { return sceneRun(scene); }
   get scene() { return canvas?.scene ?? null; }
   get run() { return this.previewRun ?? sceneRun(this.scene); }
+  /** A test run: kept nowhere. */
   get isPreview() { return !!this.previewRun; }
+  /** Whether this client sees the GM's view: a GM, unless testing and looking at the players' view. */
+  get gmView() { return !!game.user.isGM && !(this.previewRun && this.asPlayer); }
 
   /* ---------------------------------------------------------------- the GM's side: changing the run */
 
   async start(scene, challenge, party) {
     const run = startRun(challenge, party, { now: game.time.worldTime, scene: scene.id, runId: foundry.utils.randomID() });
-    this.previewRun = null; this.min = false; this.actingFor = null;
+    this.previewRun = null; this.asPlayer = false; this.min = false; this.actingFor = null;
     await scene.setFlag(ID, "challengeRun", JSON.stringify(run));
-    ChatMessage.create({ speaker: { alias: run.name }, content: `<div class="kgr-challenge-card"><h3>${esc(run.name)}</h3>${run.hook ? `<p>${esc(run.hook)}</p>` : ""}<p><small>Skill challenge: ${run.goal.succ} successes before ${run.goal.fail} failures.</small></p></div>` });
+    // The hook is the GM's to read out: the card everyone sees has only the name and the goal.
+    ChatMessage.create({ speaker: { alias: run.name }, content: `<div class="kgr-challenge-card"><h3>${esc(run.name)}</h3><p><small>Skill challenge: ${run.goal.succ} successes before ${run.goal.fail} failures.</small></p></div>` });
     this.render();
   }
 
-  /** A run built from the builder's draft, shown to this GM as a player would see it, kept nowhere. */
+  /** A test run of the builder's draft for this GM: the GM's view, kept nowhere, nothing applied. */
   preview(challenge, party) {
     this.previewRun = startRun(challenge, party, { scene: canvas?.scene?.id ?? "", runId: "preview" });
-    this.min = false;
+    this.asPlayer = false; this.min = false; this.actingFor = null; this.overrideFor = null; this.spellFor = null;
     this.render();
   }
 
@@ -94,11 +104,12 @@ export class ChallengeRun {
 
   /**
    * Change the run (a GM only): fn(run) changes it and returns something truthy, or null to leave it.
-   * On the scene's current run, one change at a time.
+   * On the scene's current run, one change at a time. A test run takes the change instead, unless it is
+   * for the scene's run (`live`: a player's message, which a GM's test must not swallow).
    */
-  change(fn, scene = this.scene) {
+  change(fn, scene = this.scene, { live = false } = {}) {
     if (!game.user.isGM) return Promise.resolve(null);
-    if (this.previewRun) { const out = fn(this.previewRun); this.render(); return Promise.resolve(out); }
+    if (this.previewRun && !live) { const out = fn(this.previewRun); this.render(); return Promise.resolve(out); }
     const job = this.queue.then(async () => {
       const run = sceneRun(scene);
       if (!run) return null;
@@ -111,7 +122,7 @@ export class ChallengeRun {
   }
 
   async end(scene = this.scene) {
-    if (this.previewRun) { this.previewRun = null; return this.close(); }
+    if (this.previewRun) { this.previewRun = null; this.asPlayer = false; this.actingFor = null; this.overrideFor = null; this.close(); return this.render(); }
     if (game.user.isGM && scene?.getFlag(ID, "challengeRun") !== undefined) await scene.unsetFlag(ID, "challengeRun");
     this.close();
   }
@@ -122,10 +133,11 @@ export class ChallengeRun {
     const scene = game.scenes.get(m.scene), user = game.users.get(userId ?? m.user), actor = game.actors.get(m.actor);
     if (!scene || !user || !actor || !actor.testUserPermission(user, "OWNER")) return;
     if (m.type === "challenge-roll") {
-      return this.change((run) => run.id === m.run && run.stage === m.stage && recordRoll(run, { actor: actor.id, approach: m.approach, option: m.option, total: Number(m.total) }), scene);
+      // A player rolls only on an approach the GM is calling for.
+      return this.change((run) => run.id === m.run && run.stage === m.stage && isCalled(run, m.approach) && recordRoll(run, { actor: actor.id, approach: m.approach, option: m.option, total: Number(m.total) }), scene, { live: true });
     }
     if (m.type === "challenge-spell") {
-      return this.change((run) => run.id === m.run && requestSpell(run, { actor: actor.id, spell: m.spell, text: m.text }), scene).then((ok) => {
+      return this.change((run) => run.id === m.run && requestSpell(run, { actor: actor.id, spell: m.spell, text: m.text }), scene, { live: true }).then((ok) => {
         if (ok) ui.notifications.info(`KG Realms: ${actor.name} asks for ${m.spell} to count.`);
       });
     }
@@ -148,7 +160,8 @@ export class ChallengeRun {
     this.busy.add(actorId); this.render();
     try {
       const showDC = game.user.isGM || run.rules.showDC;
-      const flavor = `${run.name}: ${stage.title}, ${optionLabel(option)}${terms.advantage ? " (advantage)" : ""}`;
+      // The roll's card is public: the stage by number, never its title.
+      const flavor = `${run.name}: stage ${run.stage + 1}, ${optionLabel(option)}${terms.advantage ? " (advantage)" : ""}`;
       const total = await rollOption(actor, option, { dc: showDC ? terms.dc : null, advantage: terms.advantage, flavor, chat: !this.previewRun, dialog: true });
       if (total == null) return;
       const msg = { actor: actorId, approach, option, total };
@@ -203,8 +216,9 @@ export class ChallengeRun {
 
   #head(run) {
     const stage = currentStage(run);
-    const eyebrow = run.result ? "Skill challenge · complete" : `Skill challenge · ${stage?.title ?? ""} · stage ${run.stage + 1} of ${run.stages.length}`;
-    return shellHead({ icon: "fa-dice-d20", eyebrow, title: run.name, min: { attr: 'data-sc="min"', on: this.min }, close: game.user.isGM ? { attr: 'data-sc="close"', title: this.isPreview ? "Close the preview" : "Close the challenge for everyone" } : null });
+    const where = `stage ${run.stage + 1} of ${run.stages.length}`;
+    const eyebrow = `${this.isPreview ? "Test" : "Skill challenge"} · ${run.result ? "complete" : this.gmView ? `${stage?.title ?? ""} · ${where}` : where}`;
+    return shellHead({ icon: "fa-dice-d20", eyebrow, title: run.name, min: { attr: 'data-sc="min"', on: this.min }, close: game.user.isGM ? { attr: 'data-sc="close"', title: this.isPreview ? "End the test" : "Close the challenge for everyone" } : null });
   }
 
   #tracks(run, small = false) {
@@ -216,23 +230,32 @@ export class ChallengeRun {
 
   #html(run) {
     if (this.min) return this.#head(run);
-    const banner = this.isPreview ? `<p class="sc-preview"><i class="fa-solid fa-eye"></i> Preview as a player: rolls are quiet and nothing is kept.</p>` : "";
+    const banner = this.isPreview ? `<p class="sc-preview"><i class="fa-solid fa-flask"></i> <span>Test run: rolls are quiet, and nothing is saved, posted or applied.${this.asPlayer ? " This is what the players see." : ""}</span>
+      <button type="button" data-sc="view-as">${this.asPlayer ? "Back to the GM's view" : "See the players' view"}</button></p>` : "";
     return `${this.#head(run)}<div class="sc-body">${banner}${run.result ? this.#outcome(run) : this.#stage(run)}</div>`;
   }
 
   #stage(run) {
-    const gm = game.user.isGM && !this.isPreview, stage = currentStage(run), acted = actedIn(run);
-    const showDC = gm || run.rules.showDC;
+    const gm = this.gmView, stage = currentStage(run), acted = actedIn(run);
     const rounds = run.stages.map((s, i) => {
       const acts = run.acts.filter((a) => a.stage === i && a.success != null);
       const sub = i < run.stage ? `${acts.filter((a) => a.success).length} ✓ ${acts.filter((a) => !a.success).length} ✗` : i === run.stage ? "now" : "";
-      return `<div class="sc-round ${i < run.stage ? "done" : i === run.stage ? "now" : ""}"><b>${esc(s.title)}</b><small>${esc(sub)}</small></div>`;
+      return `<div class="sc-round ${i < run.stage ? "done" : i === run.stage ? "now" : ""}"><b>${gm ? esc(s.title) : `Stage ${i + 1}`}</b><small>${esc(sub)}</small></div>`;
     }).join("");
-    const approaches = stage.approaches.map((a) => `<div class="sc-appr"><b>${esc(a.options.map(optionLabel).join(" or "))}</b>${showDC ? `<span class="sc-dc">DC ${a.dc}</span>` : "<span></span>"}<span>${esc(a.text)}</span></div>`).join("");
-    const spells = stage.spells.length && (gm || run.rules.spells) ? `<p class="sc-note"><i class="fa-solid fa-wand-sparkles"></i> Spells that count here: ${esc(stage.spells.join(", "))} (${esc(SPELL_EFFECTS[stage.spellEffect].toLowerCase())}).${gm && stage.spellNote ? ` ${esc(stage.spellNote)}` : ""}</p>` : "";
+    // The GM's alone: the read-aloud text, the approaches (with a Call button each) and the spells.
+    let gmOnly = "";
+    if (gm) {
+      const approaches = stage.approaches.map((a, j) => {
+        const on = isCalled(run, j);
+        return `<div class="sc-appr ${on ? "called" : ""}"><b>${esc(a.options.map(optionLabel).join(" or "))}</b><span class="sc-dc">DC ${a.dc}</span><span>${esc(a.text)}</span>
+          <button type="button" data-sc="call" data-appr="${j}" class="sc-call ${on ? "on" : ""}" aria-pressed="${on}" title="${on ? "Players can roll this now: click to stop calling for it" : "Call for these rolls: the players see these skills and can roll them"}"><i class="fa-solid ${on ? "fa-bullhorn" : "fa-hand-pointer"}"></i> ${on ? "Calling" : "Call for rolls"}</button></div>`;
+      }).join("");
+      const spells = stage.spells.length ? `<p class="sc-note"><i class="fa-solid fa-wand-sparkles"></i> Spells that count here: ${esc(stage.spells.join(", "))} (${esc(SPELL_EFFECTS[stage.spellEffect].toLowerCase())}).${stage.spellNote ? ` ${esc(stage.spellNote)}` : ""}</p>` : "";
+      gmOnly = `${run.stage === 0 && run.hook ? `<p class="sc-read">${esc(run.hook)}</p>` : ""}${stage.read ? `<p class="sc-read">${esc(stage.read)}</p>` : ""}
+      <div class="sc-sec"><span class="sc-lbl">Approaches <small>(players see only what you call for)</small></span>${approaches}</div>${spells}`;
+    }
     return `${this.#tracks(run)}<div class="sc-rounds">${rounds}</div>
-      ${run.stage === 0 && run.hook ? `<p class="sc-read">${esc(run.hook)}</p>` : ""}${stage.read ? `<p class="sc-read">${esc(stage.read)}</p>` : ""}
-      <div class="sc-sec"><span class="sc-lbl">Approaches</span>${approaches}</div>${spells}
+      ${gmOnly}
       ${this.#mine(run)}
       <div class="sc-sec"><span class="sc-lbl">The party</span>${run.party.map((p) => this.#person(run, p, acted)).join("")}</div>
       ${gm ? this.#gmBar(run) : ""}`;
@@ -241,34 +264,42 @@ export class ChallengeRun {
   /** The approach picker for one character on this client: their own, or the one the GM picks for. */
   #picker(run, actor) {
     const stage = currentStage(run), terms = (j) => rollTerms(run, actor.id, j), boost = run.boosts?.[actor.id];
-    const showDC = game.user.isGM || run.rules.showDC, busy = this.busy.has(actor.id);
-    const rows = stage.approaches.map((a, j) => `<div class="sc-pick"><span>${esc(a.text || a.options.map(optionLabel).join(" or "))}${showDC ? ` <b class="sc-dc">DC ${terms(j).dc}</b>` : ""}</span><span class="sc-opts">${a.options.map((o) => {
+    const gm = this.gmView, showDC = gm || run.rules.showDC, busy = this.busy.has(actor.id);
+    // The GM rolling for someone picks from every approach; a player only from those called for, by skill name alone.
+    const shown = gm ? stage.approaches.map((_, j) => j) : calledApproaches(run);
+    if (!shown.length && !gm) return `<div class="sc-mine"><b class="sc-turn">${esc(actor.name)}</b><p class="sc-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting for the GM to call for a roll.</p>${this.#spellAsk(run, actor, boost)}</div>`;
+    const rows = shown.map((j) => [stage.approaches[j], j]).map(([a, j]) => `<div class="sc-pick"><span>${esc(gm ? a.text || a.options.map(optionLabel).join(" or ") : a.options.map(optionLabel).join(" or "))}${showDC ? ` <b class="sc-dc">DC ${terms(j).dc}</b>` : ""}</span><span class="sc-opts">${a.options.map((o) => {
       const used = run.rules.noRepeat && (run.used[actor.id] ?? []).includes(o);
       return `<button type="button" data-sc="roll" data-actor="${actor.id}" data-appr="${j}" data-option="${o}" ${used || busy ? "disabled" : ""} class="${used ? "used" : ""}" title="${used ? `${esc(optionLabel(o))} is already used in this challenge` : ""}">${esc(optionLabel(o))} <b>${signed(optionBonus(actor, o))}</b>${used ? " <small>used</small>" : ""}</button>`;
     }).join("")}</span></div>`).join("");
     const boostNote = boost ? `<p class="sc-boost"><i class="fa-solid fa-wand-sparkles"></i> ${esc(boost.spell)}: your next roll is ${boost.adv ? "with advantage" : `at DC −${boost.dc}`}.</p>` : "";
-    const ask = run.rules.spells && !boost ? (this.spellFor === actor.id
-      ? `<div class="sc-spellform" data-sc-spellform="${actor.id}"><label><span class="sc-lbl">Spell</span><input name="spell" list="sc-spells-${actor.id}" placeholder="Which spell"><datalist id="sc-spells-${actor.id}">${stage.spells.map((s) => `<option value="${esc(s)}"></option>`).join("")}</datalist></label>
+    return `<div class="sc-mine"><b class="sc-turn">${gm && this.actingFor === actor.id ? `Rolling for ${esc(actor.name)}` : `Your move, ${esc(actor.name)}`}</b>${boostNote}${rows}${this.#spellAsk(run, actor, boost)}${gm && this.actingFor ? `<button type="button" data-sc="act-for" data-actor="">Done</button>` : ""}</div>`;
+  }
+
+  /** "Use a spell instead", and its form. The stage's spells are suggested to the GM only. */
+  #spellAsk(run, actor, boost) {
+    if (!run.rules.spells || boost) return "";
+    if (this.spellFor !== actor.id) return `<button type="button" data-sc="spell" data-actor="${actor.id}" class="sc-spellbtn"><i class="fa-solid fa-wand-sparkles"></i> Use a spell instead (the GM decides)</button>`;
+    const list = this.gmView ? currentStage(run).spells : [];
+    return `<div class="sc-spellform" data-sc-spellform="${actor.id}"><label><span class="sc-lbl">Spell</span><input name="spell" ${list.length ? `list="sc-spells-${actor.id}"` : ""} placeholder="Which spell">${list.length ? `<datalist id="sc-spells-${actor.id}">${list.map((s) => `<option value="${esc(s)}"></option>`).join("")}</datalist>` : ""}</label>
           <label><span class="sc-lbl">How it helps</span><input name="text" placeholder="What you do with it"></label>
-          <span class="sc-row"><button type="button" data-sc="send-spell" data-actor="${actor.id}" class="primary">Ask the GM</button><button type="button" data-sc="spell-cancel">Cancel</button></span></div>`
-      : `<button type="button" data-sc="spell" data-actor="${actor.id}" class="sc-spellbtn"><i class="fa-solid fa-wand-sparkles"></i> Use a spell instead (the GM decides)</button>`) : "";
-    return `<div class="sc-mine"><b class="sc-turn">${game.user.isGM && this.actingFor === actor.id ? `Rolling for ${esc(actor.name)}` : `Your move, ${esc(actor.name)}`}</b>${boostNote}${rows}${ask}${game.user.isGM && this.actingFor ? `<button type="button" data-sc="act-for" data-actor="">Done</button>` : ""}</div>`;
+          <span class="sc-row"><button type="button" data-sc="send-spell" data-actor="${actor.id}" class="primary">Ask the GM</button><button type="button" data-sc="spell-cancel">Cancel</button></span></div>`;
   }
 
   #mine(run) {
-    if (game.user.isGM && !this.isPreview) {
+    if (this.gmView) {
       const actor = this.actingFor ? game.actors.get(this.actingFor) : null;
       return actor && canAct(run, actor.id).ok ? this.#picker(run, actor) : "";
     }
-    // A player (or the GM previewing): their characters in the challenge that can act now, and the state of the others.
-    // A preview shows the first character's view, as their player would see it.
+    // A player (or the GM testing, in the players' view): their characters in the challenge that can act now, and the state of the others.
+    // A test shows the first character's view, as their player would see it.
     const mine = (this.isPreview ? run.party.slice(0, 1) : run.party).map((p) => game.actors.get(p.id)).filter((a) => a && (this.isPreview || a.isOwner));
     if (!mine.length) return "";
     return mine.map((actor) => {
       if (run.requests?.[actor.id]) return `<p class="sc-wait"><i class="fa-solid fa-hourglass-half"></i> ${esc(actor.name)}: waiting for the GM to rule on ${esc(run.requests[actor.id].spell)}.</p>`;
       if (!canAct(run, actor.id).ok) {
         const act = run.acts.find((a) => a.stage === run.stage && a.actor === actor.id);
-        return act ? `<p class="sc-done">${esc(actor.name)}: ${esc(this.#actText(act, game.user.isGM || run.rules.showDC))}</p>` : "";
+        return act ? `<p class="sc-done">${esc(actor.name)}: ${esc(this.#actText(act, run.rules.showDC))}</p>` : "";
       }
       return this.#rollsHere(actor) || this.isPreview ? this.#picker(run, actor) : "";
     }).join("");
@@ -282,7 +313,7 @@ export class ChallengeRun {
   }
 
   #person(run, p, acted) {
-    const gm = game.user.isGM && !this.isPreview, actor = game.actors.get(p.id), act = run.acts.find((a) => a.stage === run.stage && a.actor === p.id), req = run.requests?.[p.id];
+    const gm = this.gmView, actor = game.actors.get(p.id), act = run.acts.find((a) => a.stage === run.stage && a.actor === p.id), req = run.requests?.[p.id];
     const used = (run.used[p.id] ?? []).map(optionLabel).join(", ");
     const face = p.img ? `<img src="${esc(p.img)}" alt="">` : esc(p.name.slice(0, 1));
     let state;
@@ -310,7 +341,8 @@ export class ChallengeRun {
   }
 
   #outcome(run) {
-    const gm = game.user.isGM && !this.isPreview, o = run.outcomes[run.result] ?? { text: "", effects: [] };
+    // Players see the result and who did what. The outcome's text and its effects are the GM's to give.
+    const gm = this.gmView, test = game.user.isGM && this.isPreview, o = run.outcomes[run.result] ?? { text: "", effects: [] };
     const who = contributions(run).map((c) => `${esc(c.name)} ${c.marks || "–"}${c.spells.length ? ` (${esc(c.spells.join(", "))})` : ""}`).join(" · ");
     const effects = o.effects.map((e, i) => {
       const done = run.applied?.[i];
@@ -318,16 +350,16 @@ export class ChallengeRun {
       if (gm && e.kind !== "journal") {
         const give = e.kind === "item" ? `<label class="sc-give">Give to <select data-sc-give="${i}">${run.party.map((p) => `<option value="${p.id}" ${run.gives?.[i] === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>` : "";
         const label = { item: "Give", damage: "Post save and damage", exhaustion: "Apply", time: "Advance the clock" }[e.kind];
-        action = `${give}<button type="button" data-sc="apply" data-i="${i}" ${done ? "disabled" : ""}>${done ? "Done" : label}</button>`;
+        action = `${give}<button type="button" data-sc="apply" data-i="${i}" ${done ? "disabled" : ""}>${done ? (test ? "Tried" : "Done") : test ? `${label} (test)` : label}</button>`;
       }
       return `<div class="sc-effect ${done ? "done" : ""}"><span><b>${esc(effectLine(e))}</b></span>${action}</div>`;
     }).join("");
     return `<div class="sc-result ${run.result}"><b>${esc(RESULTS[run.result])}</b>${this.#tracks(run, true)}<small>${run.succ} success${run.succ === 1 ? "" : "es"}, ${run.fail} failure${run.fail === 1 ? "" : "s"}</small></div>
-      ${o.text ? `<p class="sc-read big">${esc(o.text)}</p>` : ""}
-      ${effects ? `<div class="sc-sec"><span class="sc-lbl">${run.result === "fail" ? "Consequences" : "Rewards"}</span>${effects}</div>` : ""}
+      ${gm && o.text ? `<p class="sc-read big">${esc(o.text)}</p>` : ""}
+      ${gm && effects ? `<div class="sc-sec"><span class="sc-lbl">${run.result === "fail" ? "Consequences" : "Rewards"}</span>${effects}</div>` : ""}
       <div class="sc-sec"><span class="sc-lbl">Who did what</span><span class="sc-muted">${who}</span></div>
-      ${gm ? `<div class="sc-gmbar"><span class="sc-muted grow">Players see the outcome until you close it.</span><button type="button" data-sc="summary">Post to chat</button><button type="button" data-sc="apply-all" class="primary">Apply the rest and close</button></div>` : ""}
-      ${game.user.isGM && this.isPreview ? `<div class="sc-gmbar"><button type="button" data-sc="close" class="primary">Close the preview</button></div>` : ""}`;
+      ${gm && !test ? `<div class="sc-gmbar"><span class="sc-muted grow">Players see the result until you close it.</span><button type="button" data-sc="summary">Post to chat</button><button type="button" data-sc="apply-all" class="primary">Apply the rest and close</button></div>` : ""}
+      ${test ? `<div class="sc-gmbar"><span class="sc-muted grow">End of the test: nothing was applied.</span><button type="button" data-sc="close" class="primary">End the test</button></div>` : ""}`;
   }
 
   /* ---------------------------------------------------------------- clicks */
@@ -335,6 +367,11 @@ export class ChallengeRun {
   async #apply(run, i) {
     const e = run.outcomes[run.result]?.effects?.[i];
     if (!e || run.applied?.[i] || e.kind === "journal") return;
+    // A test applies nothing: no item given, no damage posted, the clock left alone.
+    if (this.previewRun) {
+      await this.change((r) => { r.applied[i] = true; return true; });
+      return ui.notifications.info(`KG Realms: test, not applied: ${effectLine(e)}.`);
+    }
     try {
       const done = await applyEffect(e, run, { actorId: run.gives?.[i] ?? run.party[0]?.id });
       await this.change((r) => { r.applied[i] = true; return true; });
@@ -362,6 +399,11 @@ export class ChallengeRun {
     }
     if (!game.user.isGM) return;
     switch (b.dataset.sc) {
+      case "view-as": this.asPlayer = !this.asPlayer; this.actingFor = null; this.overrideFor = null; this.spellFor = null; return this.render();
+      case "call": {
+        const j = Number(b.dataset.appr);
+        return this.change((r) => callApproach(r, j, !isCalled(r, j)));
+      }
       case "act-for": this.actingFor = a || null; return this.render();
       case "rule": return this.change((r) => ruleSpell(r, a, b.dataset.d));
       case "skip": return this.change((r) => skipActor(r, a));

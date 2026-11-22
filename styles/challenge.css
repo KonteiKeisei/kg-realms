@@ -89,8 +89,15 @@
 .kgr-challenge-run .sc-read { margin: 0; padding: 10px 12px; background: var(--kgr-accent-soft); border-radius: 6px; font-size: 14px; line-height: 1.5; }
 .kgr-challenge-run .sc-read.big { font-size: 15px; }
 .kgr-challenge-run .sc-sec { display: flex; flex-direction: column; gap: 6px; }
-.kgr-challenge-run .sc-appr { display: grid; grid-template-columns: 170px 56px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 8px; background: var(--kgr-surface); border: 1px solid var(--kgr-line); border-radius: 6px; }
-.kgr-challenge-run .sc-appr > span:last-child { color: var(--kgr-muted-2); }
+.kgr-challenge-run .sc-appr { display: grid; grid-template-columns: 150px 50px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; background: var(--kgr-surface); border: 1px solid var(--kgr-line); border-radius: 6px; }
+.kgr-challenge-run .sc-appr > span:nth-child(3) { color: var(--kgr-muted-2); }
+.kgr-challenge-run .sc-appr.called { border-color: var(--kgr-accent); background: var(--kgr-accent-soft); }
+.kgr-challenge-run .sc-call { white-space: nowrap; width: auto; }
+.kgr-challenge-run .sc-call.on { border-color: var(--kgr-accent); color: var(--kgr-accent); font-weight: 600; }
+.kgr-challenge-run .sc-lbl small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.kgr-challenge-run .sc-preview { display: flex; align-items: center; gap: 8px; }
+.kgr-challenge-run .sc-preview > span { flex: 1; }
+.kgr-challenge-run .sc-preview > button { width: auto; white-space: nowrap; }
 .kgr-challenge-run .sc-dc { color: var(--kgr-gold-text); font-weight: 600; white-space: nowrap; }
 .kgr-challenge-run .sc-note, .kgr-challenge-run .sc-boost, .kgr-challenge-run .sc-wait, .kgr-challenge-run .sc-done { margin: 0; color: var(--kgr-muted-2); }
 .kgr-challenge-run .sc-boost { color: var(--kgr-accent); }

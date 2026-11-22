@@ -132,11 +132,28 @@ export function startRun(challenge, party, { now = 0, scene = "", runId = id() }
   return {
     id: runId, scene, name: c.name, hook: c.hook, goal: c.goal, rules: c.rules, stageEnd: c.stageEnd, stages: c.stages, outcomes: c.outcomes,
     party: (party ?? []).map((p) => ({ id: str(p.id, 40), name: str(p.name, 120), img: str(p.img, 500) })),
-    stage: 0, acts: [], used: {}, requests: {}, boosts: {}, succ: 0, fail: 0, result: null, applied: {}, gives: {}, started: now
+    stage: 0, acts: [], used: {}, requests: {}, boosts: {}, calls: [], succ: 0, fail: 0, result: null, applied: {}, gives: {}, started: now
   };
 }
 
 export const currentStage = (run) => run?.stages?.[run.stage] ?? null;
+
+/**
+ * The approaches of this stage the GM is calling for rolls on (0.98.2): players see and roll only these.
+ * A run kept before 0.98.2 has none.
+ */
+export const calledApproaches = (run) => (Array.isArray(run?.calls) ? run.calls : []).filter((j) => Number.isInteger(j) && !!currentStage(run)?.approaches?.[j]);
+export const isCalled = (run, approachIndex) => calledApproaches(run).includes(Number(approachIndex));
+
+/** The GM calls for rolls on an approach this stage (on = true), or stops calling for it. */
+export function callApproach(run, approachIndex, on = true) {
+  const j = Number(approachIndex);
+  if (run?.result || !currentStage(run)?.approaches?.[j]) return false;
+  const calls = new Set(calledApproaches(run));
+  if (on) calls.add(j); else calls.delete(j);
+  run.calls = [...calls].sort((x, y) => x - y);
+  return true;
+}
 /** The characters who have acted in a stage (rolled, had a spell count, or were skipped). */
 export const actedIn = (run, stage = run.stage) => new Set(run.acts.filter((a) => a.stage === stage && a.actor).map((a) => a.actor));
 const member = (run, actorId) => run.party.find((p) => p.id === actorId) ?? null;
@@ -253,7 +270,7 @@ export function endingFor(run) {
 /** On to the next stage, or the ending after the last. */
 export function nextStage(run) {
   if (run.result) return run;
-  run.requests = {}; run.boosts = {};
+  run.requests = {}; run.boosts = {}; run.calls = [];
   if (run.stage >= run.stages.length - 1) { run.result = endingFor(run); return run; }
   run.stage += 1;
   return run;
