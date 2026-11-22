@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.98.7: checkboxes lined up
+
+- Fixed: in the skill challenge builder's Rules, each checkbox's tick sat off its box. Foundry draws a checkbox as a box and a tick sized by its own checkbox size, and only the box was resized. Both are now the same size. The same fix for the checkboxes in the camp's duties and sharing, and the trade editor's visibility.
+
 ## 0.98.6: skill challenges, rolls set up per character
 
 - Each approach is a card in the GM's panel: drag it onto a character to set up that roll for them this stage. Their player sees it at once as skill buttons with their bonus (and the DC if the challenge shows DCs), never the approach's text. Cards can be dropped at any time as the stage goes on, more than one per character.

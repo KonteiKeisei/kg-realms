@@ -33,7 +33,8 @@
 .kgr-challenge-builder .cb-goal input { width: 64px; text-align: center; font-weight: 600; }
 .kgr-challenge-builder .cb-rule { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--kgr-line); cursor: pointer; }
 .kgr-challenge-builder .cb-rule:last-child { border-bottom: 0; }
-.kgr-challenge-builder .cb-rule input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--kgr-accent); }
+/* Foundry draws its checkbox as two icons sized by --checkbox-size: sized by width and height alone, the box and its tick came apart (0.98.7). */
+.kgr-challenge-builder .cb-rule input { --checkbox-size: 18px; width: var(--checkbox-size); height: var(--checkbox-size); flex: 0 0 auto; margin: 0; padding: 0; accent-color: var(--kgr-accent); }
 .kgr-challenge-builder .cb-rule span { display: flex; flex-direction: column; }
 .kgr-challenge-builder .cb-rule small, .kgr-challenge-builder .cb-hint { color: var(--kgr-muted-2); font-size: 12px; }
 .kgr-challenge-builder .cb-apprs { display: flex; flex-direction: column; gap: 6px; }
