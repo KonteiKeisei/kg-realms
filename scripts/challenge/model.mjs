@@ -126,21 +126,52 @@ export function challengeProblems(c) {
   return out;
 }
 
-/** A run from a challenge and its party ([{ id, name, img }]). */
-export function startRun(challenge, party, { now = 0, scene = "", runId = id() } = {}) {
-  const c = normalizeChallenge(challenge);
+const person = (p) => ({ id: str(p?.id, 40), name: str(p?.name, 120), img: str(p?.img, 500) });
+
+/**
+ * A run from a challenge and the characters who could take part ([{ id, name, img }], those on the
+ * scene). Since 0.98.4 nobody takes part until the GM adds them: `party` is who is in, `roster` who
+ * was on the scene. `{ join: true }` puts the whole roster in at the start.
+ */
+export function startRun(challenge, roster, { now = 0, scene = "", runId = id(), join = false } = {}) {
+  const c = normalizeChallenge(challenge), all = (roster ?? []).filter((p) => p?.id).map(person);
   return {
     id: runId, scene, name: c.name, hook: c.hook, goal: c.goal, rules: c.rules, stageEnd: c.stageEnd, stages: c.stages, outcomes: c.outcomes,
-    party: (party ?? []).map((p) => ({ id: str(p.id, 40), name: str(p.name, 120), img: str(p.img, 500) })),
+    roster: all, party: join ? all.map((p) => ({ ...p })) : [],
     stage: 0, acts: [], used: {}, requests: {}, boosts: {}, calls: [], succ: 0, fail: 0, result: null, applied: {}, gives: {}, started: now
   };
 }
 
 export const currentStage = (run) => run?.stages?.[run.stage] ?? null;
 
+/** The GM adds a character to the challenge (0.98.4). False when they're already in or it's over. */
+export function addMember(run, p) {
+  if (!run || run.result || !p?.id || run.party.some((x) => x.id === p.id)) return false;
+  run.party.push(person(p));
+  return true;
+}
+
+/** The GM takes a character out of the challenge. What they already did still counts. */
+export function removeMember(run, actorId) {
+  if (!run || run.result || !run.party.some((x) => x.id === actorId)) return false;
+  run.party = run.party.filter((x) => x.id !== actorId);
+  delete run.requests?.[actorId];
+  delete run.boosts?.[actorId];
+  return true;
+}
+
+/** The GM takes back a skip this stage: the character can act again. */
+export function unskipActor(run, actorId) {
+  if (!run || run.result) return false;
+  const i = run.acts.findIndex((a) => a.stage === run.stage && a.actor === actorId && a.kind === "skip");
+  if (i < 0) return false;
+  run.acts.splice(i, 1);
+  return true;
+}
+
 /**
- * The approaches of this stage the GM is calling for rolls on (0.98.2): players see and roll only these.
- * A run kept before 0.98.2 has none.
+ * The approaches of this stage the GM is calling for rolls on (0.98.3): players see and roll only these.
+ * A run kept before 0.98.3 has none.
  */
 export const calledApproaches = (run) => (Array.isArray(run?.calls) ? run.calls : []).filter((j) => Number.isInteger(j) && !!currentStage(run)?.approaches?.[j]);
 export const isCalled = (run, approachIndex) => calledApproaches(run).includes(Number(approachIndex));
@@ -254,8 +285,11 @@ export function skipActor(run, actor) {
   return act;
 }
 
-/** Whether every character has acted this stage. */
-export const everyoneActed = (run) => run.party.every((p) => actedIn(run).has(p.id));
+/** Those taking part who haven't acted this stage. */
+export const stillToAct = (run) => { const acted = actedIn(run); return run.party.filter((p) => !acted.has(p.id)); };
+
+/** Whether every character taking part has acted this stage. */
+export const everyoneActed = (run) => stillToAct(run).length === 0;
 
 /** Whether the stage can end: always for the GM unless "everyone" is on and someone hasn't acted. */
 export const canAdvance = (run) => !run.result && (!run.rules.everyone || everyoneActed(run));
@@ -282,9 +316,14 @@ export function endEarly(run) {
   return run;
 }
 
-/** Each character's contribution, for the ending: [{ id, name, marks: "✓✗", spells: [name] }]. */
+/**
+ * Each character's contribution, for the ending: [{ id, name, marks: "✓✗", spells: [name] }]. Those
+ * taking part, then anyone taken out who did something before.
+ */
 export function contributions(run) {
-  return run.party.map((p) => {
+  const gone = [];
+  for (const a of run.acts) if (a.actor && a.kind !== "skip" && !run.party.some((p) => p.id === a.actor) && !gone.some((p) => p.id === a.actor)) gone.push({ id: a.actor, name: a.name });
+  return [...run.party, ...gone].map((p) => {
     const mine = run.acts.filter((a) => a.actor === p.id && a.kind !== "skip");
     return { id: p.id, name: p.name, marks: mine.map((a) => (a.success ? "✓" : "✗")).join(""), spells: mine.filter((a) => a.kind === "spell").map((a) => a.note), others: mine.filter((a) => a.kind === "gm" && a.note).map((a) => a.note) };
   });

@@ -14,6 +14,9 @@
 // roll for or skip anyone, a success or failure of their own, next stage and end early. At the end,
 // the result for everyone; the outcome's text and effects, and the buttons to apply them, for the GM.
 //
+// Who takes part (0.98.4): nobody at the start. The GM adds characters (those on the scene, then any
+// a player owns) and can take them out again; a skip can be taken back for the stage.
+//
 // A test run (the builder's "Test this challenge"): the GM's view of the draft, kept nowhere, rolls
 // quiet, effects not applied, with a switch to see the players' view of it.
 import { shellHead, movable, placeKept } from "../ui-shell.mjs";
@@ -21,7 +24,7 @@ import { isPrimaryGM } from "../authority.mjs";
 import {
   RESULTS, SPELL_EFFECTS, optionLabel, startRun, currentStage, actedIn, canAct, rollTerms, recordRoll, requestSpell,
   ruleSpell, gmMark, gmOverride, skipActor, canAdvance, everyoneActed, nextStage, endEarly, contributions,
-  calledApproaches, isCalled, callApproach
+  calledApproaches, isCalled, callApproach, addMember, removeMember, unskipActor, stillToAct
 } from "./model.mjs";
 import { applyEffect, effectLine, postSummary } from "./effects.mjs";
 
@@ -257,8 +260,28 @@ export class ChallengeRun {
     return `${this.#tracks(run)}<div class="sc-rounds">${rounds}</div>
       ${gmOnly}
       ${this.#mine(run)}
-      <div class="sc-sec"><span class="sc-lbl">The party</span>${run.party.map((p) => this.#person(run, p, acted)).join("")}</div>
+      <div class="sc-sec"><span class="sc-lbl">Taking part</span>${run.party.map((p) => this.#person(run, p, acted)).join("") || `<p class="sc-wait">${gm ? "Nobody yet: add who takes part below." : "The GM is choosing who takes part."}</p>`}</div>
+      ${gm ? this.#addable(run) : ""}
       ${gm ? this.#gmBar(run) : ""}`;
+  }
+
+  /**
+   * Who the GM can add (0.98.4): the characters who were on the scene when it started, then every
+   * character a player owns, less those already in.
+   */
+  #candidates(run) {
+    const out = [], seen = new Set(run.party.map((p) => p.id));
+    const take = (p) => { if (p?.id && !seen.has(p.id)) { seen.add(p.id); out.push({ id: p.id, name: p.name, img: p.img }); } };
+    (run.roster ?? []).forEach(take);
+    Array.from(game.actors ?? []).filter((a) => a.type === "character" && a.hasPlayerOwner).sort((x, y) => x.name.localeCompare(y.name)).forEach(take);
+    return out;
+  }
+
+  #addable(run) {
+    const list = this.#candidates(run);
+    if (!list.length) return "";
+    const rows = list.map((p) => `<div class="sc-person out"><span class="cs-face">${p.img ? `<img src="${esc(p.img)}" alt="">` : esc(String(p.name ?? "?").slice(0, 1))}</span><span class="sc-who"><b>${esc(p.name)}</b></span><span class="sc-state"><button type="button" data-sc="add" data-actor="${p.id}"><i class="fa-solid fa-plus"></i> Add</button></span></div>`).join("");
+    return `<div class="sc-sec"><span class="sc-lbl">Not taking part <button type="button" data-sc="add-all" class="sc-addall">Add everyone</button></span>${rows}</div>`;
   }
 
   /** The approach picker for one character on this client: their own, or the one the GM picks for. */
@@ -321,21 +344,22 @@ export class ChallengeRun {
     if (!act && gm && this.overrideFor === p.id) state = `<div class="sc-override" data-sc-keep data-sc-override="${p.id}">
         <input name="note" maxlength="300" placeholder="What they did instead (shown on the card)">
         <span class="sc-override-btns"><button type="button" data-sc="override-ok" data-actor="${p.id}" data-ok="1" class="primary">Success</button><button type="button" data-sc="override-ok" data-actor="${p.id}" data-ok="0">Failure</button><button type="button" data-sc="override-cancel">Cancel</button></span></div>`;
-    else if (act) state = `<span class="sc-roll ${act.success === true ? "ok" : act.success === false ? "no" : ""}">${esc(this.#actText(act, gm || run.rules.showDC))}</span>`;
+    else if (act) state = `<span class="sc-roll ${act.success === true ? "ok" : act.success === false ? "no" : ""}">${esc(this.#actText(act, gm || run.rules.showDC))}</span>${gm && act.kind === "skip" ? `<button type="button" data-sc="unskip" data-actor="${p.id}" title="Take back the skip: they can act this stage">Undo skip</button>` : ""}`;
     else if (req) state = gm ? `<span class="sc-ask"><b>Asks for ${esc(req.spell)}</b>${req.text ? `<small>“${esc(req.text)}”</small>` : ""}</span>
         <button type="button" data-sc="rule" data-actor="${p.id}" data-d="allow" class="primary">Allow: ${{ auto: "success", dc2: "DC −2", adv: "advantage" }[currentStage(run).spellEffect]}</button>
         ${currentStage(run).spellEffect !== "dc2" ? `<button type="button" data-sc="rule" data-actor="${p.id}" data-d="dc2">DC −2</button>` : ""}
         <button type="button" data-sc="rule" data-actor="${p.id}" data-d="deny">Not enough</button>${other}` : `<span class="sc-muted">Waiting for the GM to rule on ${esc(req.spell)}</span>`;
     else if (this.busy.has(p.id)) state = `<span class="sc-muted">Rolling…</span>`;
     else state = `<span class="sc-muted">${actor && playersOf(actor).length ? "Choosing…" : "No player online"}</span>${gm ? `<button type="button" data-sc="act-for" data-actor="${p.id}">Roll for them</button>${other}<button type="button" data-sc="skip" data-actor="${p.id}">Skip</button>` : ""}`;
-    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}"><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}</span></div>`;
+    const remove = gm ? `<button type="button" data-sc="remove" data-actor="${p.id}" class="sc-remove" title="Take ${esc(p.name)} out of the challenge: what they already did still counts" aria-label="Remove ${esc(p.name)}"><i class="fa-solid fa-xmark"></i></button>` : "";
+    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}"><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}${remove}</span></div>`;
   }
 
   #gmBar(run) {
-    const last = run.stage >= run.stages.length - 1, waiting = run.party.length - actedIn(run).size;
+    const last = run.stage >= run.stages.length - 1, waiting = stillToAct(run).length;
     const blocked = !canAdvance(run);
     return `<div class="sc-gmbar"><span class="sc-marknote" data-sc-keep><input name="marknote" maxlength="300" placeholder="Note for a group mark (optional)"></span><button type="button" data-sc="mark" data-ok="1">+ Success</button><button type="button" data-sc="mark" data-ok="0">+ Failure</button>
-      <span class="sc-muted grow">${everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}</span>
+      <span class="sc-muted grow">${!run.party.length ? "Nobody is taking part." : everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}</span>
       <button type="button" data-sc="end-early">End early</button>
       <button type="button" data-sc="next" class="primary" ${blocked ? "disabled" : ""}>${last ? "Finish" : "Next stage"}</button></div>`;
   }
@@ -404,6 +428,20 @@ export class ChallengeRun {
         const j = Number(b.dataset.appr);
         return this.change((r) => callApproach(r, j, !isCalled(r, j)));
       }
+      case "add": {
+        const p = this.#candidates(run).find((x) => x.id === a);
+        return p ? this.change((r) => addMember(r, p)) : null;
+      }
+      case "add-all": {
+        const list = this.#candidates(run);
+        return this.change((r) => list.map((p) => addMember(r, p)).some(Boolean));
+      }
+      case "remove": {
+        if (this.actingFor === a) this.actingFor = null;
+        if (this.overrideFor === a) this.overrideFor = null;
+        return this.change((r) => removeMember(r, a));
+      }
+      case "unskip": return this.change((r) => unskipActor(r, a));
       case "act-for": this.actingFor = a || null; return this.render();
       case "rule": return this.change((r) => ruleSpell(r, a, b.dataset.d));
       case "skip": return this.change((r) => skipActor(r, a));

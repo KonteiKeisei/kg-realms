@@ -2,7 +2,7 @@
 // the GM rules on, stages and the three endings.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride, calledApproaches, isCalled, callApproach } from "../scripts/challenge/model.mjs";
+import { exportChallenge, importChallenge, exportFileName, challengeLinks, gmOverride, calledApproaches, isCalled, callApproach, addMember, removeMember, unskipActor, stillToAct, everyoneActed } from "../scripts/challenge/model.mjs";
 import { normalizeChallenge, challengeProblems, startRun, canAct, recordRoll, requestSpell, ruleSpell, gmMark, skipActor, canAdvance, nextStage, endEarly, endingFor, rollTerms, contributions, actedIn } from "../scripts/challenge/model.mjs";
 
 const party = [{ id: "a", name: "Ash" }, { id: "b", name: "Bree" }, { id: "c", name: "Cole" }];
@@ -16,7 +16,7 @@ const challenge = (over = {}) => normalizeChallenge({
   ],
   ...over
 });
-const run = (over) => startRun(challenge(over), party, { scene: "s1", runId: "r1" });
+const run = (over) => startRun(challenge(over), party, { scene: "s1", runId: "r1", join: true });
 
 test("a stored challenge is cleaned: bad options dropped, numbers kept in range, partial capped at the goal", () => {
   const c = normalizeChallenge({ goal: { succ: 4, fail: 0, partial: 9 }, stages: [{ approaches: [{ options: ["skill:nat", "skill:nope", "check:xyz"], dc: 99 }] }] });
@@ -208,6 +208,42 @@ test("calls are cleared at the next stage, and a run kept before calls existed h
   assert.equal(isCalled(old, 0), false);
   assert.equal(callApproach(old, 0), true);
   assert.deepEqual(old.calls, [0]);
+});
+
+// 0.98.4: the GM chooses who takes part, and a skip can be taken back.
+test("a run starts with nobody taking part, the scene's characters kept as its roster", () => {
+  const r = startRun(challenge(), party, { scene: "s1", runId: "r1" });
+  assert.deepEqual(r.party, []);
+  assert.deepEqual(r.roster.map((p) => p.id), ["a", "b", "c"]);
+  assert.equal(canAct(r, "a").ok, false);
+  assert.equal(everyoneActed(r), true, "nobody is waiting");
+});
+
+test("the GM adds and removes characters; a removed one can't act, what they did still counts", () => {
+  const r = startRun(challenge(), party, { scene: "s1", runId: "r1" });
+  assert.equal(addMember(r, party[0]), true);
+  assert.equal(addMember(r, party[0]), false, "already in");
+  assert.equal(addMember(r, { id: "z", name: "Zed" }), true, "anyone the GM picks, not only the roster");
+  assert.deepEqual(stillToAct(r).map((p) => p.id), ["a", "z"]);
+  recordRoll(r, { actor: "a", approach: 0, option: "skill:nat", total: 20 });
+  assert.equal(removeMember(r, "a"), true);
+  assert.equal(canAct(r, "a").ok, false);
+  assert.equal(r.succ, 1);
+  assert.deepEqual(stillToAct(r).map((p) => p.id), ["z"]);
+  assert.deepEqual(contributions(r).map((c) => [c.id, c.marks]), [["z", ""], ["a", "✓"]]);
+  assert.equal(removeMember(r, "a"), false, "already out");
+  assert.equal(addMember(r, party[0]), true, "and back in");
+});
+
+test("a skip is taken back: the character can act again this stage", () => {
+  const r = run();
+  skipActor(r, "b");
+  assert.equal(canAct(r, "b").ok, false);
+  assert.equal(unskipActor(r, "b"), true);
+  assert.equal(canAct(r, "b").ok, true);
+  assert.equal(unskipActor(r, "b"), false, "nothing to take back");
+  recordRoll(r, { actor: "c", approach: 0, option: "skill:nat", total: 20 });
+  assert.equal(unskipActor(r, "c"), false, "a roll isn't a skip");
 });
 
 test("nothing can be called once the challenge is over", () => {

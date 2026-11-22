@@ -311,19 +311,18 @@ export class ChallengeBuilder {
 
   #party() { return this.partyOf(this.scene).map((a) => ({ id: a.id, name: a.name, img: a.img })); }
 
-  /** A test run of the draft as it stands, saved or not. With nobody on the scene, the players' characters stand in. */
+  /**
+   * A test run of the draft as it stands, saved or not. As a real start (0.98.4): nobody takes part
+   * until the GM adds them in the panel, from the scene's characters or any a player owns.
+   */
   #test() {
     if (challengeProblems(this.draft).length || this.runner.activeRun(this.scene)) return;
-    let party = this.#party();
-    if (!party.length) party = Array.from(game.users ?? []).filter((u) => !u.isGM && u.character).map((u) => u.character).filter((a, i, all) => all.indexOf(a) === i).map((a) => ({ id: a.id, name: a.name, img: a.img }));
-    if (!party.length) return ui.notifications.warn("KG Realms: there's nobody to test with. Put the party token or a player character's token on this scene, or give a player a character.");
-    this.runner.preview(normalizeChallenge(this.draft), party);
+    this.runner.preview(normalizeChallenge(this.draft), this.#party());
   }
 
   async #start() {
     if (challengeProblems(this.draft).length) return;
     const party = this.#party();
-    if (!party.length) return ui.notifications.warn("KG Realms: there's nobody to take part. Put the party token or the player characters' tokens on this scene first.");
     if (!(await this.#save())) return;
     if (!this.scene.active) {
       const go = await RealmDialog.confirm({ window: { title: "Start the skill challenge" }, content: `<p>Players see the challenge on <b>${esc(this.scene.name)}</b>. Activate that scene for everyone now?</p>` });

@@ -1,5 +1,13 @@
 # KG Realms changelog
 
+## 0.98.4: skill challenges, the GM chooses who takes part
+
+- A skill challenge now starts with nobody taking part. The GM's panel lists who can be added: the characters on the scene, then every character a player owns. Each has an Add button, and there is Add everyone.
+- Each character taking part has a remove button (the ×). What they already did still counts, and they show under "Who did what" at the end. They can be added back.
+- Fixed: Skip could not be undone, and with every character on the scene put in at the start, the only way to leave someone out was to skip them stage after stage. A skipped character now has Undo skip, and they can act again that stage.
+- Only those taking part count toward "still to act" and "everyone must act first", and only they get the outcome's effects. A player whose character isn't in sees the tracks, and "The GM is choosing who takes part." until it is.
+- Test this challenge starts the same way, with nobody in, so adding, removing and undoing a skip can be tried before a real run.
+
 ## 0.98.3: skill challenges that don't guide the players
 
 - Skill challenges: players see only the successes and failures, the stages by number (Stage 1, Stage 2, and so on) and who has acted. The hook, each stage's read-aloud text and title, the approaches, the spells that count and the outcome's text and effects are the GM's alone. The GM still sees everything.
