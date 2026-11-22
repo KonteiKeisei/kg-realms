@@ -1,5 +1,14 @@
 # KG Realms changelog
 
+## 0.98.1: Flash Token Bar 5e parties open
+
+- Flash Token Bar 5e: parties start open, their people listed under them, and a click on one of the people (not only the party) selects the party's token and pans to it, as on Monk's TokenBar.
+
+## 0.98.0: Flash Token Bar 5e
+
+- Parties show on Flash Token Bar 5e as they do on Monk's TokenBar. On a scene with a party token, Flash's bar opens on its Group tab with each party there, folded, with one picture of its people; its people are its members, ready for a roll request. A plain click on a party picks just that party (shift adds), selects its token and pans to it. The same code as KG Cities 0.17.6, so the two work alike when both are active.
+- Encounter Perception requests go through Flash Token Bar 5e when Monk's TokenBar is not active (Monk's first, then Flash, then the chat card).
+
 ## 0.97.9: watch rolls without the die
 
 - A watch's encounter roll is made in the background and its result shown at once, as a line (such as '3 on 1d4 · A quiet watch.', in red when something lurks). The tumbling die and its two-second wait are gone. The die was restarted by every clock redraw, timed against each computer's own clock (so players saw it late, skip or land at once), and redrawn every frame with a shadow over the blurred panel.

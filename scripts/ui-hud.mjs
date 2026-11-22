@@ -1210,6 +1210,13 @@ export class TravelHud {
           ...(dc != null ? { dc, showdc: true } : {}) });
       }
     } catch (err) { console.warn("kg-realms | Monk's TokenBar roll request failed; asking in the chat instead:", err); }
+    // Flash Token Bar 5e when Monk's isn't there (0.98.0).
+    const flash = !monks && game.modules.get("flash-rolls-5e")?.active ? game.modules.get("flash-rolls-5e").api : null;
+    try {
+      if (game.user.isGM && flash?.requestRoll && actors.length) {
+        return await flash.requestRoll({ requestType: "skill", rollKey: "prc", actorIds: actors.map((a) => a.id), ...(dc != null ? { dc } : {}), sendAsRequest: true });
+      }
+    } catch (err) { console.warn("kg-realms | Flash Token Bar 5e roll request failed; asking in the chat instead:", err); }
     if (game.system.id !== "dnd5e") return ui.notifications.info("KG Realms: ask the party for Perception rolls (no roll request for this game system).");
     const names = actors.length ? ` (${actors.map((a) => esc(a.name)).join(", ")})` : "";
     return ChatMessage.create({

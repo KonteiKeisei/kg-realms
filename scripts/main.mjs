@@ -2,6 +2,7 @@ import {RealmDialog} from "./ui-theme.mjs";
 import {registerPartyAppearance} from './party-appearance.mjs';
 import { installMonksPartyBar, isKgParty, addPartyRule } from "./monks-bar.mjs";
 import { installMonksMembers } from "./monks-members.mjs";
+import { installFlashParties } from "./flash-parties.mjs";
 import {registerWindowAppearance} from './ui-theme.mjs';
 import {registerIntegrationSetup,promptIntegrations} from './integration-setup.mjs';
 import {localMapPicture} from './local-map-tiles.mjs';
@@ -82,6 +83,7 @@ Hooks.once("init", () => {
   addPartyRule((a) => a.type === "group");
   installMonksPartyBar();
   installMonksMembers({ isScene: (s) => s.tokens.some((t) => isKgParty(t.actor)) });
+installFlashParties({ isScene: (s) => s.tokens.some((t) => isKgParty(t.actor)) });
 });
 Hooks.on('renderSettingsConfig', (_app, html) => waterRegionSettingUI(html?.[0] ?? html));
 import { applyRouteEdits, smoothRoutes } from "./routes.mjs";
