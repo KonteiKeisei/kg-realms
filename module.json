@@ -1,8 +1,8 @@
 {
   "id": "kg-realms",
   "title": "KG Realms",
-  "description": "Realm maps for Foundry VTT: turn your own world map into a travel map with places, roads, rivers, areas, journeys, encounters, camps, weather and settlement maps. Right-click a scene with a map picture and choose Make realm world, or install a world module.",
-  "version": "0.99.3",
+  "description": "<p>Realm maps for Foundry VTT: turn your own world map into a travel map with places, roads, rivers, areas, journeys, encounters, camps, weather and settlement maps. Right-click a scene with a map picture and choose Make realm world, or install a world module.</p>",
+  "version": "0.99.4",
   "compatibility": {
     "minimum": "13.351",
     "verified": "13",
@@ -10,7 +10,8 @@
   },
   "authors": [
     {
-      "name": "Konte"
+      "name": "Konte",
+      "flags": {}
     }
   ],
   "socket": true,
@@ -18,23 +19,30 @@
     "scripts/main.mjs"
   ],
   "styles": [
-    "styles/realms.css",
-    "styles/glass.css",
-    "styles/challenge.css"
+    {
+      "src": "styles/realms.css"
+    },
+    {
+      "src": "styles/glass.css"
+    },
+    {
+      "src": "styles/challenge.css"
+    }
   ],
-  "languages": [],
   "relationships": {
     "recommends": [
       {
         "id": "calendaria",
-        "type": "module"
+        "type": "module",
+        "compatibility": {}
       }
     ]
   },
   "url": "https://github.com/KonteiKeisei/kg-realms",
   "manifest": "https://github.com/KonteiKeisei/kg-realms/releases/latest/download/module.json",
-  "download": "https://github.com/KonteiKeisei/kg-realms/releases/download/v0.99.3/kg-realms.zip",
+  "download": "https://github.com/KonteiKeisei/kg-realms/releases/download/v0.99.4/kg-realms.zip",
   "bugs": "https://github.com/KonteiKeisei/kg-realms/issues",
   "readme": "https://github.com/KonteiKeisei/kg-realms#readme",
-  "changelog": "https://github.com/KonteiKeisei/kg-realms/blob/main/CHANGELOG.md"
+  "changelog": "https://github.com/KonteiKeisei/kg-realms/blob/main/CHANGELOG.md",
+  "flags": {}
 }

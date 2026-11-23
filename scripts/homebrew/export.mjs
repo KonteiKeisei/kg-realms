@@ -16,7 +16,7 @@ import { TILE_SUFFIX, moduleIdFrom, moduleScript, exportWorldDefinition, ROUTES_
 import { fileRef, rewriteFiles, assetNamer, placeForExport, scenesOfWorld, sceneForExport, sceneLinks, wildcardPlace, uuidsIn, uuidParts, rewriteUuids, docForPack, modulePacks, PACK_NAMES, markersUsed, exportReport, calendarForExport, calendarLabel, calendarAction, keepsOwnCalendar, startingDate } from "./export-plan.mjs";
 import {collectExportFiles,exportFileProblem,exportRepairReport} from './export-sources.mjs';
 import {worldForExport,presetForExport,travelLinks} from './export-policy.mjs';
-import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors} from '../scene-package-support.mjs';
+import {sceneBehaviorRequirements,mergedPackageRequirements,prepareSceneBehaviors,hasOptionalSceneBehaviors} from '../scene-package-support.mjs';
 import {configurationSnapshot,exportCalendariaSettings} from '../companion-configuration.mjs';
 import { terrainSource } from '../world-tiles.mjs';
 
@@ -351,7 +351,7 @@ async function buildWorldExport(def, { moduleId, title, version }, onStep, conte
   // The oldest KG Realms that reads this export (EXPORT_READS_FROM), not the one exporting: a module
   // exported from a test build (0.97.2-harvest-test) required that build, and Foundry switched the
   // module off on any released KG Realms below it.
-  const minimum = EXPORT_READS_FROM;
+  const minimum = hasOptionalSceneBehaviors(groups.get('Scene') ?? []) ? "0.99.4" : EXPORT_READS_FROM;
   const manifest={ id: moduleId, title, description: `${def.title}, a world for KG Realms.`, version, authors: [{ name: game.user.name }], compatibility: { minimum: "13", verified: String(game.release?.generation??13), maximum:'14' }, relationships: { requires: [{ id: ID, type: "module", compatibility: { minimum } }], ...(calendar ? { recommends: [{ id: "calendaria", type: "module", reason: `Sets this world's calendar: ${calendar.name}.` }] } : {}) }, esmodules: ["scripts/main.mjs"], ...modulePacks(title, [...groups.keys()], systemId) };
   manifest.relationships.requires.push(...sceneBehaviorRequirements(groups.get('Scene')??[]));
   if(!calendar&&configuration?.calendaria)manifest.relationships.recommends=[{id:'calendaria',type:'module',reason:'Restores this world\'s Calendaria settings and weather configuration.'}];
@@ -470,7 +470,7 @@ export async function fillModulePacks() {
           const cls = getDocumentClass(type);
           const rejected=[],ready=[];
           for(const raw of short){
-            try{if(type==='Scene')assertSceneBehaviors(raw);ready.push(raw);}
+            try{ready.push(type==='Scene' ? prepareSceneBehaviors(raw) : raw);}
             catch(error){rejected.push(error.message);}
           }
           for(let i=0;i<ready.length;i+=IN_ONE_GO){
@@ -563,7 +563,7 @@ async function bringIn(world, type, id, collection, folder) {
   const pack = game.packs.get(`${world.module}.${PACK_NAMES[type]}`);
   const doc = await pack?.getDocument(id);
   if (!doc) return false;
-  const data={...doc.toObject(),...(folder?{folder}:{})};if(type==='Scene')assertSceneBehaviors(data);
+  let data={...doc.toObject(),...(folder?{folder}:{})};if(type==='Scene')data=prepareSceneBehaviors(data);
   const created=await getDocumentClass(type).create(data,{keepId:true});
   if(!created)throw Error(`${doc.name??id}: Foundry did not create the ${type}. See its validation error in the console.`);
   return true;

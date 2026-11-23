@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors,moduleSceneFolderPath} from '../scripts/scene-package-support.mjs';
+import {sceneBehaviorRequirements,mergedPackageRequirements,assertSceneBehaviors,prepareSceneBehaviors,moduleSceneFolderPath} from '../scripts/scene-package-support.mjs';
+
+test('optional KG The Other behavior only ships into a scene when its model is available',()=>{
+  const optional={type:'kg-the-other.kgRegion'}, other={type:'fxmaster.effect'};
+  const scene={name:'Cave',regions:[{name:'River',behaviors:[optional,other]}]};
+  assert.deepEqual(sceneBehaviorRequirements([scene],{modules:new Map()}),[{id:'fxmaster',type:'module'}]);
+  assert.throws(()=>prepareSceneBehaviors(scene,{}),/fxmaster/);
+  assert.deepEqual(prepareSceneBehaviors(scene,{'fxmaster.effect':class{}}).regions[0].behaviors,[other]);
+  assert.deepEqual(prepareSceneBehaviors(scene,{'fxmaster.effect':class{},'kg-the-other.kgRegion':class{}}),scene);
+  assert.deepEqual(scene.regions[0].behaviors,[optional,other]);
+});
 import {sceneForExport} from '../scripts/homebrew/export-plan.mjs';
 
 test('a folder migration marker is local to its installation and is not inherited by a re-export',()=>{

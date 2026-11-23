@@ -1,5 +1,9 @@
 # KG Realms changelog
 
+## 0.99.4: portable Region Behaviors
+
+- Companion exports keep KG The Other Region Behaviors optional. Import keeps them when their model is registered and omits them otherwise.
+
 ## 0.99.3: custom marker deletion and scrolling
 
 - Custom marker deletion has a separate button beside the marker. The Places tab scrolls with the editor body.

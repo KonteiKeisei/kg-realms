@@ -53,7 +53,8 @@ STORED = {".pmtiles", ".pbf", ".webm", ".mp4", ".ktx2"}
 
 files = sorted({p for pattern in INCLUDE for p in ROOT.glob(pattern) if p.is_file()})
 for entry in manifest.get("esmodules", []) + manifest.get("styles", []):
-    assert (ROOT / entry) in files, f"manifest file missing: {entry}"
+    path = entry["src"] if isinstance(entry, dict) else entry
+    assert (ROOT / path) in files, f"manifest file missing: {path}"
 
 out = ROOT / "dist" / f"{module_id} v{version}.zip"
 out.parent.mkdir(exist_ok=True)

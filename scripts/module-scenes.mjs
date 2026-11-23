@@ -3,7 +3,7 @@ import {allWorlds,worldDef,worldUrl,registerWorld} from './worlds.mjs';
 import {mergedSceneTemplates,selectedScenePlan,sceneTemplateCatalog} from './scene-template-plan.mjs';
 import {restoreModuleRegionalMaps} from './homebrew/export.mjs';
 import {regionalPlace} from './regional-place.mjs';
-import {assertSceneBehaviors} from './scene-package-support.mjs';
+import {prepareSceneBehaviors} from './scene-package-support.mjs';
 import {packagedSceneFolderData,organizePackagedScene} from './module-scene-folders.mjs';
 
 const ID='kg-realms', SETTING='sceneTemplateSetup', files=new WeakMap(), queues=new Map(), dialogs=new Map();
@@ -21,7 +21,7 @@ export async function organizeGeneratedScene(def,scene){
 }
 
 async function placedTemplateData(def,node,data){
-  assertSceneBehaviors(data);
+  data = prepareSceneBehaviors(data);
   const placement=await packagedSceneFolderData(def,sceneTemplates(def),node);
   if('folder' in placement){data.folder=placement.folder;data.flags??={};data.flags[ID]??={};data.flags[ID].moduleFolder=placement.marker;}
   return data;

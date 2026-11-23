@@ -16,6 +16,6 @@ test("the export requires a fixed, released KG Realms version", () => {
 
 test("the exporting version is not written as the requirement", () => {
   const manifest = src.slice(src.indexOf("// The module."), src.indexOf("const sceneTemplates=sceneTemplateCatalog"));
-  assert.ok(manifest.includes("const minimum = EXPORT_READS_FROM;"));
+  assert.match(manifest, /const minimum = hasOptionalSceneBehaviors.*\? "0\.99\.4" : EXPORT_READS_FROM;/);
   assert.ok(!/kg\??\.version/.test(manifest), "no kg.version in the manifest's requirement");
 });
