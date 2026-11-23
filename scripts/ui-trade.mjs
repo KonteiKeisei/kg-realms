@@ -132,9 +132,18 @@ export async function openTradeEditor({ service, world, place, changed }) {
           row.key = `good-${foundry.utils.randomID()}`; this.draft.rows.push(row); this.openRow = this.draft.rows.length - 1; this.dirty = true; return this.render();
         }
         if (act === "profile") {
-          if (this.dirty && !await this.confirmDiscard()) return;
           const id = root.querySelector('[name="profile"]').value;
-          this.draft = this.service.defaults(this.market.data, this.service.profile(this.market.data, this.place, id)); this.dirty = true; return this.render();
+          const profile = this.service.profile(this.market.data, this.place, id);
+          const next = this.service.defaults(this.market.data, profile);
+          const goods = next.rows.map(row => esc(row.name)).join(", ");
+          const houses = next.houses.map(esc).join(", ");
+          const approved = await RealmDialog.confirm({
+            window: { title: "Apply starting profile" }, rejectClose: false,
+            content: `<p>Replace the ${this.draft.rows.length} goods and ${this.draft.houses.length} trading houses in this draft?</p>
+              <p><strong>Goods:</strong> ${goods || "None"}</p><p><strong>Trading houses:</strong> ${houses || "None"}</p>`
+          });
+          if (!approved) return;
+          this.draft = next; this.dirty = true; return this.render();
         }
         if (act !== "save" && act !== "reset") return;
         if (act === "reset" && !await RealmDialog.confirm({ window: { title: "Restore trade defaults" }, content: "<p>Remove this place's trade overrides and restore its original profile?</p>", rejectClose: false })) return;

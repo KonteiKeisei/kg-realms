@@ -63,7 +63,7 @@
 .kgr-challenge-builder .cb-status { flex: 1 1 260px; min-width: 0; color: var(--kgr-muted-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kgr-challenge-builder .cb-status.warn { color: var(--kgr-danger); }
 .kgr-challenge-builder .cb-status.run { color: var(--kgr-ok); }
-.kgr-challenge-builder .cb-io { display: inline-flex; gap: 6px; padding-right: 8px; border-right: 1px solid var(--kgr-line); }
+.kgr-challenge-builder .cb-io { padding-right: 8px; border-right: 1px solid var(--kgr-line); }
 
 /* ------------------------------------------------------------------ the challenge under way */
 .kgr-challenge-run { top: 64px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 76px); display: flex; flex-direction: column; overflow: hidden; }
@@ -184,4 +184,6 @@
 .kgr-challenge-run .sc-override { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--kgr-accent); border-radius: 6px; background: var(--kgr-accent-soft); }
 .kgr-challenge-run .sc-override input, .kgr-challenge-run .sc-marknote input { width: 100%; min-width: 0; }
 .kgr-challenge-run .sc-override-btns { display: flex; flex-wrap: wrap; gap: 6px; }
-.kgr-challenge-run .sc-marknote { flex: 1 1 100%; display: flex; }
+.kgr-challenge-run .sc-marknote { display: grid; gap: 4px; margin-block: 4px 8px; }
+.kgr-challenge-run .sc-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.kgr-challenge-run .sc-assign select { min-width: 0; flex: 1 1 12rem; }

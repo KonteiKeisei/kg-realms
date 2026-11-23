@@ -136,7 +136,7 @@ class EditBar {
     this.el.innerHTML = `<i class="fa-solid fa-pen-ruler"></i><b>${esc(s.title)}</b>${s.mode ? `<span class="mode">${esc(s.mode)}</span>` : ""}
       <span class="hint">${esc(s.hint ?? "")}</span>
       <span class="keys">${s.esc ? `<b>Esc</b> ${esc(s.esc)}` : ""}${s.undo ? ` · <b>Ctrl+Z</b> undoes` : ""}</span>
-      <button type="button" data-act="done" class="primary">${esc(s.done ?? "Done editing")}</button>`;
+      ${s.hideDone ? "" : `<button type="button" data-act="done" class="primary">${esc(s.done ?? "Done editing")}</button>`}`;
     this.noteEl.hidden = !s.note;
     this.noteEl.textContent = s.note ?? "";
     this.tipEl.hidden = !s.tip;

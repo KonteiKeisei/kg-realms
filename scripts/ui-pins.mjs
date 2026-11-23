@@ -605,13 +605,13 @@ export class PinEditor {
   }
 
   #markerGrid(p) {
-    const cell = (marker, label, inner, del = false) => `<button class="kgr-marker ${p.marker === marker ? "on" : ""}" data-act="pick-marker" data-marker="${esc(marker)}" title="${esc(label)}">${inner}${del ? `<i class="fa-solid fa-xmark del" data-act="delete-marker"></i>` : ""}</button>`;
+    const cell = (marker, label, inner) => `<button type="button" class="kgr-marker ${p.marker === marker ? "on" : ""}" data-act="pick-marker" data-marker="${esc(marker)}" aria-label="${esc(label)}" title="${esc(label)}">${inner}</button>`;
     const own = Object.entries(this.getMarkers());
     const groups = {};
     for (const m of this.catalog ?? []) (groups[m.group] ??= []).push(m);
     return `<div class="kgr-markers">
       <h4>Map key</h4><div class="grid">${KEY.map(([k, label]) => cell(k, label, `<span class="kgr-thumb key">${label}</span>`)).join("")}</div>
-      ${own.length ? `<h4>Your markers</h4><div class="grid">${own.map(([k, m]) => cell(k, m.name, `<img src="${esc(foundry.utils.getRoute(m.src))}" alt="">`, true)).join("")}</div>` : ""}
+      ${own.length ? `<h4>Your markers</h4><div class="grid">${own.map(([k, m]) => `<div class="kgr-custom-marker">${cell(k, m.name, `<img src="${esc(foundry.utils.getRoute(m.src))}" alt="">`)}<button type="button" class="kgr-marker-delete" data-act="delete-marker" data-marker="${esc(k)}" aria-label="Delete marker: ${esc(m.name)}" title="Delete marker: ${esc(m.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>`).join("")}</div>` : ""}
       ${Object.entries(groups).map(([g, list]) => `<h4>${esc(g)}</h4><div class="grid">${list.map((m) => cell(m.id, m.name, `<img src="${esc(foundry.utils.getRoute(`modules/kg-realms/data/markers/${m.file}`))}" alt="">`)).join("")}</div>`).join("")}
     </div>`;
   }

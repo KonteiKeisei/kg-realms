@@ -8,7 +8,7 @@ function fixture(generation=13){
   const handlers=new Map(),dialogs=[],settings={homebrewWorlds:{detail:{id:'detail',title:'Detailed map'}},regionalMaps:{detail:{parent:'companion-realm'}}};
   globalThis.Hooks={on:(name,fn)=>{const list=handlers.get(name)??[];list.push(fn);handlers.set(name,list);},once:()=>{}};
   globalThis.HTMLElement=class {};
-  globalThis.foundry={utils:{deepClone:structuredClone,escapeHTML:String},applications:{api:{DialogV2:{wait:async d=>{dialogs.push(d);return null;}}}}};
+  globalThis.foundry={utils:{deepClone:structuredClone,escapeHTML:String},applications:{api:{DialogV2:{wait:async d=>{dialogs.push(d);return d.window.title === "Make a Realms map" ? "realm" : null;}}}}};
   const scene=(id,flags)=>({id,getFlag:(_m,k)=>flags[k]});
   const scenes=new Map([
     ['realm',scene('realm',{world:'companion-realm'})],
@@ -39,8 +39,8 @@ test('a companion realm exports through its scene menu without becoming a homebr
 });
 
 test('the V14 scene menu reads Level pictures and passes the selected scene through its native click handler',async()=>{
-  const {actions,entry,dialogs}=fixture(14),make=actions.find(a=>a.label==='Make realm world');
-  assert.equal(make.visible(entry('plain')),true);await make.onClick({type:'click'},entry('plain'));assert.equal(dialogs[0].window.title,'Make realm world');
+  const {actions,entry,dialogs}=fixture(14),make=actions.find(a=>a.label==='Make a Realms map…');
+  assert.equal(make.visible(entry('plain')),true);await make.onClick({type:'click'},entry('plain'));assert.equal(dialogs[1].window.title,'Make realm world');
   for(const action of actions)for(const key of ['condition','callback','name'])assert.equal(key in action,false);
 });
 

@@ -679,10 +679,10 @@ export class RoadEditor {
     // The everyday tools at the top; the whole-map ones (simplify every road, the roads file) in a
     // plain row at the bottom, always in view.
     const tools = roadsTab
-      ? `<div class="row kgr-tools"><button data-act="new-road"><i class="fa-solid fa-plus"></i> New road</button><button data-act="new-trail"><i class="fa-solid fa-plus"></i> New trail</button><span class="sp"></span>
+      ? `<div class="row kgr-tools kgr-road-actions"><button data-act="new-road"><i class="fa-solid fa-plus"></i> New road</button><button data-act="new-trail"><i class="fa-solid fa-plus"></i> New trail</button>
           <button data-act="undo" title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo</button></div>`
       : `<div class="row kgr-tools"><button data-act="new-enc" class="primary"><i class="fa-solid fa-plus"></i> Encounter</button><button data-act="new-hazard"><i class="fa-solid fa-plus"></i> Hazard</button><select name="new-hazard-subtype" aria-label="New hazard subtype">${Object.entries(HAZARD_TYPES).map(([k,v])=>`<option value="${k}" ${k===(this.newHazard??"rapids")?"selected":""}>${v}</option>`).join("")}</select></div>`;
-    const files = roadsTab ? `<div class="kgr-file-row"><button data-act="simplify-all" title="Take out excess nodes on every road and trail"><i class="fa-solid fa-wand-magic-sparkles"></i> Simplify every road</button>
+    const files = roadsTab ? `<div class="kgr-file-row kgr-road-actions"><button data-act="simplify-all" title="Take out excess nodes on every road and trail"><i class="fa-solid fa-wand-magic-sparkles"></i> Simplify every road</button>
       <button data-act="export" title="Save every road and trail to a file"><i class="fa-solid fa-file-export"></i> Export roads</button><button data-act="import" title="Load roads and trails from a file"><i class="fa-solid fa-file-import"></i> Import roads</button></div>` : "";
     this.panel.innerHTML = `${tools}${body}${restore}${roadsTab && !this.draft && !this.joining ? this.#roadList() : ""}${files}${roadsTab?"":this.encounterList()+'<div class="kgr-file-row"><button data-act="enc-export">Export encounters</button><button data-act="enc-import">Import encounters</button></div>'}`;
     this.onStatus?.();

@@ -126,9 +126,10 @@ export class TravelHud {
   /** Leave route or encounter editing (the map editor is opening). */
   stopEditing() { if (!this.mode) return; this.#setMode(null); this.render(); }
 
-  /** Hide the panel while the map editor is open, and show it again after. */
-  suspend(on) {
+  /** Pause travel rendering while a map tool owns the canvas. */
+  suspend(on, { keepVisible = false } = {}) {
     this.suspended = !!on;
+    if (this.el) this.el.hidden = this.suspended && !keepVisible;
     if (on) this.#setMode(null);
     this.render();
     if (!on && this.refreshPending) return this.refresh();
@@ -275,8 +276,8 @@ export class TravelHud {
     this.el = document.createElement("section");
     this.el.className = "kgr-ui kgr-travel";
     document.body.append(this.el);
-    this.el.addEventListener("click", (e) => this.#click(e));
-    this.el.addEventListener("change", (e) => this.#change(e));
+    this.el.addEventListener("click", (e) => { if (!this.suspended) this.#click(e); });
+    this.el.addEventListener("change", (e) => { if (!this.suspended) this.#change(e); });
     // A stop's handle: drag it up or down the list, or press the arrow keys on it.
     this.el.addEventListener("pointerdown", (e) => this.#gripDown(e));
     this.el.addEventListener("pointermove", (e) => this.#gripMove(e));
@@ -379,6 +380,7 @@ export class TravelHud {
 
   unmount() {
     this.lifecycleEpoch = (this.lifecycleEpoch ?? 0) + 1;
+    this.landPlanCache = null;
     this.panelHtml = null;
     this.refreshGeneration = (this.refreshGeneration ?? 0) + 1;
     clearTimeout(this.tokenMoveTimer); this.tokenMoveTimer = null;
@@ -484,7 +486,12 @@ export class TravelHud {
         seaFallback: s.legModes?.[i] === "direct" ? null : { vessel: this.vessel(s.legVessels?.[i]) }
       }));
       this.landArgs = { terrainAt, baseMph };
-      result = frozen?.key===regionalKey ? structuredClone(frozen.result) : itinerary(this.graph, pts, { segments:network?.segments, stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph });
+      const terrain = this.travelBiomeQuery.terrain;
+      if (this.landPlanCache?.graph !== this.graph || this.landPlanCache?.terrain !== terrain || this.landPlanCache?.network !== network) {
+        this.landPlanCache = { graph: this.graph, terrain, network, plans: new Map() };
+      }
+      let failedLeg = 0;
+      result = frozen?.key===regionalKey ? structuredClone(frozen.result) : itinerary(this.graph, pts, { segments:network?.segments, landPlans: this.landPlanCache.plans, onUnroutable: i => { failedLeg = i; }, stays: s.stays, legModes: s.legModes ?? [], legs, seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph });
       this.regionalSnapshot=result&&(network||frozen)?{key:regionalKey,result:JSON.parse(JSON.stringify(result))}:null;
       // A route edit deliberately replans the remaining itinerary; map edits alone use the snapshot.
       // (Not while route edits are held on this client: it is written with the finished route.)
@@ -497,9 +504,7 @@ export class TravelHud {
       if (!result) {
         const sts = this.stops(), names = sts.map((w, i) => w.name ?? (i ? `stop ${i}` : "the start"));
         const under = (q) => { const T = terrainAt(q[0], q[1]); return T?.water ? "water" : T?.name ?? "land"; };
-        let leg = -1;
-        for (let i = 0; i + 1 < pts.length && leg < 0; i++) if (!itinerary(this.graph, [pts[i], pts[i + 1]], { legModes: [s.legModes?.[i] ?? null], legs: [legs[i]], seaPlan: (a, b, v) => this.seaPlan(a, b, v), mode: "roads", rules: this.rules, pace: s.pace, hoursPerDay: s.hours, terrainAt, milesPerPixel: this.sourceMap.milesPerPixel, baseMph })) leg = i;
-        const i = Math.max(0, leg);
+        const i = failedLeg;
         const roadOnly = METHODS[legs[i]?.method?.key]?.roadsOnly && legs[i]?.method?.key;
         const gap = (q) => roadGapMiles(this.graph, q, this.sourceMap.milesPerPixel), far = (q) => gap(q) > roadReachMiles(this.sourceMap.milesPerPixel);
         const offRoad = roadOnly ? (far(pts[i]) ? { name: names[i], miles: gap(pts[i]) } : far(pts[i + 1]) ? { name: names[i + 1], miles: gap(pts[i + 1]) } : null) : null;
@@ -1352,6 +1357,7 @@ export class TravelHud {
     // from them (they roll their camp checks in the scene), and even while the panel's redraw waits.
     const p = this.stops().length >= 2 ? this.progress() : null;
     if (p) { this.camp.watchChanged(p); this.camp.renderScene(p); } else this.camp.renderScene(null);
+    if (this.suspended) return;
     const f = document.activeElement;
     if (f && this.el.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && !["button", "checkbox", "radio"].includes(f.type)) {
       // The journey moved on (camp made, the rest begun, dawn): the field is let go, the panel follows.
@@ -1363,7 +1369,6 @@ export class TravelHud {
     this.stage = p ? `${p.status}|${p.night ?? ""}|${this.state.watch?.setup ?? ""}` : "";
     const gm = game.user.isGM, s = this.state, r = this.result;
     const rulesOnly = !gm && (s.show === "none" || this.stops().length < 2);
-    this.el.hidden = !!this.suspended;
     this.el.classList.toggle("collapsed", this.collapsed);
     const sts = this.stops();
     const title = rulesOnly ? "Travel rules" : !gm && s.show === "progress" ? "Journey progress" : s.name || (sts.length > 1 ? `${this.stopTitle(sts[0], "Start")} to ${this.stopTitle(sts.at(-1), "End")}` : "Travel");
@@ -1553,7 +1558,7 @@ export class TravelHud {
     const pinned = this.#pinned(stage === "decide" ? campHtml : "");
     // The pinned footer (ui-shell.mjs): Undo when there is a route change to undo, editing, then More.
     const editable = gm && !inCamp && pr?.status !== "arrived" && !this.mode;
-    const foot = gm ? `<footer class="kgr-sh-foot">${this.history?.length ? `<button data-act="undo" title="Undo the last route change (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo route change</button>` : ""}${editable ? `<button data-act="edit"><i class="fa-solid fa-route"></i> Edit route</button>${r ? `<button data-act="place-encounter"><i class="fa-solid fa-triangle-exclamation"></i> Add encounters</button>` : ""}` : ""}
+    const foot = gm ? `<footer class="kgr-sh-foot">${this.history?.length ? `<button data-act="undo" title="Undo the last route change (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i> Undo route change</button>` : ""}${editable ? `<button data-act="edit"><i class="fa-solid fa-route"></i> Edit route</button>` : ""}
       <span class="kgr-sh-sp"></span><button data-act="more" class="more ${this.moreOpen ? "on" : ""}" aria-expanded="${this.moreOpen ? "true" : "false"}">More <i class="fa-solid fa-caret-${this.moreOpen ? "up" : "down"}"></i></button>
       ${this.moreOpen ? `<div class="more-menu" role="menu"><button data-act="recalc" role="menuitem" ${this.stops().length > 1 ? "" : "disabled"} title="From the start through your stops to the end, along the roads"><i class="fa-solid fa-arrows-rotate"></i> Recalculate the route</button><button data-act="reset" role="menuitem" ${this.state.trip ? "" : "disabled"}><i class="fa-solid fa-backward-fast"></i> Back to the start</button><button data-act="clear" role="menuitem" class="danger"><i class="fa-solid fa-trash"></i> Clear the route</button></div>` : ""}</footer>` : "";
     const encRows = gm ? this.#encounterRows() : [];
@@ -1564,7 +1569,7 @@ export class TravelHud {
     const encounter = gm && pr?.status === "encounter" && pr.encounter?.kind !== "town" ? this.#encounterDetail(pr) : "";
     const topError = failedLeg < 0 ? failed : "";
     const main = activeTab === "camp" ? `${campHtml}${encounter}`
-      : gm && activeTab === "enc" ? `${hint}${this.#encounterTab(encRows)}`
+      : gm && activeTab === "enc" ? `${hint}${editable && r ? '<button type="button" data-act="place-encounter">Add encounter</button>' : ""}${this.#encounterTab(encRows)}`
       : activeTab === "rules" ? this.#rulesTab()
       : activeTab === "hist" ? historyHtml
       : `${hint}${stage === "sea" ? campHtml : ""}${encounter}${this.#onward(pr)}${settings}${whereTo}${topError}${list}${addStop}${journey}${warn}`;
@@ -1820,9 +1825,10 @@ export class TravelHud {
       const places=(this.getDestinations?.()??[]).filter(p=>!p.hidden&&!['territory','domain'].includes(p.kind)&&!['Road','Trail'].includes(p.class)).sort((a,b)=>a.name.localeCompare(b.name));
       if(!places.length)return ui.notifications.info("No destinations on the linked maps yet.");
       const targetScene=this.scene,targetTrip=journeyKey(this.state);
-      const picked=await RealmDialog.wait({window:{title:"Travel destination"},rejectClose:false,content:`<div class="form-group"><label>Find a place</label><input name="filter" type="search" placeholder="Type a name"></div><div class="form-group"><label>Destination</label><select name="place" size="10">${places.map((p,i)=>`<option value="${i}">${esc(p.name)}${p.regionalTitle?` (${esc(p.regionalTitle)})`:''}</option>`).join('')}</select></div>`,render:(_e,d)=>{const el=d.element;el.querySelector('input').oninput=e=>{const options=[...el.querySelectorAll('option')];options.forEach(o=>o.hidden=!o.textContent.toLowerCase().includes(e.target.value.toLowerCase()));const first=options.find(o=>!o.hidden);if(first)el.querySelector('select').value=first.value;const add=el.querySelector('[data-action=add]');if(add)add.disabled=!first;};},buttons:[{action:'add',label:'Add destination',callback:(_e,b)=>b.form.elements.place.value},{action:'cancel',label:'Cancel',callback:()=>null}]});
-      if(picked==null||picked===false||picked===''||this.scene!==targetScene||journeyKey(this.state)!==targetTrip)return;const place=places[Number(picked)];if(!place)return;
-      return this.save({waypoints:[...this.state.waypoints,{lon:place.lon,lat:place.lat,name:place.name,stop:true}]},{scene:targetScene,expectedTrip:targetTrip});
+      return this.chooseDestination?.(places, (place) => {
+        if (!this.leader || this.scene !== targetScene || journeyKey(this.state) !== targetTrip) return;
+        return this.save({waypoints:[...this.state.waypoints,{lon:place.lon,lat:place.lat,name:place.name,stop:true}]},{scene:targetScene,expectedTrip:targetTrip});
+      });
     }
     if (btn.dataset.set) return this.save({ [btn.dataset.set]: btn.dataset.value });
     if (act === "edit") { this.addingStop = false; this.#setMode(this.mode === "route" ? null : "route"); return this.render(); }

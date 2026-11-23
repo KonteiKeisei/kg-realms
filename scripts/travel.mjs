@@ -256,6 +256,41 @@ export function roadGapMiles(graph, p, milesPerPixel) {
  * the network), hooks (network nodes tried at each end) }.
  * Returns { legs: [{ kind, name, pts, miles, terrain }], miles, normalHours } or null.
  */
+const roadNodeBins = new WeakMap();
+const ROAD_BIN_SIZE = 512;
+
+function nearbyRoadNodes(graph, point, radius, limit) {
+  const nodes = graph.nodes;
+  let index = roadNodeBins.get(graph);
+  if (!index || index.size !== nodes.size) {
+    const bins = new Map();
+    let order = 0;
+    for (const n of nodes.values()) {
+      const key = `${Math.floor(n.at[0] / ROAD_BIN_SIZE)},${Math.floor(n.at[1] / ROAD_BIN_SIZE)}`;
+      if (!bins.has(key)) bins.set(key, []);
+      bins.get(key).push({ n, order: order++ });
+    }
+    index = { size: nodes.size, bins };
+    roadNodeBins.set(graph, index);
+  }
+  const [x, y] = point, cell = value => Math.floor(value / ROAD_BIN_SIZE);
+  const x0 = cell(x - radius), x1 = cell(x + radius), y0 = cell(y - radius), y1 = cell(y + radius);
+  const matches = [];
+  const collect = (n, order) => {
+    const d = Math.hypot(n.at[0] - x, n.at[1] - y);
+    if (d <= radius) matches.push({ n, d, order });
+  };
+  if (Number.isFinite(radius) && (x1 - x0 + 1) * (y1 - y0 + 1) <= nodes.size) {
+    for (let bx = x0; bx <= x1; bx++) for (let by = y0; by <= y1; by++) {
+      for (const { n, order } of index.bins.get(`${bx},${by}`) ?? []) collect(n, order);
+    }
+  } else {
+    let order = 0;
+    for (const n of nodes.values()) collect(n, order++);
+  }
+  return matches.sort((a, b) => a.d - b.d || a.order - b.order).slice(0, limit);
+}
+
 export function planJourney(graph, from, to, { mode = "best", trailRule = false, rules = "2014", pace = "normal", terrainAt = () => PLAINS, milesPerPixel, hookPx = 400, hooks = 12, offroadBias = 1.4, segments = null } = {}) {
   const opts = { trailRule, rules, pace };
   // When choosing the way, going off-road counts more (rough going, no road to follow).
@@ -277,10 +312,7 @@ export function planJourney(graph, from, to, { mode = "best", trailRule = false,
   if (mode === "roadsOnly" && (roadGapMiles(graph, from, mpp) > roadReachMiles(mpp) || roadGapMiles(graph, to, mpp) > roadReachMiles(mpp))) return null;
   if (mode === "direct" || !graph.nodes.size) return finish(direct());
   // Network nodes near each end, joined off-road.
-  const all = [...graph.nodes.values()];
-  const near = (p) => all.map((n) => ({ n, d: Math.hypot(n.at[0] - p[0], n.at[1] - p[1]) }))
-    .filter((x) => x.d <= hookPx).sort((a, b) => a.d - b.d).slice(0, hooks);
-  const starts = near(from), goals = near(to);
+  const starts = nearbyRoadNodes(graph, from, hookPx, hooks), goals = nearbyRoadNodes(graph, to, hookPx, hooks);
   if (!starts.length || !goals.length) return mode === "roadsOnly" ? null : finish(direct());
   const goalCost = new Map(goals.map(({ n }) => { const c = offroadCostB(n.at, to); return [n.k, c.water ? Infinity : c.cost]; }));
   // Dijkstra over hours (at 1 mph scale; pace scales all legs alike).
@@ -467,9 +499,9 @@ export function methodSpeed(method, { pace = "normal", rules = "2014", trailRule
  * ends it goes overland. A crewed ship sails round the clock: its stretch of the journey is in
  * `sail` ([{ from, to }] travel hours), where the party does not stop to camp.
  */
-export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: how = [], seaPlan = null, mode = "best", rules = "2014", pace: legPace = "normal", hoursPerDay: legHours = 8, trailRule = false, terrainAt = () => PLAINS, milesPerPixel, encounters = [], baseMph = 3, segments = null } = {}) {
+export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: how = [], seaPlan = null, mode = "best", rules = "2014", pace: legPace = "normal", hoursPerDay: legHours = 8, trailRule = false, terrainAt = () => PLAINS, milesPerPixel, encounters = [], baseMph = 3, segments = null, onUnroutable, landPlans } = {}) {
   const legs = [], days = [], path = [], ground = { road: 0, trail: 0, offroad: 0, water: 0 }, track = [], legEnds = [], sail = [];
-  let clock = 0;
+  let clock = 0, miles = 0;
   for (let i = 0; i + 1 < waypoints.length; i++) {
     const from = waypoints[i], to = waypoints[i + 1], h = how[i] ?? {};
     // A leg already travelled keeps the pace and hours it was travelled at (0.97.3).
@@ -490,7 +522,15 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
     const m = METHODS[h.method?.key]?.roadsOnly ? (h.pinned ? "roads" : "roadsOnly") : flying || legModes[i] === "direct" ? "direct" : mode;
     let bySea = !!plan, autoSea = false;
     if (!plan) {
-      plan = planJourney(graph, from, to, { mode: m, rules, pace, trailRule, terrainAt: flying ? () => PLAINS : terrainAt, milesPerPixel, hookPx: 2000, segments });
+      const key = landPlans && JSON.stringify([from, to, m, rules, pace, trailRule, flying, milesPerPixel]);
+      if (landPlans?.has(key)) plan = landPlans.get(key);
+      else {
+        plan = planJourney(graph, from, to, { mode: m, rules, pace, trailRule, terrainAt: flying ? () => PLAINS : terrainAt, milesPerPixel, hookPx: 2000, segments });
+        if (landPlans) {
+          if (landPlans.size >= 32) landPlans.delete(landPlans.keys().next().value);
+          landPlans.set(key, plan);
+        }
+      }
       // No way overland (an island, a port cut off by water): by boat, if water joins the two (0.75.5).
       if (!plan && !flying && h.seaFallback && seaPlan) {
         plan = seaPlan(from, to, h.seaFallback.vessel);
@@ -501,7 +541,7 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
           sched = schedule(plan, { pace, hoursPerDay: perDay, terrainAt, milesPerPixel, encounters });
         }
       }
-      if (!plan) return null;
+      if (!plan) { onUnroutable?.(i); return null; }
       if (!autoSea) sched = schedule(plan, { pace, hoursPerDay, terrainAt: flying ? () => PLAINS : terrainAt, trailRule, rules, milesPerPixel, encounters, baseMph, speedAt: h.method ? methodSpeed(h.method, { pace, rules, trailRule }) : null });
     }
     if (perDay >= 24) sail.push({ from: clock, to: clock + sched.hours });
@@ -512,17 +552,18 @@ export function itinerary(graph, waypoints, { stays = [], legModes = [], legs: h
         start: pointAtHour(sched.samples, (d.day - 1) * perDay), end: pointAtHour(sched.samples, endHour), encounters: d.encounters });
     }
     for (const sm of sched.samples) path.push({ at: sm.at, day: first + Math.floor(sm.hour / perDay) + 1 });
-    for (const sm of sched.samples) track.push({ ...sm, ...(segments?{miles:legs.reduce((n,l)=>n+l.miles,0)+(sm.miles??0)}:{}), hour: clock + sm.hour, leg: i });
+    for (const sm of sched.samples) track.push({ ...sm, ...(segments?{miles:miles+(sm.miles??0)}:{}), hour: clock + sm.hour, leg: i });
     const startHour = clock;
     clock += sched.hours;
+    miles += plan.miles;
     legEnds.push(clock);
     for (const l of plan.legs) ground[WATER_KINDS.has(l.kind) ? "water" : l.kind] += l.miles;
     for (let k = 0; k < (stays[i] ?? 0); k++) days.push({ day: days.length + 1, type: "stay", leg: i, miles: 0, hours: 0, start: to, end: to, encounters: [] });
     legs.push({ from, to, plan, sched, days: sched.days.length, miles: plan.miles, hours: sched.hours, start: startHour, mode: m, method: h.method?.key ?? "foot", sea: bySea, autoSea, crewed: perDay >= 24 });
   }
   path.push({ at: waypoints.at(-1), day: days.length });
-  track.push({ at: waypoints.at(-1), hour: clock, leg: legs.length - 1, ...(segments?{worldId:track.at(-1)?.worldId,regionTitle:track.at(-1)?.regionTitle,regionalFallback:track.at(-1)?.regionalFallback,terrain:track.at(-1)?.terrain,miles:legs.reduce((n,l)=>n+l.miles,0)}:{}) });
-  return { legs, days, path, track, legEnds, sail, hours: clock, miles: legs.reduce((s, l) => s + l.miles, 0), ground };
+  track.push({ at: waypoints.at(-1), hour: clock, leg: legs.length - 1, ...(segments?{worldId:track.at(-1)?.worldId,regionTitle:track.at(-1)?.regionTitle,regionalFallback:track.at(-1)?.regionalFallback,terrain:track.at(-1)?.terrain,miles}:{}) });
+  return { legs, days, path, track, legEnds, sail, hours: clock, miles, ground };
 }
 
 export function encounterDistance(e,p) {

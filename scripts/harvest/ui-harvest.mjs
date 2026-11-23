@@ -6,8 +6,7 @@
 // Start harvest carries it out in the harvest run (run.mjs), the camp activities' step view, shared
 // with the players: one step for each creature, its rolls with each person's bonus, the GM's rerolls
 // and rulings, then Done, which moves the clock on and logs it in the Log tab, a chat card and the
-// Harvests journal. A practice run is the GM's alone, rolled quietly, nothing kept. Closing the window
-// ends the session.
+// Harvests journal. A practice run is the GM's alone, rolled quietly, nothing kept.
 import { shellHead, shellTabs, movable, placeKept, isLocked, toggleLocked, applyMin } from "../ui-shell.mjs";
 import { uiBounds } from "../ui-editbar.mjs";
 import { ruleTooltip, ruleParagraphs } from "../travel-rules.mjs";
@@ -69,10 +68,34 @@ export class HarvestWindow {
   get priceScale() { return Number(this.hud?.priceScale) || 1; }
   get running() { return !!this.runner.run; }
 
+  registerSettingsMenu() {
+    const harvest = this;
+    class HarvestRules extends foundry.applications.api.DialogV2 {
+      constructor() {
+        super({
+          window: { title: "Harvest difficulty", icon: "fa-solid fa-sliders" },
+          position: { width: 500 },
+          classes: ["kgr-ui", "kgr-harvest-settings"],
+          content: harvest.#dcsTab(),
+          buttons: [
+            { action: "reset", label: "Restore defaults", callback: () => harvest.#saveDcs(null) },
+            { action: "save", label: "Save DCs", default: true, callback: (_event, button) => harvest.#saveDcs(button.form) },
+            { action: "cancel", label: "Cancel" }
+          ]
+        });
+      }
+    }
+    game.settings.registerMenu(MODULE_ID, "harvestRulesMenu", {
+      name: "Harvest difficulty", label: "Configure harvest DCs", hint: "Base DC, skill adjustments and difficulty by part.",
+      icon: "fa-solid fa-sliders", restricted: true, type: HarvestRules
+    });
+  }
+
   /** Open (or bring up) the window; a token to open on, from its token HUD. */
   async open(token = null) {
     if (!game.user.isGM) return;
     if (!this.el) this.#start();
+    this.el.hidden = false;
     this.#scan();
     if (token) { const c = this.creatures.find((x) => x.tokenId === (token.document ?? token).id); if (c) this.openId = c.id; }
     this.tab = "creatures";
@@ -251,11 +274,11 @@ export class HarvestWindow {
   /* ------------------------------------------------------------------ render */
 
   render() {
-    if (!this.el) return;
+    if (!this.el || this.el.hidden) return;
     const scene = game.scenes.get(this.sceneId);
-    const tabs = shellTabs([["creatures", "Creatures", "fa-paw", this.creatures.length], ["log", "Log", "fa-scroll", this.runs.length || null], ["dcs", "DCs", "fa-sliders"]], this.tab);
-    const body = this.tab === "log" ? this.#logTab() : this.tab === "dcs" ? this.#dcsTab() : this.#creaturesTab();
-    this.el.innerHTML = shellHead({ icon: "fa-scissors", eyebrow: "Harvest", title: scene?.name ?? "Harvest", lock: { attr: 'data-act="lock"', on: isLocked("harvest") }, min: { attr: 'data-act="min"', on: !!this.min, title: this.min ? "Show the harvest" : "Minimise" }, close: { attr: 'data-act="close"', title: "Close: ends this harvest" } })
+    const tabs = shellTabs([["creatures", "Creatures", "fa-paw", this.creatures.length], ["log", "Log", "fa-scroll", this.runs.length || null]], this.tab);
+    const body = this.tab === "log" ? this.#logTab() : this.#creaturesTab();
+    this.el.innerHTML = shellHead({ icon: "fa-scissors", eyebrow: "Harvest", title: scene?.name ?? "Harvest", lock: { attr: 'data-act="lock"', on: isLocked("harvest") }, min: { attr: 'data-act="min"', on: !!this.min, title: this.min ? "Show the harvest" : "Minimise" }, close: { attr: 'data-act="close"', title: this.running ? "Hide harvest" : "Close harvest" } })
       + tabs + `<div class="hv-body">${body}</div>` + this.#pinned() + this.#foot();
     this.el.classList.toggle("locked", isLocked("harvest"));
     applyMin(this.el, this.min);
@@ -340,7 +363,6 @@ export class HarvestWindow {
 
   /** What happens now, and the one main button. */
   #pinned() {
-    if (this.tab === "dcs") return `<div class="hv-pin"><p class="hv-tell">Changes apply to every harvest in this world.</p><button type="button" class="primary" data-act="save-dcs" ${this.running ? "disabled" : ""}>Save DCs</button></div>`;
     if (this.running) {
       const r = this.runner.run, s = this.runner.step, done = r.steps.filter((x) => x.done).length;
       return `<div class="hv-pin"><div class="hv-pos"><b>${r.practice ? "Practice run" : "Harvest"} under way</b><small>${s ? `${esc(s.name)} · step ${r.at + 1} of ${r.steps.length + 1}` : "done: finish it in the harvest"} · ${done} of ${r.steps.length} confirmed</small><span class="sp"></span>${rule(HARVEST_RULES.run)}</div>
@@ -361,7 +383,6 @@ export class HarvestWindow {
   }
 
   #foot() {
-    if (this.tab === "dcs") return `<div class="kgr-sh-foot"><button type="button" data-act="reset-dcs" ${this.running ? "disabled" : ""}>Reset to defaults</button></div>`;
     if (this.running) return `<div class="kgr-sh-foot"><button type="button" data-act="call-off">Call off the harvest</button><span class="kgr-sh-sp"></span></div>`;
     const fresh = this.#newOnScene();
     return `<div class="kgr-sh-foot"><span class="kgr-sh-sp"></span><button type="button" data-act="scan" ${fresh ? "" : "disabled"}>Add downed creatures${fresh ? ` (${fresh} new)` : ""}</button></div>`;
@@ -376,7 +397,12 @@ export class HarvestWindow {
     if (tab) { this.tab = tab.dataset.tab; return this.render(); }
     if (!b) return;
     const act = b.dataset.act, c = this.creatures.find((x) => x.id === b.dataset.id);
-    if (act === "close") return this.close();
+    if (act === "close") {
+      if (!this.running) return this.close();
+      this.#closeMenu();
+      this.el.hidden = true;
+      return;
+    }
     if (act === "lock") { await toggleLocked("harvest"); return this.render(); }
     if (act === "min") { this.min = !this.min; return this.render(); }
     if (act === "fold" && c) { this.openId = this.openId === c.id ? null : c.id; return this.render(); }
@@ -388,13 +414,11 @@ export class HarvestWindow {
     if (act === "remove" && c) { this.creatures = this.creatures.filter((x) => x !== c); return this.render(); }
     if (act === "scan") { this.#scan(); return this.render(); }
     if (act === "start") return this.#begin();
-    if (act === "save-dcs") return this.#saveDcs();
-    if (act === "reset-dcs") { await game.settings.set(MODULE_ID, "harvestDCs", {}); ui.notifications.info("KG Realms: harvest DCs are back to their defaults."); return this.render(); }
   }
 
   /** While a harvest is under way, who harvests what is fixed. */
   #lockedOut(act) {
-    if (!this.running || !["unassign", "remove", "skill", "pick", "offer", "assign", "add", "practice", "start", "save-dcs", "reset-dcs"].includes(act)) return false;
+    if (!this.running || !["unassign", "remove", "skill", "pick", "offer", "assign", "add", "practice", "start"].includes(act)) return false;
     ui.notifications.warn("KG Realms: a harvest is under way. Finish it or call it off to change who harvests what.");
     return true;
   }
@@ -408,11 +432,16 @@ export class HarvestWindow {
     if (t.dataset.act === "offer" && c && t.checked) return this.#offer(c, t.dataset.key).then(() => this.render());
   }
 
-  async #saveDcs() {
+  async #saveDcs(form) {
+    if (this.running) return ui.notifications.warn("Finish or call off the current harvest before changing DCs.");
+    if (!form) {
+      await game.settings.set(MODULE_ID, "harvestDCs", {});
+      return ui.notifications.info("KG Realms: harvest DCs restored.");
+    }
     const n = (v, d) => (Number.isFinite(Number(v)) && String(v).trim() !== "" ? Number(v) : d);
     const d = this.dcs, out = { base: d.base, survival: d.survival, medicine: d.medicine, parts: { ...d.parts } };
-    for (const i of this.el.querySelectorAll("[data-dc]")) out[i.dataset.dc] = n(i.value, d[i.dataset.dc]);
-    for (const i of this.el.querySelectorAll("[data-part]")) out.parts[i.dataset.part] = n(i.value, d.parts[i.dataset.part]);
+    for (const i of form.querySelectorAll("[data-dc]")) out[i.dataset.dc] = n(i.value, d[i.dataset.dc]);
+    for (const i of form.querySelectorAll("[data-part]")) out.parts[i.dataset.part] = n(i.value, d.parts[i.dataset.part]);
     await game.settings.set(MODULE_ID, "harvestDCs", out);
     ui.notifications.info("KG Realms: harvest DCs saved.");
     this.render();

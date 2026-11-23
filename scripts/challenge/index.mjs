@@ -1,5 +1,5 @@
 // Skill challenges (0.97.0): where they hook into Foundry.
-//  - The GM opens the builder from the scene controls (Token tools, "Skill challenge"), the Scenes
+//  - The GM opens the builder from the Realms scene controls, the Scenes
 //    sidebar's menu, or Scene Config, on a Site or local map (a theater or battlemap scene). Realm and
 //    region maps don't take them.
 //  - Everyone looking at a scene with a challenge under way sees its panel, kept up to date as the scene's
@@ -21,13 +21,7 @@ export function installChallenges({ party, sceneLevel, onChange }) {
     return builder.open(scene).catch(fail);
   };
 
-  Hooks.on("getSceneControlButtons", (controls) => {
-    if (!game.user.isGM || !allowed(canvas?.scene)) return;
-    const tokens = controls.tokens ?? (Array.isArray(controls) ? controls.find((c) => c.name === "token") : null);
-    if (!tokens) return;
-    const tool = { name: "kgRealmsChallenge", title: sceneRun(canvas.scene) ? "Skill challenge (running)" : "Skill challenge", icon: "fa-solid fa-dice-d20", button: true, order: 102, onChange: () => open(canvas.scene), onClick: () => open(canvas.scene) };
-    if (Array.isArray(tokens.tools)) tokens.tools.push(tool); else tokens.tools.kgRealmsChallenge = tool;
-  });
+
 
   const sceneFrom = (li) => { const el = li instanceof HTMLElement ? li : li?.[0]; return game.scenes.get(el?.dataset?.entryId ?? el?.dataset?.documentId); };
   for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (_app, options) => {
@@ -61,7 +55,7 @@ export function installChallenges({ party, sceneLevel, onChange }) {
   });
 
   return {
-    runner, builder,
+    runner, builder, allowed,
     /** What the encounter box shows for a scene: { name, running }, or null when it has no challenge. */
     about(scene) {
       if (!allowed(scene)) return null;

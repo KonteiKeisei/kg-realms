@@ -56,7 +56,7 @@ export class CityHud {
     for (const h of ["updateToken", "createToken", "deleteToken", "updateNote", "createNote", "deleteNote", "updateActor"]) Hooks.on(h, (doc) => { if (this.el && cityHudChange(h, doc)) this.later(); });
     Hooks.on("updateUser", (user, changes) => { if (foundry.utils.hasProperty(changes, `flags.${ID}.cityAsk`)) this.later(); });
     // The clock moving changes only the time shown: not a rebuild of the HUD (each second, with Calendaria).
-    Hooks.on("updateWorldTime", () => { if (this.view === "rest") this.#clock(); });
+    Hooks.on("updateWorldTime", () => { if (this.view === "rest" && !this.el?.classList.contains("kgr-editing")) this.#clock(); });
     // Clicking a party's token: that party (at rest), or that journey (travelling).
     Hooks.on("controlToken", (token, on) => {
       if (!on || token.actor?.type !== "group" || !this.el) return;
@@ -79,7 +79,7 @@ export class CityHud {
     document.body.append(el);
     makeMovable(el, () => this.dock());
     this.offDock = observeMapUi(() => this.dock());
-    el.addEventListener("click", (e) => this.action(e).catch((error) => ui.notifications.error(error.message)));
+    el.addEventListener("click", (e) => { if (!e.target.closest(".kgr-hud-editor")) this.action(e).catch((error) => ui.notifications.error(error.message)); });
     el.addEventListener("input", (e) => { if (e.target.matches("[data-hud-search]")) { this.query = e.target.value; this.#matches(); } });
     el.addEventListener("pointerover", (e) => { const row = e.target.closest("[data-note]"); this.#lightNote(row?.dataset.note ?? null); });
     el.addEventListener("pointerleave", () => this.#lightNote(null));
@@ -127,7 +127,7 @@ export class CityHud {
    * or All when several journeys run at once.
    */
   render() {
-    if (!this.el) return;
+    if (!this.el || this.el.classList.contains("kgr-editing")) return;
     const planning = !!this.travel.el, list = this.journeys(), resting = this.resting();
     const restId = this.focus?.startsWith?.("rest:") ? this.focus.slice(5) : null;
     if (restId ? !resting.some((t) => t.actor.id === restId) : this.focus && this.focus !== "all" && !list.some(([id]) => id === this.focus)) this.focus = null;
@@ -146,7 +146,7 @@ export class CityHud {
 
   /** The clock moved: the journey tabs' progress, and the All view's times. */
   tick() {
-    if (!this.el || this.view === "plan") return;
+    if (!this.el || this.view === "plan" || this.el.classList.contains("kgr-editing")) return;
     if (this.view === "all") return this.render();
     if (!this.el.querySelector(".kgr-city-tabs").hidden) this.#tabs(this.journeys(), this.resting(), this.shownFocus);
   }

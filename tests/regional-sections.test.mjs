@@ -21,6 +21,28 @@ function fixture() {
 }
 const fc = (...features) => ({ type: 'FeatureCollection', features });
 
+test("regional preparation reuses crossings for the same inputs and rebuilds after a map edit", async () => {
+  const { parent, data, link, road } = fixture();
+  gmGame();
+  game.scenes = new Map([[link.parentScene, { id: link.parentScene }]]);
+  game.settings.get = (_module, key) => key === "regionalMaps" ? { dale: link } : null;
+  let loads = 0, revision = 0;
+  const maps = new RegionalMaps({
+    loadWorld: async id => id === "realm" ? parent : data,
+    getRoutes: async () => { loads++; return fc(road("great", [[80, 115], [150, 115]])); },
+    revision: () => revision
+  });
+  await Promise.all([maps.prepare("realm"), maps.prepare("dale")]);
+  assert.equal(loads, 1);
+  const previous = maps.sections.dale;
+  await maps.prepare("realm");
+  assert.equal(maps.sections.dale, previous);
+  revision++;
+  await maps.prepare("realm");
+  assert.equal(loads, 2);
+  assert.notEqual(maps.sections.dale, previous);
+});
+
 test('a realm road through the outline gets a section from where it enters to where it leaves', () => {
   const { road, args } = fixture(), routes = fc(road('great', [[80, 115], [115, 112], [150, 115]]));
   const entries = regionalEntrances(...args(routes)), { roads } = regionalSections(...args(routes));

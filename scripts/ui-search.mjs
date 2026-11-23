@@ -39,14 +39,16 @@ export class RealmSearch {
     window.removeEventListener("keydown", this.onKeyDown, true);
     this.el?.remove();
     this.el = null;
+    this.selection = null;
   }
 
-  open() {
+  open(selection = null) {
     this.close();
+    this.selection = selection;
     this.el = document.createElement("div");
     this.el.className = "kgr-ui kgr-panel kgr-search";
     this.el.innerHTML = `
-      <div class="bar"><i class="fa-solid fa-magnifying-glass"></i><input type="text" placeholder="Search places" autocomplete="off" spellcheck="false"><button type="button" class="close" aria-label="Close search" title="Close search"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="bar"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" aria-label="${selection ? "Find a travel destination" : "Search places"}" placeholder="${selection ? "Find a travel destination" : "Search places"}" autocomplete="off" spellcheck="false"><button type="button" class="close" aria-label="Close search" title="Close search"><i class="fa-solid fa-xmark"></i></button></div>
       <div class="list"></div>`;
     document.body.append(this.el);
     window.addEventListener("keydown", this.onKeyDown, true);
@@ -72,12 +74,12 @@ export class RealmSearch {
   }
 
   #run(query) {
-    const data = this.getData();
+    const data = this.selection?.data ?? this.getData();
     this.results = searchWorld(query, data).map((r) => ({ ...r, here: this.#inScene(r.item) }))
       .sort((a, b) => ((a.type === "local") - (b.type === "local")) || (b.here - a.here) || (b.score - a.score));
     // The settlement's named streets, after its places: a name starting with the words typed first.
     const q = query.trim().toLowerCase().replace(/^the\s+/, "");
-    if (q) this.results.push(...(this.getStreets?.() ?? []).map((s) => { const n = s.name.toLowerCase().replace(/^the\s+/, ""); return n.includes(q) ? { type: "street", item: s, here: true, score: n.startsWith(q) ? 2 : 1 } : null; })
+    if (q && !this.selection) this.results.push(...(this.getStreets?.() ?? []).map((s) => { const n = s.name.toLowerCase().replace(/^the\s+/, ""); return n.includes(q) ? { type: "street", item: s, here: true, score: n.startsWith(q) ? 2 : 1 } : null; })
       .filter(Boolean).sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, 12));
     this.active = 0;
     const list = this.el.querySelector(".list");
@@ -88,10 +90,10 @@ export class RealmSearch {
       const icon = r.type === "street" ? "fa-road" : r.type === "region" ? "fa-flag" : r.type === "local" ? (CATEGORIES[it.category] ?? CATEGORIES.other).icon : iconFor(it);
       const kind = { avenue: "Avenue", street: "Street", lane: "Lane", alley: "Alley" }[it.kind] ?? "Street";
       const where = r.type === "street" ? kind : r.type === "region" ? placeClass(it) : r.type === "local" ? `${(CATEGORIES[it.category] ?? CATEGORIES.other).label}, in ${it.map}` : [placeClass(it), it.location?.split("→").pop()?.trim()].filter(Boolean).join(", ");
-      return `<div class="row ${i === 0 ? "active" : ""} ${r.here ? "" : "away"}" data-i="${i}">
+      return `<button type="button" class="row ${i === 0 ? "active" : ""} ${r.here || this.selection ? "" : "away"}" data-i="${i}">
         <span class="ic ${it.gold ? "gold" : ""}"><i class="fa-solid ${icon}"></i></span>
         <span class="name">${esc(it.name)}</span>
-        <span class="where">${esc(where ?? "")}${r.here ? "" : " · off this map"}</span></div>`;
+        <span class="where">${esc(where ?? "")}${r.here ? "" : " · off this map"}</span></button>`;
     }).join("");
     for (const row of list.querySelectorAll(".row")) row.addEventListener("click", () => this.#pick(this.results[Number(row.dataset.i)]));
   }
@@ -105,6 +107,11 @@ export class RealmSearch {
 
   async #pick(r) {
     if (!r) return;
+    if (this.selection) {
+      const { pick } = this.selection;
+      this.close();
+      return pick(r.item);
+    }
     if (r.type === "local") { this.close(); return this.goToLocal?.(r.item); }
     if (r.type === "street") { this.close(); return this.showStreet?.(r.item.name); }
     const layer = this.getLayer();

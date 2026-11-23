@@ -23,6 +23,21 @@ test('the scene-designated party token is always the origin, and the economy far
   assert.equal(walletValue(f.actors.get('a').system.currency),95);assert.equal(game.time.worldTime,1000);
   await assert.rejects(()=>f.controller.resumeBoarding(),/no longer boarding/);assert.equal(f.batches(),1);
 });
+
+test("settlement previews reuse legs without rounding the cached result or keeping an old road revision", () => {
+  const { controller, scene } = setup();
+  const target = { x: 1839, y: 0 };
+  const first = controller.preview(scene, target, "mixed");
+  const second = controller.preview(scene, target, "mixed");
+  assert.deepEqual(second, first);
+  const cached = controller.graphs.get(scene.id);
+  assert.equal(cached.legs.size, 1);
+  const original = scene.getFlag.bind(scene);
+  const changed = { ...original("kg-realms", "cityRoads"), revision: 2 };
+  scene.getFlag = (module, key) => key === "cityRoads" ? changed : original(module, key);
+  assert.equal(controller.preview(scene, target, "mixed").plan.roadRevision, 2);
+  assert.notEqual(controller.graphs.get(scene.id).legs, cached.legs);
+});
 test('a lost payment reply resumes only unpaid riders and never charges a marked actor twice',async()=>{
   const f=setup({fail:true});await assert.rejects(()=>f.controller.start(f.scene,{x:2000,y:0},{mode:'mixed',riderIds:['a','b']}),/Lost reply/);
   assert.equal(f.controller.ride.phase,'boarding');assert.equal(walletValue(f.actors.get('a').system.currency),50);assert.equal(walletValue(f.actors.get('b').system.currency),100);

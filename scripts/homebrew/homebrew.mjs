@@ -31,7 +31,7 @@ const isVideo = (src) => /\.(webm|mp4|m4v|ogv)(\?|$)/i.test(src ?? "");
 let reloading = false;
 
 /** Init: the setting, then every saved homebrew world registered (before world modules, which win). */
-export function registerHomebrew() {
+export function registerHomebrew({ makeLocalMap } = {}) {
   game.settings.register(ID, SETTING, { scope: "world", config: false, type: Object, default: {} });
   registerWorldTiles();
   registerSceneSetup();
@@ -55,7 +55,7 @@ export function registerHomebrew() {
   for (const def of Object.values(game.settings.get(ID, SETTING) ?? {})) {
     try { registerWorld(def); } catch (err) { console.warn(`${ID} | homebrew world ${def?.id}:`, err); }
   }
-  for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (app, options) => contextOptions(options));
+  for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (_app, options) => contextOptions(options, makeLocalMap));
   Hooks.once("ready", async () => {
     await adoptPackagedScenes();
     if (game.user !== game.users.activeGM) return;
@@ -193,12 +193,37 @@ async function resheetWorlds() {
   }
 }
 
-function contextOptions(options) {
+function contextOptions(options, makeLocalMap) {
   if (!Array.isArray(options)) return;
   const gm = () => game.user.isGM;
+  const canBuild = scene => {
+    const src = backgroundOf(scene);
+    return !!src && !isVideo(src);
+  };
   options.push(...[
-    { name: "Make realm world", icon: '<i class="fa-solid fa-earth-europe"></i>', condition: (li) => { const s = sceneOf(li),src=backgroundOf(s); return gm() && !!src && !isVideo(src) && !s.getFlag(ID, "world") && !s.getFlag(ID, "localMap"); }, callback: (li) => makeRealmWorld(sceneOf(li)) },
-    { name: "Make regional map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: li=>{const s=sceneOf(li),src=backgroundOf(s);return gm()&&!!src&&!isVideo(src)&&!s.getFlag(ID,"world")&&!s.getFlag(ID,"localMap");}, callback: async li=>{const scene=sceneOf(li);await makeRealmWorld(scene,{regional:true});if(scene?.getFlag(ID,"world")){await scene.setFlag(ID,"regionalMap",true);await game.modules.get(ID).api.regionalMaps.configure(scene);}} },
+    { name: "Make a Realms map…", icon: '<i class="fa-solid fa-map"></i>',
+      condition: li => {
+        const scene = sceneOf(li);
+        return gm() && !!scene && !scene.getFlag(ID, "world") && !scene.getFlag(ID, "localMap") && (makeLocalMap || canBuild(scene));
+      },
+      callback: async li => {
+        const scene = sceneOf(li);
+        const button = (action, label) => ({ action, label, callback: () => action });
+        const buttons = canBuild(scene) ? [button("realm", "Realm"), button("regional", "Regional")] : [];
+        if (makeLocalMap) buttons.push(button("local", "Local"));
+        buttons.push(button("cancel", "Cancel"));
+        const kind = await RealmDialog.wait({
+          window: { title: "Make a Realms map" }, rejectClose: false, buttons,
+          content: "<p>Realm: an overview map. Regional: a detailed map linked to a realm. Local: a settlement or place map.</p>"
+        });
+        if (kind === "local") return makeLocalMap(scene);
+        if (kind === "realm") return makeRealmWorld(scene);
+        if (kind !== "regional") return;
+        await makeRealmWorld(scene, { regional: true });
+        if (!scene.getFlag(ID, "world")) return;
+        await scene.setFlag(ID, "regionalMap", true);
+        return game.modules.get(ID).api.regionalMaps.configure(scene);
+      } },
     { name: "Realm world settings", icon: '<i class="fa-solid fa-gear"></i>', condition: (li) => gm() && !!homebrewOf(sceneOf(li)), callback: (li) => worldSettings(sceneOf(li)) },
     { name: "Revert to backup", icon: '<i class="fa-solid fa-rotate-left"></i>', condition: (li) => gm() && !!sceneOf(li)?.getFlag(ID, "homebrewOriginal"), callback: (li) => revert(sceneOf(li)) },
     { name: "Export as module", icon: '<i class="fa-solid fa-file-export"></i>', condition: (li) => gm() && !!exportWorldOf(sceneOf(li)), callback: (li) => exportModule(exportWorldOf(sceneOf(li)),sceneOf(li)?.id) }

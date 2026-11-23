@@ -49,7 +49,19 @@ export class CityTransit {
   party(scene){if(this.partyId){const t=selectedParty(scene,this.partyId);return t?[wrap(t)]:[];}const t=selectedParty(scene);return t?[wrap(t)]:[];}
   members(scene){return this.party(scene).flatMap(t=>groupMembers(t.actor));}
   origin(scene){const first=this.party(scene)[0]?.document;if(!first)throw Error('Place or designate the party token on this settlement map first.');const g=scene.grid.size;return[first.x+(first.width??1)*g/2,first.y+(first.height??1)*g/2];}
-  graph(scene){const data=scene.getFlag(ID,'cityRoads')??{schema:1,revision:0,roads:[]},key=JSON.stringify(data);let entry=this.graphs.get(scene.id);if(entry?.key!==key){entry={key,graph:buildCityGraph(data)};this.graphs.set(scene.id,entry);}return entry.graph;}
+  graph(scene) {
+    const data = scene.getFlag(ID, "cityRoads");
+    const previous = this.graphs.get(scene.id);
+    if (previous && previous.data === data) return previous.graph;
+    const key = JSON.stringify(data);
+    if (previous?.key === key) {
+      previous.data = data;
+      return previous.graph;
+    }
+    const graph = buildCityGraph(data ?? { schema: 1, revision: 0, roads: [] });
+    this.graphs.set(scene.id, { key, data, graph, legs: new Map() });
+    return graph;
+  }
   destination(scene,target){
     if(target.note){const note=scene.notes.get(target.note),rec=note?.getFlag(ID,'local');if(!rec)throw Error('That destination was removed. Choose another place.');return{x:note.x,y:note.y,note:note.id,name:rec.visibility==='hidden'?'Chosen destination':rec.name};}
     const d=scene.dimensions,x=Number(target.x),y=Number(target.y),sx=d?.sceneX??0,sy=d?.sceneY??0;
@@ -63,7 +75,21 @@ export class CityTransit {
     // The route goes by the points the GM set (target.via, in order), each piece along the roads.
     const via=(Array.isArray(target.via)?target.via:[]).map(p=>[Number(p[0]),Number(p[1])]).filter(p=>p.every(Number.isFinite));
     const stops=[this.origin(scene),...via,[destination.x,destination.y]],options={mode,feetPerPixel:cityFeetPerPixel(scene),speeds,maxConnector:Math.max(100,scene.grid.size*3)};
-    const plan=joinCityPlans(stops.slice(1).map((to,i)=>{try{return planCityRoute(this.graph(scene),stops[i],to,options);}catch(e){throw via.length&&i<via.length?Error(`Route point ${i+1}: ${e.message}`):e;}}));
+    const graph = this.graph(scene), { legs } = this.graphs.get(scene.id);
+    const parts = stops.slice(1).map((to, i) => {
+      const from = stops[i], key = JSON.stringify([from, to, options]);
+      try {
+        if (!legs.has(key)) {
+          const leg = planCityRoute(graph, from, to, options);
+          if (legs.size >= 48) legs.delete(legs.keys().next().value);
+          legs.set(key, leg);
+        }
+        return legs.get(key);
+      } catch (error) {
+        throw via.length && i < via.length ? Error(`Route point ${i + 1}: ${error.message}`) : error;
+      }
+    });
+    const plan = parts.length === 1 ? structuredClone(parts[0]) : joinCityPlans(parts);
     const rounded=Math.max(1,Math.ceil(plan.seconds));for(const leg of plan.legs)leg.seconds*=rounded/plan.seconds;plan.seconds=rounded;
     const perRider=farePerRider(game.settings.get(ID,'priceScale'));
     return{plan,destination,mode,perRider,quote:JSON.stringify({plan,perRider,party:this.party(scene)[0]?.document.id,members:this.members(scene).map(a=>a.id)})};

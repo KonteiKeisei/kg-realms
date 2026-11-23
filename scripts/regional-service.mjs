@@ -15,10 +15,10 @@ import {sceneContextEntry} from './foundry-compat.mjs';
 const ID='kg-realms', KEY='regionalMaps';
 const clone=x=>structuredClone(x), esc=x=>foundry.utils.escapeHTML(String(x??''));
 export class RegionalMaps {
-  constructor(options){Object.assign(this,options);this.indexes={};this.networks=new Map();this.writes=Promise.resolve();this.loadErrors={};this.entryPoints={};this.sections={};}
+  constructor(options){Object.assign(this,options);this.indexes={};this.networks=new Map();this.prepared=new Map();this.writes=Promise.resolve();this.loadErrors={};this.entryPoints={};this.sections={};}
   get links(){return game.settings.get(ID,KEY)??{};}
   init(){
-    game.settings.register(ID,KEY,{scope:'world',config:false,type:Object,default:{},onChange:()=>{this.networks.clear();this.onChange?.();}});
+    game.settings.register(ID,KEY,{scope:'world',config:false,type:Object,default:{},onChange:()=>{this.networks.clear();this.prepared.clear();this.onChange?.();}});
     for(const hook of ['getSceneContextOptions','getSceneDirectoryEntryContext'])Hooks.on(hook,(_app,options)=>{
       options.push(sceneContextEntry({name:'Regional map settings',icon:'<i class="fa-solid fa-map-location-dot"></i>',condition:li=>{const scene=this.sceneFrom(li),world=scene?.getFlag(ID,'world');return !!(game.user.isGM&&world&&(this.links[world]||scene.getFlag(ID,'regionalMap')));},callback:li=>this.configure(this.sceneFrom(li)).catch(e=>ui.notifications.error(`KG Realms: ${e.message}`))}));
     });
@@ -28,11 +28,30 @@ export class RegionalMaps {
   async prepare(id){
     const own=this.links[id],root=own?.parent??id,links=Object.values(this.links).filter(l=>l.parent===root);
     if(own&&!game.scenes.get(own.parentScene))throw Error('The parent realm scene is missing. Repair it in Regional map settings.');
-    await Promise.allSettled([root,...links.map(l=>l.world)].map(w=>this.load(w)));
+    const worlds = [root, ...links.map(link => link.world)];
+    await Promise.allSettled(worlds.map(w=>this.load(w)));
     if(this.loadErrors[id])throw this.loadErrors[id];
     if(links.length&&!this.loadErrors[root]){
-      const routes=await this.getRoutes(root,this.indexes[root]),waters=await this.getWaterways?.(root)??{};
-      for(const link of links)if(this.indexes[link.world]){const args=[routes,link,this.indexes[root].sourceMap,this.indexes[link.world].sourceMap,waters];this.entryPoints[link.world]=regionalEntrances(...args);this.sections[link.world]=regionalSections(...args);}
+      const indexes = worlds.map(world => this.loadErrors[world] ? null : this.indexes[world]);
+      const key = JSON.stringify([links, this.revision?.(worlds)]);
+      const cached = this.prepared.get(root);
+      if (cached?.key === key && indexes.every((index, i) => index === cached.indexes[i])) return cached.work;
+      const entry = { key, indexes };
+      entry.work = (async () => {
+        const [routes, waters] = await Promise.all([this.getRoutes(root, indexes[0]), this.getWaterways?.(root)]);
+        if (this.prepared.get(root) !== entry) return this.prepared.get(root)?.work;
+        for (const [i, link] of links.entries()) {
+          if (!indexes[i + 1]) continue;
+          const args = [routes, link, indexes[0].sourceMap, indexes[i + 1].sourceMap, waters ?? {}];
+          this.entryPoints[link.world] = regionalEntrances(...args);
+          this.sections[link.world] = regionalSections(...args);
+        }
+      })().catch(error => {
+        if (this.prepared.get(root) === entry) this.prepared.delete(root);
+        throw error;
+      });
+      this.prepared.set(root, entry);
+      return entry.work;
     }
   }
   entrances(world){const link=this.links[world],entries=this.entryPoints[world]??link?.entrances??[];return this.indexes[world]?adjustedEntrances(entries,this.getEdits?.(world)?.edits,this.indexes[world].sourceMap):entries;}
@@ -100,7 +119,8 @@ export class RegionalMaps {
     if(!links.length)return null;
     await this.prepare(id);
     for(const link of links)if(this.loadErrors[link.world])throw Error(`${link.title}: regional map data is unavailable. Restore it before planning through this realm.`);
-    const key=JSON.stringify([links,this.revision?.(),[id,...links.map(l=>l.world)].map(w=>this.indexes[w]?.sourceMap)]);
+    const worlds = [id, ...links.map(link => link.world)];
+    const key=JSON.stringify([links,this.revision?.(worlds),worlds.map(w=>this.indexes[w]?.sourceMap)]);
     if(this.networks.get(id)?.key===key)return this.networks.get(id).network;
     const contexts=await Promise.all(links.map(async link=>{
       const data=this.indexes[link.world],grid=await this.getTerrain(link.world,data),projection=sourceProjection(data.sourceMap);

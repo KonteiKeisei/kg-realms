@@ -16,7 +16,7 @@ export function applyHeight(el, h) {
     // Only the body scrolls: never shorter than everything else (header, tabs, pinned rows, footer)
     // plus a little of the body, or those spill out past the bottom edge and cover the grip.
     let fixed = 0;
-    for (const c of el.children ?? []) if (!c.matches(".body, .kgr-grip") && getComputedStyle(c).position !== "absolute") fixed += c.offsetHeight;
+    for (const c of el.children ?? []) if (!c.matches(".body, .kgr-grip, .kgr-hud-editor") && getComputedStyle(c).position !== "absolute") fixed += c.offsetHeight;
     const min = Math.max(MIN_H, fixed + 80);
     // The screen still wins: a panel never runs off the bottom of the window.
     el.style.height = `${Math.min(available, Math.max(min, h))}px`;

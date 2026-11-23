@@ -128,6 +128,43 @@ body .kgr-ui header.kgr-sh .kgr-sh-ctls > button:hover:not(:disabled) {
   border-color: var(--kgr-accent); color: var(--kgr-accent);
 }
 
+body .application.kgr-ui > .window-header > button[data-action="close"] {
+  margin-inline-start: auto;
+}
+body .kgr-ui :is(.window-header > button[data-action="close"], header.kgr-sh .kgr-sh-ctl:has(> .fa-xmark), .kgr-search .bar > .close),
+body .kgr-ui.kgr-search .bar > .close {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  inline-size: 26px;
+  block-size: 26px;
+  min-block-size: 26px;
+  padding: 0;
+  border: 1px solid var(--kgr-line-2);
+  border-radius: 4px;
+  background: var(--kgr-input);
+  color: var(--kgr-text);
+  font-size: 0;
+}
+body .kgr-ui :is(.window-header > button[data-action="close"], header.kgr-sh .kgr-sh-ctl:has(> .fa-xmark), .kgr-search .bar > .close)::before,
+body .kgr-ui.kgr-search .bar > .close::before {
+  content: none;
+}
+body .kgr-ui :is(.window-header > button[data-action="close"], header.kgr-sh .kgr-sh-ctl:has(> .fa-xmark)) > i,
+body .kgr-ui.kgr-search .bar > .close > i {
+  display: none;
+}
+body .kgr-ui :is(.window-header > button[data-action="close"], header.kgr-sh .kgr-sh-ctl:has(> .fa-xmark))::after,
+body .kgr-ui.kgr-search .bar > .close::after {
+  content: "";
+  inline-size: 12px;
+  block-size: 12px;
+  background:
+    linear-gradient(45deg, transparent 43%, currentColor 44% 56%, transparent 57%),
+    linear-gradient(-45deg, transparent 43%, currentColor 44% 56%, transparent 57%);
+}
+
 /* Inputs, action buttons and inset content use the darker surface of the selected theme. */
 body .kgr-ui :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea) {
   background: var(--kgr-input); color: var(--kgr-text); border: 1px solid var(--kgr-line-3);

@@ -1,3 +1,4 @@
+import { mountHudEditor, unmountHudEditor } from "./hud-mode.mjs";
 import {RealmDialog} from "./ui-theme.mjs";
 // The GM's Local places panel on a local map, with its own marker editing, in the panel shell
 // (ui-shell.mjs), with three tabs:
@@ -69,7 +70,7 @@ export class LocalEditor {
     this.editScene = this.scene;
     this.el = document.createElement("div");
     this.el.className = "kgr-ui kgr-panel kgr-editor kgr-local-editor";
-    document.body.append(this.el);
+    this.hud = mountHudEditor(this.maps.editorHost?.(), this.el);
     this.el.addEventListener("click", (e) => this.#click(e));
     this.el.addEventListener('change',async e=>{
       if(e.target.matches('[data-place-type]')){const select=e.target,note=this.scene.notes.get(select.dataset.note);select.disabled=true;try{await this.maps.changePlaceType(note,select.value);}catch(error){ui.notifications.error(`KG Realms: ${error.message}`);}this.render();return;}
@@ -81,7 +82,7 @@ export class LocalEditor {
     this.el.addEventListener("keydown", (e) => { const row = e.target.closest?.(".kgr-local-row[data-note]"); if (row && e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); const note = this.scene.notes.get(row.dataset.note); if (note) this.maps.open(note); } });
     this.el.addEventListener("toggle", (e) => { const k = e.target.dataset?.sec; if (k && !e.target.closest(".kgr-sh-host")) this.shut[e.target.open ? "delete" : "add"](k); }, true);
     // Movable by its header like every panel; double-click the header to put it back under the bar.
-    movable(this.el, "local", { moved: () => { editBar.anchor(this.el, false); this.el.classList.remove("kgr-anchored"); }, redock: () => this.render() });
+    if (!this.hud) movable(this.el, "local", { moved: () => { editBar.anchor(this.el, false); this.el.classList.remove("kgr-anchored"); }, redock: () => this.render() });
     this.offCanvas = onCanvas({ pointerdown: this.onDown, pointermove: this.onMove, pointerup: this.onUp, pointercancel: this.onCancel, lostpointercapture: this.onCancel });
     window.addEventListener("blur", this.onCancel);
     document.addEventListener("keydown", this.onKey, { capture: true });
@@ -94,6 +95,7 @@ export class LocalEditor {
     ];
     this.render();
     this.maps.editorOpened?.(this.scene);
+    this.el?.querySelector('[data-act="close"]')?.focus();
   }
 
   close() {
@@ -107,7 +109,8 @@ export class LocalEditor {
     for (const [name, id] of this.hooks ?? []) Hooks.off(name, id);
     this.hooks = null;
     editBar.anchor(this.el, false);
-    this.el?.remove();
+    unmountHudEditor(this.hud, this.el);
+    this.hud = null;
     this.el = null;
     this.placing = null;
     this.lastMarkerClick = null;
@@ -133,7 +136,7 @@ export class LocalEditor {
     if (!map) return this.close();
     const tab = this.tab, notes = this.#notes();
     const roadsCount = this.scene.getFlag(MODULE_ID, "cityRoads")?.roads?.length ?? 0;
-    const head = shellHead({ icon: "fa-map-location-dot", eyebrow: "Local places", title: map.name, lock: { attr: 'data-act="lock"', on: isLocked("local") }, min: { attr: 'data-act="min"', on: !!panelState("local").min }, close: { attr: 'data-act="close"' } });
+    const head = shellHead({ icon: "fa-map-location-dot", eyebrow: "Editing map", title: map.name, lock: this.hud ? null : { attr: 'data-act="lock"', on: isLocked("local") }, min: this.hud ? null : { attr: 'data-act="min"', on: !!panelState("local").min }, extra: this.hud ? '<button type="button" class="kgr-done-editing" data-act="close">Done editing</button>' : "", close: this.hud ? null : { attr: 'data-act="close"' } });
     const tabs = shellTabs([["places", TABS.places[0], TABS.places[1], notes.length], ["roads", TABS.roads[0], TABS.roads[1], roadsCount], ["style", TABS.style[0], TABS.style[1]]], tab, { attr: "data-local-tab", label: "Local places" });
     if (tab === "roads") {
       // The road editor draws into its host: kept across redraws (its scroll and fields stay).
@@ -153,7 +156,7 @@ export class LocalEditor {
     } else {
       const body = this.el.querySelector(":scope > .body"), scroll = this.renderedTab === tab ? body?.scrollTop ?? 0 : 0;
       this.el.innerHTML = `${head}${tabs}<div class="body">${tab === "style" ? this.#style(map) : this.#places(map, notes)}</div>
-        <div class="kgr-sh-foot"><button data-act="travel" title="Plan a trip in this settlement"><i class="fa-solid fa-horse"></i> Travel here</button><span class="kgr-sh-sp"></span><button data-act="import"><i class="fa-solid fa-file-import"></i> Import</button><button data-act="export"><i class="fa-solid fa-file-export"></i> Export</button></div>`;
+        <div class="kgr-sh-foot"><details><summary>More map actions</summary><button type="button" data-act="import">Import places</button><button type="button" data-act="export">Export places</button></details></div>`;
       const nb = this.el.querySelector(":scope > .body");
       if (nb) nb.scrollTop = scroll;
       if (tab === "style") paintIconPackPreview(this.el.querySelector('[data-icon-pack-preview]'),resolvedIconPack(map),[CATEGORIES.inn.glyph,CATEGORIES.shop.glyph,CATEGORIES.harbour.glyph]);
@@ -162,6 +165,7 @@ export class LocalEditor {
     }
     this.renderedTab = tab;
     // Where it was left, else under the editing bar; minimised or whole.
+    if (this.hud) return;
     if (placeKept(this.el, "local")) { editBar.anchor(this.el, false); this.el.classList.remove("kgr-anchored"); } else editBar.anchor(this.el);
     this.el.classList.toggle("locked", isLocked("local"));
     applyMin(this.el, panelState("local").min);
@@ -213,7 +217,7 @@ export class LocalEditor {
       title: `Editing ${map.name}`, mode: TABS[this.tab]?.[0] ?? "Local places", done: "Done editing", onDone: () => this.close(),
       hint: this.placing ? `Click the map to place ${this.placing.name}` : "Click a place for its card · drag a marker to move it",
       esc: this.placing ? "cancels placing" : "leaves editing", tip: this.placing ? `Click to place ${this.placing.name}` : "", crosshair: !!this.placing,
-      ...st
+      ...st, hideDone: !!this.hud
     };
     if (editBar.owner === this) editBar.update(this, bar); else editBar.show(this, bar);
   }
@@ -236,7 +240,6 @@ export class LocalEditor {
     if (act === "lock") { await toggleLocked("local"); return this.render(); }
     if (act === "min") { await setPanelState("local", { min: !panelState("local").min }); return this.render(); }
     if (act === "settings") return this.maps.settings(this.scene);
-    if (act === "travel") { this.close(); return this.maps.travel?.(); }
     if (act === "locate") { const note = this.scene.notes.get(actEl.dataset.note); if (note) canvas.animatePan({ x: note.x, y: note.y, duration: 400 }); return; }
     if(act==='delete-place'){const note=this.scene.notes.get(actEl.dataset.note);if(note&&await RealmDialog.confirm({window:{title:'Delete place permanently'},content:`<p>Delete ${esc(this.maps.localOf(note).name)} from this world? It will not return when the companion reloads.</p>`,rejectClose:false}))await this.maps.deletePlace(note);return;}
     if(act==='restore-source'){if(await RealmDialog.confirm({window:{title:'Restore deleted source places'},content:'<p>Restore deleted places from the companion preset? Existing places and your edits are kept.</p>',rejectClose:false}))await this.maps.restoreSourcePlaces(this.scene);this.render();return;}

@@ -1,3 +1,4 @@
+import { mountHudEditor, unmountHudEditor } from "./hud-mode.mjs";
 // The GM's map editor: one panel, one button. Tabs switch what clicks on the map do:
 //  Places:     add, move and mark places (each place's card holds the rest).
 //  Roads:      roads and trails.
@@ -34,7 +35,7 @@ export class MapEditor {
 
   toggle(on = !this.active) { on ? this.open() : this.close(); }
 
-  async open() {
+  async open({ hud } = {}) {
     if (this.active || !game.user.isGM) return;
     this.active = true;
     this.el = document.createElement("div");
@@ -42,8 +43,8 @@ export class MapEditor {
     this.el.innerHTML = `${this.#head()}
       ${shellTabs(Object.entries(TABS).filter(([k]) => this.tabs[k]).map(([k, [icon, label]]) => [k, label, icon]), this.tab, { label: "Map editor", stacked: true }).replace("kgr-sh-tabs", "kgr-sh-tabs kgr-editor-tabs")}
       <div class="body"></div>`;
-    applyMin(this.el, panelState("mapEditor").min);
-    document.body.append(this.el);
+    this.hud = mountHudEditor(hud, this.el);
+    if (!this.hud) applyMin(this.el, panelState("mapEditor").min);
     this.el.querySelector("nav").addEventListener("click", (e) => { const t = e.target.closest("[data-tab]")?.dataset.tab; if (t) this.show(t); });
     // The window controls: lock, minimise, close (the shell's header, redrawn as they change).
     this.el.addEventListener("click", async (e) => {
@@ -55,18 +56,21 @@ export class MapEditor {
     this.#lockButton();
     // Where it goes: where it was put (dragged by its header while unlocked), else under the bar
     // against the sidebar. Its height: as set with its grip, else to fit.
-    dragByHeader(this.el, { locked: () => !!get("mapEditorLocked"), save: (x, y) => { set("mapEditorX", x); set("mapEditorY", y); this.#placed(); } });
-    heightGrip(this.el, (h) => set("mapEditorH", h));
+    if (!this.hud) {
+      dragByHeader(this.el, { locked: () => !!get("mapEditorLocked"), save: (x, y) => { set("mapEditorX", x); set("mapEditorY", y); this.#placed(); } });
+      heightGrip(this.el, (h) => set("mapEditorH", h));
+      this.#position();
+      this.onResize = () => this.#position();
+      window.addEventListener("resize", this.onResize);
+    }
     editBar.show(this, this.#bar());
-    this.#position();
-    this.onResize = () => this.#position();
-    window.addEventListener("resize", this.onResize);
     await this.show(this.tab);
+    this.el?.querySelector('[data-shell="close"]')?.focus();
   }
 
   /** The header (ui-shell.mjs): the open tab's name as the title. */
   #head() {
-    return shellHead({ icon: "fa-pen-ruler", eyebrow: "Map editor", title: TABS[this.tab]?.[1] ?? "", lock: { attr: 'data-shell="lock"', on: !!get("mapEditorLocked") }, min: { attr: 'data-shell="min"', on: !!panelState("mapEditor").min }, close: { attr: 'data-shell="close"', title: "Done editing" } });
+    return shellHead({ icon: "fa-pen-ruler", eyebrow: "Map editor", title: TABS[this.tab]?.[1] ?? "", lock: this.hud ? null : { attr: 'data-shell="lock"', on: !!get("mapEditorLocked") }, min: this.hud ? null : { attr: 'data-shell="min"', on: !!panelState("mapEditor").min }, extra: this.hud ? '<button type="button" class="kgr-done-editing" data-shell="close">Done editing</button>' : "", close: this.hud ? null : { attr: 'data-shell="close"', title: "Done editing" } });
   }
 
   /** Redraw the header (the lock, minimise and title follow their state). */
@@ -111,7 +115,7 @@ export class MapEditor {
   /** What the editing bar says for the open tab, from the tab's own state. */
   #bar() {
     const st = this.tabs[this.tab]?.status?.() ?? {};
-    return { title: "Editing the map", mode: TABS[this.tab][1], done: "Done editing", undo: true, note: this.note, onDone: () => this.onClose?.() ?? this.close(), ...st };
+    return { title: "Editing the map", mode: TABS[this.tab][1], done: "Done editing", undo: true, note: this.note, onDone: () => this.onClose?.() ?? this.close(), ...st, hideDone: !!this.hud };
   }
 
   close() {
@@ -120,7 +124,8 @@ export class MapEditor {
     for (const t of new Set(Object.values(this.tabs))) t.close();
     if (this.onResize) window.removeEventListener("resize", this.onResize);
     editBar.anchor(this.el, false);
-    this.el?.remove();
+    unmountHudEditor(this.hud, this.el);
+    this.hud = null;
     this.el = null;
     editBar.hide(this);
   }

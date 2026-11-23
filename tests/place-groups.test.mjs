@@ -3,6 +3,37 @@ import assert from 'node:assert/strict';
 import {parseHTML} from 'linkedom';
 import {PinEditor} from '../scripts/ui-pins.mjs';
 
+test("clicking the custom marker's delete icon removes it without assigning it", async () => {
+  const {document,window} = parseHTML("<html><body></body></html>");
+  let confirmations = 0, assignments = 0;
+  Object.assign(globalThis, {
+    document, window, game: {user: {isGM: true}},
+    fetch: async () => ({json: async () => []}),
+    foundry: {
+      utils: {escapeHTML: String, getRoute: String},
+      applications: {api: {DialogV2: {confirm: async () => { confirmations++; return true; }}}}
+    }
+  });
+  const place = {id: "town", name: "Town", kind: "settlement", class: "Town", lon: 1, lat: 1};
+  let markers = {saltmarsh: {name: "Saltmarsh", src: "saltmarsh.webp"}};
+  const editor = new PinEditor({
+    getLayer: () => ({frame: {}, setAreaEdit() {}}), getPlaces: () => [place], getPlace: () => place,
+    getMarkers: () => markers, saveMarkers: async update => { markers = update(markers); },
+    saveEdits: async () => { assignments++; }
+  });
+  await editor.open();
+  editor.select(place.id);
+  editor.panel.querySelector('[data-act="markers"]').click();
+  const remove = editor.panel.querySelector('button[data-act="delete-marker"]');
+  assert.equal(remove.getAttribute("aria-label"), "Delete marker: Saltmarsh");
+  remove.querySelector("i").dispatchEvent(new window.Event("click", {bubbles: true}));
+  await new Promise(setImmediate);
+  assert.equal(confirmations, 1);
+  assert.equal(assignments, 0);
+  assert.deepEqual(markers, {});
+  editor.close();
+});
+
 test('place groups start collapsed and search expansion is discarded when search clears or the editor reopens',async()=>{
   const {document,window}=parseHTML('<html><body></body></html>');
   Object.assign(globalThis,{document,window,game:{user:{isGM:true}},foundry:{utils:{escapeHTML:String,getRoute:String}},fetch:async()=>({json:async()=>[]}),localStorage:{getItem:()=> '["kind:settlement","kind:realms","settlement|Town"]'}});

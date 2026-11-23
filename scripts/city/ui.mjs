@@ -23,18 +23,26 @@ export class SettlementTravelUI {
     registerPanelPlace();
     this.fleet.install();
     this.hud.install();
-    Hooks.on('updateActor',()=>{if(this.el)this.render();});
-    Hooks.on('getSceneControlButtons',controls=>{
-      if(!game.user.isGM||!canvas.scene?.getFlag(ID,'localMap')||!controls.notes)return;
-      controls.notes.tools.kgRealmsCityRoads={name:'kgRealmsCityRoads',title:'Settlement roads (avenue, street, lane, alley)',icon:'fa-solid fa-road',order:102,button:true,onChange:()=>this.openRoads()};
-      controls.notes.tools.kgRealmsCityTravel={name:'kgRealmsCityTravel',title:'Plan a trip in this settlement',icon:'fa-solid fa-horse',order:103,button:true,onChange:()=>this.open()};
+    Hooks.on('updateActor', (actor, changes) => {
+      if (!this.el) return;
+      if (actor.id === this.partyId || (("name" in changes || "img" in changes) && this.controller.members(this.scene).some(member => member.id === actor.id))) this.render();
     });
+
     Hooks.on('canvasTearDown',()=>{this.close();this.editor.close({save:false});this.graphics?.destroy();this.graphics=null;});
     Hooks.on('canvasReady',()=>this.paint());
     Hooks.on('canvasPan',()=>{if(this.frame!=null)return;this.frame=requestAnimationFrame(()=>{this.frame=null;this.paint();this.editor.paint();});});
     Hooks.on('updateScene',(scene,changes)=>{if(scene.id!==this.scene?.id)return;if(changes.flags?.[ID]?.cityRoads||Object.keys(changes).some(k=>k.startsWith(`flags.${ID}.cityRoads`)))this.render();});
-    Hooks.on('updateToken',(token,changes)=>{if(token.parent?.id===this.scene?.id&&('x'in changes||'y'in changes)&&!tripActive(this.controller.ride))this.render();});
+    Hooks.on('updateToken',(token,changes)=>{if(token.parent?.id===this.scene?.id&&token.actor?.id===this.partyId&&('x'in changes||'y'in changes)&&!tripActive(this.controller.ride))this.render();});
     Hooks.on('updateSetting',setting=>{if([`${ID}.priceScale`,`${ID}.cityWalkMph`,`${ID}.cityCarriageMph`].includes(setting.key))this.render();});
+  }
+  suspendPlanning(on) {
+    this.planningSuspended = on;
+    this.arm();
+    if (!on) {
+      if (this.el && this.planDirty) this.render();
+      else this.hud.render();
+    }
+    this.paint();
   }
   dock(){this.hud.dock();}
   /** Settlement roads: the Roads tab of the Local places editor. */
@@ -55,7 +63,7 @@ export class SettlementTravelUI {
     if(game.settings.get(ID,'cityHudMin'))await game.settings.set(ID,'cityHudMin',false);
     this.el=this.hud.slot('body');this.foot=this.hud.slot('foot');
     // Esc: finish editing the route, else back to the HUD.
-    this.menuKey=e=>{if(e.key!=='Escape'||e.target.closest?.('input,textarea,select'))return;e.preventDefault();e.stopImmediatePropagation();if(this.routeEditing){this.routeEditing=false;this.render();}else this.close();};document.addEventListener('keydown',this.menuKey,true);
+    this.menuKey=e=>{if(this.planningSuspended||e.key!=='Escape'||e.target.closest?.('input,textarea,select'))return;e.preventDefault();e.stopImmediatePropagation();if(this.routeEditing){this.routeEditing=false;this.render();}else this.close();};document.addEventListener('keydown',this.menuKey,true);
     for(const part of [this.el,this.foot])part.addEventListener('click',e=>this.action(e).catch(error=>{ui.notifications.error(error.message);this.render();}));
     this.el.addEventListener('change',e=>{if(e.target.name==='waive'){this.waive=e.target.checked;this.render();}if(e.target.name==='member'){e.target.checked?this.going.add(e.target.value):this.going.delete(e.target.value);this.render();}});
     // The search box and the left-behind party's name: kept as typed, without redrawing the panel.
@@ -68,7 +76,10 @@ export class SettlementTravelUI {
   /** The way chosen: on foot or by coach (by coach when there is one, until the GM picks). */
   chosen(){const coach=this.coachPreview?.plan.boardingCount?this.coachPreview:null;return this.mode==='walk'?this.walkPreview:this.mode==='coach'?coach??this.walkPreview:coach??this.walkPreview;}
   render(){
-    if(!this.el||this.picking)return;const scene=this.scene;if(!scene||scene!==canvas.scene)return this.close();
+    if (!this.el || this.picking) return;
+    if (this.planningSuspended) { this.planDirty = true; return; }
+    this.planDirty = false;
+    const scene=this.scene;if(!scene||scene!==canvas.scene)return this.close();
     if(tripActive(this.controller.ride))return this.close();
     const all=this.controller.members(scene),members=all.filter(a=>this.going.has(a.id)),staying=all.filter(a=>!this.going.has(a.id));
     const notes=Array.from(scene.notes??[]).map(n=>({note:n,rec:n.getFlag(ID,'local')})).filter(x=>x.rec).sort((a,b)=>a.rec.name.localeCompare(b.rec.name));
@@ -112,7 +123,7 @@ export class SettlementTravelUI {
    * route (route points: click the roads to add one, drag one to move it, right-click one to remove it).
    */
   arm(){
-    const want=this.el&&(!this.target||this.routeEditing)?(this.target?'route':'choose'):null;
+    const want=!this.planningSuspended&&this.el&&(!this.target||this.routeEditing)?(this.target?'route':'choose'):null;
     if(want===this.armed)return;this.offPick?.();this.offPick=null;this.armed=want;
     const view=canvas.app?.view;if(view){if(want&&this.previousCursor===undefined)this.previousCursor=view.style.cursor;view.style.cursor=want?'crosshair':this.previousCursor??'';if(!want)this.previousCursor=undefined;}
     if(!want)return;
@@ -140,7 +151,7 @@ export class SettlementTravelUI {
   paint(){
     if(!canvas.ready||!canvas.interface)return;
     const journeys=this.fleet.active().filter(([,r])=>r.scene===canvas.scene?.id),focus=journeys.length===1?journeys[0][0]:this.hud.focus;
-    const planning=this.el&&!this.picking?this.preview?.plan:null;
+    const planning=this.el&&!this.picking&&!this.planningSuspended?this.preview?.plan:null;
     if(!journeys.length&&!planning){this.graphics?.clear();return;}
     if(!this.graphics||this.graphics.destroyed){this.graphics=new PIXI.Graphics();this.graphics.eventMode='none';canvas.interface.addChild(this.graphics);}
     const g=this.graphics,scale=canvas.stage.scale.x||1;g.clear();

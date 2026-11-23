@@ -97,13 +97,13 @@ export class ChallengeBuilder {
     return `${shellHead({ icon: "fa-dice-d20", eyebrow: "Skill challenge builder", title: d.name || "Skill challenge", close: { attr: 'data-cb="close"' }, extra: `<span class="cb-scene" title="Runs on this scene"><i class="fa-solid fa-image"></i> ${esc(this.scene?.name)}</span>` })}
       <div class="cb-grid">${rail}<div class="cb-main">${main}</div></div>
       <footer class="cb-foot">${status}
-        <span class="cb-io">
+        <details class="cb-io"><summary>Import / export</summary>
           <button type="button" data-cb="import" title="Load a challenge from a .json file, replacing this one"><i class="fa-solid fa-file-import"></i> Import</button>
           <button type="button" data-cb="export" title="Save this challenge as a .json file"><i class="fa-solid fa-file-export"></i> Export</button>
           <input type="file" accept=".json,application/json" data-cb-file hidden>
-        </span>
-        <button type="button" data-cb="preview" ${problems.length || running ? "disabled" : ""} title="${running ? "Finish or close the running challenge first" : "Run through it as the GM, with a switch to the players' view: rolls are quiet and nothing is saved, posted or applied"}"><i class="fa-solid fa-flask"></i> Test this challenge</button>
-        <button type="button" data-cb="save">Save</button>
+        </details>
+        <button type="button" data-cb="preview" ${problems.length || running ? "disabled" : ""} title="${running ? "Finish or close the running challenge first" : "Run through it as the GM, with a switch to the players' view: rolls are quiet and nothing is saved, posted or applied"}"><i class="fa-solid fa-flask"></i> Test draft</button>
+        <button type="button" data-cb="save">Save draft</button>
         ${running ? `<button type="button" data-cb="open-run" class="primary">Open the running challenge</button>` : `<button type="button" data-cb="start" class="primary" ${problems.length ? "disabled" : ""}>Start challenge</button>`}
       </footer>`;
   }
@@ -135,10 +135,10 @@ export class ChallengeBuilder {
     const p = `stages.${i}`;
     const optionSelect = (j) => `<select data-cb-add-option="${i}.${j}" aria-label="Add a skill or check"><option value="">+ Add</option>${OPTION_GROUPS.map(([label, keys]) => `<optgroup label="${label}">${keys.filter((k) => !s.approaches[j].options.includes(k)).map((k) => `<option value="${k}">${esc(optionLabel(k))}</option>`).join("")}</optgroup>`).join("")}</select>`;
     const approaches = s.approaches.map((a, j) => `<div class="cb-appr">
-        <div class="cb-opts">${a.options.map((o) => `<span class="cb-chip">${esc(optionLabel(o))}<button type="button" data-cb="del-option" data-at="${i}.${j}" data-option="${o}" aria-label="Remove ${esc(optionLabel(o))}">×</button></span>`).join("")}${optionSelect(j)}</div>
+        <div class="cb-opts">${a.options.map((o) => `<span class="cb-chip">${esc(optionLabel(o))}<button type="button" data-cb="del-option" data-at="${i}.${j}" data-option="${o}" aria-label="Remove ${esc(optionLabel(o))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></span>`).join("")}${optionSelect(j)}</div>
         <input type="number" min="1" max="40" data-f="${p}.approaches.${j}.dc" value="${a.dc}" aria-label="DC">
         <input type="text" data-f="${p}.approaches.${j}.text" value="${esc(a.text)}" placeholder="What it does in the scene" aria-label="What it does">
-        <button type="button" data-cb="del-approach" data-at="${i}.${j}" class="cb-x" aria-label="Remove this approach">×</button>
+        <button type="button" data-cb="del-approach" data-at="${i}.${j}" class="cb-x" aria-label="Remove this approach"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>`).join("");
     return `<div class="cb-two cb-stagehead">
         <label class="cb-field"><span class="cb-lbl">Stage title</span><input type="text" data-f="${p}.title" value="${esc(s.title)}"></label>
@@ -148,7 +148,7 @@ export class ChallengeBuilder {
       <div class="cb-apprs"><div class="cb-appr head"><span class="cb-lbl">Skills or checks (any one)</span><span class="cb-lbl">DC</span><span class="cb-lbl">What it does in the scene</span><span></span></div>${approaches}
         <button type="button" data-cb="add-approach" data-at="${i}" class="cb-add">+ Add approach</button></div>
       <div class="cb-box"><div class="cb-row"><span class="cb-lbl">Spell shortcuts</span><select data-f="${p}.spellEffect" aria-label="What an allowed spell does">${Object.entries(SPELL_EFFECTS).map(([k, v]) => `<option value="${k}" ${s.spellEffect === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></div>
-        <div class="cb-opts">${s.spells.map((x, k) => `<span class="cb-chip"><i class="fa-solid fa-wand-sparkles"></i>${esc(x)}<button type="button" data-cb="del-spell" data-at="${i}.${k}" aria-label="Remove ${esc(x)}">×</button></span>`).join("")}
+        <div class="cb-opts">${s.spells.map((x, k) => `<span class="cb-chip"><i class="fa-solid fa-wand-sparkles"></i>${esc(x)}<button type="button" data-cb="del-spell" data-at="${i}.${k}" aria-label="Remove ${esc(x)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></span>`).join("")}
           <input type="text" data-cb-spell="${i}" placeholder="Add a spell, then Enter (or drop one)" aria-label="Add a spell" data-cb-drop="spell:${i}"></div>
         <input type="text" data-f="${p}.spellNote" value="${esc(s.spellNote)}" placeholder="A note for the GM (Plant Growth counts only against the briar)" aria-label="Spell note">
         <small class="cb-hint">Players can also ask for spells not listed here; the GM decides.</small></div>
@@ -162,7 +162,7 @@ export class ChallengeBuilder {
     const when = { full: `${d.goal.succ} successes`, partial: d.goal.partial ? `${d.goal.partial}–${d.goal.succ - 1} successes at the end` : "off (partial 0)", fail: `${d.goal.fail} failures${d.goal.partial ? `, or under ${d.goal.partial} at the end` : ""}` };
     const effect = (k, e, j) => {
       const at = `${k}.${j}`, miss = e.uuid && this.missing.has(e.uuid) ? ` <span class="cb-miss" title="Not in this world: drop the right one onto this outcome, then remove this">not found</span>` : "";
-      const del = `<button type="button" data-cb="del-effect" data-at="${at}" aria-label="Remove">×</button>`;
+      const del = `<button type="button" data-cb="del-effect" data-at="${at}" aria-label="Remove"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`;
       const f = (name) => `outcomes.${k}.effects.${j}.${name}`;
       if (e.kind === "item") return `<span class="cb-chip effect"><i class="fa-solid fa-gem"></i>Item: ${esc(e.name)}${miss}${del}</span>`;
       if (e.kind === "journal") return `<span class="cb-chip effect"><i class="fa-solid fa-book-open"></i>Journal: ${esc(e.name)}${miss}${del}</span>`;

@@ -121,7 +121,7 @@ export class LocalMaps {
     this.bar = null;
     this.focus = null; // { scene, note } or { scene, placeId }: where to centre once that scene is drawn
     this.editor = new LocalEditor(this);
-    this.editor.onClose = () => { for(const t of [ui.controls?.controls?.notes?.tools?.kgRealmsLocal,ui.controls?.controls?.tokens?.tools?.kgRealmsEditor])if(t)t.active=false;ui.controls?.render(); };
+    this.editor.onClose = () => { this.editorClosed?.(); const tool=ui.controls?.controls?.kgRealms?.tools?.edit;if(tool)tool.active=false;ui.controls?.render(); };
   }
 
   localMapOf(scene) { return localMapOf(scene); }
@@ -230,14 +230,7 @@ export class LocalMaps {
     Hooks.on("canvasTearDown", () => { this.editor.close(); this.#removeBar(); });
     // A travelling party's position (journey.now) changes neither the way back nor the markers.
     Hooks.on("updateScene", (scene, changes) => { if(scene!==canvas.scene||onlyJourneyProgress(changes))return;if(foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`))this.#drawBar();this.refreshMarkers(scene); });
-    // The GM's Local places tool, with the Journal Notes tools, on a local map.
-    Hooks.on("getSceneControlButtons", (controls) => {
-      if (!game.user.isGM || !localMapOf(canvas.scene) || !controls.notes) return;
-      controls.notes.tools.kgRealmsLocal = {
-        name: "kgRealmsLocal", title: "Local places (add, move, edit, link scenes)", icon: "fa-solid fa-map-location-dot",
-        order: 101, toggle: true, active: this.editor.active, onChange: (event, active) => this.editor.toggle(active)
-      };
-    });
+
     for (const hook of ["getSceneContextOptions", "getSceneDirectoryEntryContext"]) Hooks.on(hook, (app, options) => this.#contextOptions(options));
   }
 
@@ -402,7 +395,6 @@ export class LocalMaps {
     if (!Array.isArray(options)) return;
     const scene = (li) => { const el = li instanceof HTMLElement ? li : li?.[0]; return game.scenes.get(el?.dataset?.entryId ?? el?.dataset?.documentId); };
     options.push(...[
-      { name: "Make local map", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: (li) => game.user.isGM && !localMapOf(scene(li)) && !scene(li)?.getFlag(MODULE_ID, "world"), callback: (li) => this.make(scene(li)) },
       { name: "Local map settings", icon: '<i class="fa-solid fa-map-location-dot"></i>', condition: (li) => game.user.isGM && !!localMapOf(scene(li)), callback: (li) => this.settings(scene(li)) }
     ].map(sceneContextEntry));
   }
@@ -445,6 +437,11 @@ export class LocalMaps {
   }
 
   editorOpened(scene) {
+    const tool = ui.controls?.controls?.kgRealms?.tools?.edit;
+    if (tool && !tool.active) {
+      tool.active = true;
+      ui.controls?.render();
+    }
     for(const tool of [ui.controls?.controls?.tokens?.tools?.kgRealmsEditor,ui.controls?.controls?.notes?.tools?.kgRealmsLocal])if(tool)tool.active=true;
     ui.controls?.render();
     this.entrancePrompts?.delete(`${scene.id}:land`);

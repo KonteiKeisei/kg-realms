@@ -1,17 +1,28 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {sceneEditorTools} from '../scripts/scene-tools.mjs';
+import test from "node:test";
+import assert from "node:assert/strict";
+import { sceneEditorTools } from "../scripts/scene-tools.mjs";
 
-test('GM can configure an ordinary scene before conversion, and edit realm, Regional and local maps from Token Controls',()=>{
-  for(const kind of ['ordinary','realm','regional','local']){
-    const native={name:'select'},controls={tokens:{tools:{select:native}}},scene={id:kind};let opened,editing;
-    sceneEditorTools(controls,{scene,isGM:true,realm:['realm','regional'].includes(kind),local:kind==='local',configure:s=>opened=s,edit:on=>editing=on});
-    controls.tokens.tools.kgRealmsSceneConfig.onChange();assert.equal(opened,scene);assert.equal(controls.tokens.tools.select,native);
-    if(kind==='ordinary')assert.equal(controls.tokens.tools.kgRealmsEditor,undefined);
-    else{controls.tokens.tools.kgRealmsEditor.onChange({},true);assert.equal(editing,true);assert.match(controls.tokens.tools.kgRealmsEditor.title,/Map editor/);}
-    assert.equal(controls.tokens.tools.kgRealmsRegions,undefined);
-  }
+test("Realms adds one group and leaves native controls alone", () => {
+  const native = { select: { name: "select" } };
+  const controls = { tokens: { tools: native }, notes: { tools: {} } };
+  const scene = { id: "realm" };
+  let editing = false;
+  sceneEditorTools(controls, { scene, isGM: true, map: true, canTravel: true, edit: on => { editing = on; } });
+  assert.equal(controls.tokens.tools, native);
+  assert.deepEqual(controls.notes.tools, {});
+  assert.deepEqual(Object.keys(controls.kgRealms.tools), ["travel", "edit", "search"]);
+  controls.kgRealms.tools.edit.onChange({}, true);
+  assert.equal(editing, true);
 });
-test('players do not receive GM editing or scene configuration tools',()=>{
-  const controls={tokens:{tools:{}}};sceneEditorTools(controls,{scene:{id:'realm'},isGM:false,realm:true});assert.deepEqual(controls.tokens.tools,{});
+
+test("tools are scoped by scene and permissions", () => {
+  const scene = { id: "scene" }, controls = {};
+  sceneEditorTools(controls, { scene, isGM: true });
+  assert.equal(controls.kgRealms, undefined);
+  sceneEditorTools(controls, { scene, map: true, isGM: false, canTravel: true });
+  assert.deepEqual(Object.keys(controls.kgRealms.tools), ["travel", "search"]);
+  sceneEditorTools(controls, { scene, map: true, isGM: true, canTravel: false, challenge() {} });
+  assert.deepEqual(Object.keys(controls.kgRealms.tools), ["edit", "search", "challenge"]);
+  sceneEditorTools(controls, { scene, isGM: true, challenge() {} });
+  assert.deepEqual(Object.keys(controls.kgRealms.tools), ["challenge"]);
 });

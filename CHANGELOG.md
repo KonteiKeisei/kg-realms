@@ -1,5 +1,24 @@
 # KG Realms changelog
 
+## 0.99.3: custom marker deletion and scrolling
+
+- Custom marker deletion has a separate button beside the marker. The Places tab scrolls with the editor body.
+
+## 0.99.2: close buttons and road tools
+
+- Close buttons use a consistent X and align to the top-right of Realms windows. The Roads tab uses the same column widths for its tools and file actions.
+
+## 0.99.1: compact Map Editor controls
+
+- Travel form styles stay out of the Map Editor. Place actions and fields use compact rows, and Done editing fits on one line in both HUDs.
+
+## 0.99.0: shared Travel and Map Editor HUD
+
+- Travel switches to map editing in the same HUD on realm, regional and settlement scenes. The Realms Scene Controls group collects the tools available for the current scene and user.
+- Foundry's KG Realms settings group computer preferences and world defaults by task. Harvest difficulty is under Travel and camp. Scene conversion starts from Make a Realms map.
+- Skill challenge GMs can assign an approach by keyboard or drag and drop. The result note sits beside its tracks. Harvest can be hidden while a run continues, and trade profiles preview the replacement before applying it.
+- Route planning reuses regional crossing preparation and unchanged land and settlement legs. Realm routes look up nearby road nodes through an index and report a failed leg from the first planning pass.
+
 ## 0.98.9: success and failure buttons on their tracks
 
 - Skill challenges: the GM's + Success and + Failure buttons are on the Successes and Failures tracks at the top of the panel, not in the bar at the bottom. The bar keeps the optional note, used by the next one pressed.

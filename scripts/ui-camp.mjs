@@ -517,7 +517,7 @@ export class CampPanel {
     const view = views.includes(this.setupView) ? this.setupView : views[0];
     const stage = { tasks, watches: watch, night }[view];
     const next = views[views.indexOf(view) + 1];
-    const labels = { tasks: "Tasks", watches: "Watches", night: "Camp plan" };
+    const labels = { tasks: "Camp activities", watches: "Watches", night: "Camp plan" };
     // The setup's steps, numbered; those behind marked done (each step's one main button leads on).
     const at = views.indexOf(view);
     const nav = `<nav class="camp-dock-nav kgr-camp-steps" aria-label="Camp setup">${views.map((v, i) => `<button type="button" data-camp="view" data-view="${v}" class="${v === view ? "current" : i < at ? "done" : ""}" ${v === view ? 'aria-current="step"' : ""}><span class="num">${i < at ? '<i class="fa-solid fa-check"></i>' : i + 1}</span>${labels[v]}</button>`).join("")}</nav>`;

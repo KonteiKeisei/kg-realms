@@ -64,14 +64,14 @@ export class EncounterBox {
     const open = combat ? this.combatOpen : this.open;
     // 0.97.1: the scene's skill challenge, when it has one, on the first row (shown even folded).
     const sc = this.challenge?.(canvas.scene);
-    const scBtn = sc ? `<button data-act="challenge" class="${sc.running ? "primary" : ""}" title="${esc(sc.running ? `${sc.name} is under way: show its panel` : `Open ${sc.name} to start it`)}"><i class="fa-solid fa-dice-d20"></i> ${sc.running ? "Challenge (running)" : "Skill challenge"}</button>` : "";
+    const scBtn = sc ? `<button data-act="challenge" class="${sc.running ? "primary" : ""}" title="${esc(sc.name)}"><i class="fa-solid fa-dice-d20"></i> Open skill challenge</button>` : "";
     const one = (x, i) => {
       const e = x.e, d = { actors: e.actors ?? (e.actor ? [e.actor] : []), images: e.images ?? [] };
       const assets = assetStrip(d);
       const has = assets || e.pinned;
       // The way back to the realm map is the top bar's (local-maps.mjs), as on every scene. Here: its
       // own buttons in one row, and ending it when a journey waits, which shows even folded for combat.
-      const conclude = x.journey ? `<button data-act="carry-on" class="primary" title="The encounter is over: the journey goes on"><i class="fa-solid fa-play"></i> Conclude</button>` : "";
+      const conclude = x.journey ? `<button data-act="carry-on" class="${sc?.running ? "" : "primary"}" title="Resolve the encounter and return to the journey"><i class="fa-solid fa-play"></i> Conclude encounter</button>` : "";
       const actions = open ? `${e.pinned ? `<button data-act="journal"><i class="fa-solid fa-book-open"></i> Journal</button>` : ""}<button data-act="card"><i class="fa-solid fa-id-card"></i> Card</button>` : "";
       const extra = i === 0 ? scBtn : "";
       return `<div class="encbox-row" data-i="${i}">

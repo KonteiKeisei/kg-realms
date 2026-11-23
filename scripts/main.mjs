@@ -8,6 +8,7 @@ import {registerIntegrationSetup,promptIntegrations} from './integration-setup.m
 import {localMapPicture} from './local-map-tiles.mjs';
 import {PlacedTileLods} from './placed-tile-lods.mjs';
 import {sceneEditorTools} from './scene-tools.mjs';
+import {groupRealmSettings} from './settings-layout.mjs';
 import {dayGate} from './day-gate.mjs';
 Hooks.once('init',registerIntegrationSetup);
 const placedTileLods=new PlacedTileLods();Hooks.once('init',()=>placedTileLods.install());
@@ -27,7 +28,7 @@ import { flagsNeedRedraw, lakeBiome } from "./biome-climate.mjs";
 // The worlds first (worlds.mjs), before anything that loads one: the GM's homebrew worlds saved in
 // this game world (homebrew/), then each world module's on the kgRealmsRegisterWorlds hook (KG Realms:
 // Faerûn registers Toril). A module registering the same id replaces the homebrew copy.
-Hooks.once("init", () => { registerHomebrew(); collectWorlds({ registerWorld }); });
+Hooks.once("init", () => { registerHomebrew({ makeLocalMap: scene => localMaps.make(scene) }); collectWorlds({ registerWorld }); });
 import {bypassPartyEncounter} from './party-encounters.mjs';
 import {writeJourney} from './journey-write.mjs';
 import {writeQueue} from './write-queue.mjs';
@@ -149,7 +150,10 @@ const regional = new RegionalMaps({
   // Crossing markers are the GM's, shown only while the map editor is open (0.97.7).
   showCrossings:()=>game.user.isGM&&!!editor?.active,
   getRoutes:async(id,data)=>{const file=data.routes?await roadFile(worldUrl(id,data.routes)).catch(e=>{throw Error(`${id} roads: ${e.message}`);}):{type:"FeatureCollection",features:[]};const routes=regional.followRoutes(id,applyRouteEdits(regional.withSections(id,file),routeEditsOf(id))),p=sourceProjection(data.sourceMap);return data.sourceMap?smoothRoutes(routes,p.toSource,p.toLonLat):routes;},
-  revision:()=>[setting("placeEdits"),setting("routeEdits"),setting("biomes"),setting("waterways")],
+  revision:(worlds)=>["placeEdits","routeEdits","biomes","waterways"].map(key => {
+    const records = setting(key);
+    return worlds.map(world => records?.[world]);
+  }),
   onChange:()=>{backgroundJourneys.clear();if(canvas.ready){localMaps.refreshNavigation();drawRegion();}}
 });
 Hooks.once("init",()=>regional.init());
@@ -281,6 +285,13 @@ function encounterParentOf(scene) {
   return null;
 }
 const cityTravel=new SettlementTravelUI({localMaps});
+localMaps.editorHost = () => {
+  if (!cityTravel.hud.el) cityTravel.hud.show();
+  cityTravel.suspendPlanning(true);
+  cityTravel.hud.closeRide();
+  return cityTravel.hud.el;
+};
+localMaps.editorClosed = () => cityTravel.suspendPlanning(false);
 const partyManager=new PartyManager({before:scene=>syncJourney(scene,{force:true}),busy:id=>cityTravel.fleet.busy(id),
  // A party splitting mid settlement trip: the trip stops where the party is (unused fares refunded), rather than refusing.
  stopTravel:id=>cityTravel.fleet.worker(id).stop('The party split.'),
@@ -717,6 +728,7 @@ const hud = new TravelHud({
   getLayer: () => regional.viewLayer(layer,current?.region.world),
   getPlaces: travelPlaces,
   getDestinations:()=>regional.destinations(travelWorld()),
+  chooseDestination: (places, pick) => search.open({ data: { places, regions: [], locals: [] }, pick }),
   getRoutes: () => regional.networks.get(travelWorld())?.network.routes ?? (regional.links[current?.region.world]?{type:"FeatureCollection",features:[]}:current?.drawn??current?.routes??{type:"FeatureCollection",features:[]}),
   getEncounters: () => current?regional.encounters(travelWorld(),encountersOf):[],
   getTerrain: () => travelWorld()===current?.region.world?loadTerrain():terrainFor(travelWorld(),regional.indexes[travelWorld()]),
@@ -1083,21 +1095,21 @@ function setMapEditor(on) {
   if (!game.user.isGM || !current) return;
   if (!on) return editor.onClose();
   if (editor.active) return;
-  editor.note = hud.stops?.().length > 1 ? "Travel panel hidden while you edit the map" : "";
-  hud.suspend(true);
+
+  hud.suspend(true, { keepVisible: true });
   layer.setEditing(true);
-  editor.open();
+  editor.open({ hud: hud.el });
   // Regional crossings show while the map editor is open (regional-service.mjs places).
   if (regional.hasCrossings(current.region.world)) refreshPlaces();
-  const tool = ui.controls?.controls?.tokens?.tools?.kgRealmsEditor;
+  const tool = ui.controls?.controls?.kgRealms?.tools?.edit;
   if (tool) { tool.active = true; ui.controls?.render(); }
 }
 editor.onClose = () => {
-  hud.suspend(false);
   layer.setEditing(false);
-  const tool = ui.controls?.controls?.tokens?.tools?.kgRealmsEditor;
+  const tool = ui.controls?.controls?.kgRealms?.tools?.edit;
   if (tool) tool.active = false;
   editor.close();
+  hud.suspend(false);
   if (current && regional.hasCrossings(current.region.world)) refreshPlaces();
   ui.controls?.render();
 };
@@ -1269,6 +1281,7 @@ Hooks.once("init", () => {
   for (const k of ["advancedWatches", "taskForage", "taskConceal", "taskAlarm", "taskProvision"]) register(k, { scope: "world", config: false, type: Boolean, default: false, onChange: () => hud.render() });
   // Harvesting (0.96).
   register("harvestDCs", { scope: "world", config: false, type: Object, default: {}, onChange: () => harvest.render() });
+  harvest.registerSettingsMenu();
   register("harvestHumanoidMeat", { name: "Harvest: eat humanoids and giants", hint: "On: a downed humanoid or giant gives edible meat, as beasts do. Off: they give no meat at all.", scope: "world", config: true, type: Boolean, default: false, onChange: () => harvest.render() });
   register("harvestSpoilage", { name: "Harvest: meat spoils", hint: "On: harvested meat and greens spoil 3 days after the kill, unless Provisioning at camp turns them into rations first.", scope: "world", config: true, type: Boolean, default: false });
   register("campEncounterTable", { scope: "world", config: false, type: String, default: "" });
@@ -1666,6 +1679,7 @@ Hooks.on("renderChatMessageHTML", (message, html) => {
 // Show Perception DC is always on while Tenacity is active: the box is ticked and locked, and says why.
 Hooks.on("renderSettingsConfig", (app, html) => {
   const root = html instanceof HTMLElement ? html : html?.[0];
+  groupRealmSettings(root);
   if (game.user.isGM) partyPicker(root?.querySelector(`[name="${MODULE_ID}.partyActor"]`));
   const gm = root?.querySelector(`[name="${MODULE_ID}.primaryGM"]`);
   if (gm) {
@@ -1774,24 +1788,20 @@ Hooks.on("updateWorldTime", () => {
 /* ---------------------------------------- */
 
 Hooks.on("getSceneControlButtons", (controls) => {
-  const realm=!!regionOf(canvas.scene),local=!realm&&!!canvas.scene?.getFlag(MODULE_ID,'localMap');
-  sceneEditorTools(controls,{scene:canvas.scene,isGM:game.user.isGM,realm,local,active:local?localMaps.editor.active:editor.active,edit:on=>local?localMaps.editor.toggle(on):setMapEditor(on),configure:scene=>scene.sheet.render(true)});
-  // A local map: search its places.
-  if (!regionOf(canvas.scene) && canvas.scene?.getFlag(MODULE_ID, "localMap") && controls.tokens) {
-    controls.tokens.tools.kgRealmsSearch = { name: "kgRealmsSearch", title: "Search this map's places (Ctrl+F)", icon: "fa-solid fa-magnifying-glass-location", order: 100, button: true, onChange: () => search.toggle() };
-    return;
-  }
-  if (!regionOf(canvas.scene)) return;
-  if (controls.tokens) {
-    controls.tokens.tools.kgRealmsSearch = {
-      name: "kgRealmsSearch", title: "Search the map (Ctrl+F)", icon: "fa-solid fa-magnifying-glass-location",
-      order: 100, button: true, onChange: () => search.toggle()
-    };
-    controls.tokens.tools.kgRealmsTravel = {
-      name: "kgRealmsTravel", title: "Travel", icon: "fa-solid fa-person-hiking",
-      order: 101, button: true, onChange: () => planner.open()
-    };
-  }
+  const scene = canvas.scene;
+  const realm = !!regionOf(scene), local = !realm && !!scene?.getFlag(MODULE_ID, "localMap");
+  sceneEditorTools(controls, {
+    scene, isGM: game.user.isGM, map: realm || local, canTravel: realm || isPrimaryGM(),
+    active: local ? localMaps.editor.active : editor.active,
+    edit: on => local ? localMaps.editor.toggle(on) : setMapEditor(on),
+    travel: () => {
+      if (local) return localMaps.editor.active ? localMaps.editor.close() : cityTravel.open();
+      if (editor.active) return setMapEditor(false);
+      return planner.open();
+    },
+    search: () => search.toggle(),
+    challenge: challenges.allowed(scene) ? () => challenges.openFrom(scene) : null
+  });
 });
 
 Hooks.on("renderSceneDirectory", (app, html) => {

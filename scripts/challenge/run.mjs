@@ -340,7 +340,7 @@ export class ChallengeRun {
   #tracks(run, small = false) {
     const pips = (n, of, cls) => Array.from({ length: of }, (_, i) => `<span class="sc-pip ${cls} ${i < n ? "on" : ""}"></span>`).join("");
     if (small) return `<span class="sc-tracks small"><span role="img" aria-label="${run.succ} of ${run.goal.succ} successes">${pips(run.succ, run.goal.succ, "ok")}</span><span role="img" aria-label="${run.fail} of ${run.goal.fail} failures">${pips(run.fail, run.goal.fail, "no")}</span></span>`;
-    // The GM's own success or failure sits on its track (0.98.9): nobody's roll, with the note from the GM bar if there is one.
+    // A manual result belongs to its track and consumes the optional note beside the tracks.
     const mark = (ok) => this.gmView && !run.result ? `<button type="button" data-sc="mark" data-ok="${ok ? 1 : 0}" class="sc-mark" title="Add a ${ok ? "success" : "failure"} that is nobody's roll">+ ${ok ? "Success" : "Failure"}</button>` : "";
     return `<div class="sc-tracks"><div class="sc-track"><span class="sc-lbl">Successes <b class="ok">${run.succ} / ${run.goal.succ}</b></span><span role="img" aria-label="${run.succ} of ${run.goal.succ} successes">${pips(run.succ, run.goal.succ, "ok")}</span>${mark(true)}</div>
       <div class="sc-track"><span class="sc-lbl">Failures <b class="no">${run.fail} / ${run.goal.fail}</b></span><span role="img" aria-label="${run.fail} of ${run.goal.fail} failures">${pips(run.fail, run.goal.fail, "no")}</span>${mark(false)}</div></div>`;
@@ -373,7 +373,8 @@ export class ChallengeRun {
       gmOnly = `${run.stage === 0 && run.hook ? `<p class="sc-read">${esc(run.hook)}</p>` : ""}${stage.read ? `<p class="sc-read">${esc(stage.read)}</p>` : ""}
       <div class="sc-sec"><span class="sc-lbl">Approaches <small>(drag a card onto a character: their player sees only the skills, never the text)</small></span>${approaches}${other}</div>${spells}`;
     }
-    return `${this.#tracks(run)}<div class="sc-rounds">${rounds}</div>
+    const markNote = gm ? '<label class="sc-marknote" data-sc-keep>Note for the next manual result (optional)<input name="marknote" maxlength="300"></label>' : "";
+    return `${this.#tracks(run)}${markNote}<div class="sc-rounds">${rounds}</div>
       ${gmOnly}
       ${this.#mine(run)}
       <div class="sc-sec"><span class="sc-lbl">Taking part</span>${run.party.map((p) => this.#person(run, p, acted)).join("") || `<p class="sc-wait">${gm ? "Nobody yet: add who takes part below." : "The GM is choosing who takes part."}</p>`}</div>
@@ -509,7 +510,10 @@ export class ChallengeRun {
     if (!gm && !done && req) state = `<span class="sc-muted">Asked for a spell</span>`;
     const skip = gm && !acts.length && !mine.length ? `<button type="button" data-sc="skip" data-actor="${p.id}" class="sc-skip" title="Nothing from them this stage">Skip</button>` : "";
     const remove = gm ? `<button type="button" data-sc="remove" data-actor="${p.id}" class="sc-remove" title="Take ${esc(p.name)} out of the challenge: what they already did still counts" aria-label="Remove ${esc(p.name)}"><i class="fa-solid fa-xmark"></i></button>` : "";
-    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}" ${gm ? `data-sc-person="${p.id}"` : ""}><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}${skip}${remove}</span>${lines ? `<div class="sc-lines">${lines}</div>` : ""}</div>`;
+    const assign = gm ? `<div class="sc-lines"><label class="sc-assign" data-sc-keep><span>Approach</span><select data-sc-approach aria-label="Approach for ${esc(p.name)}">
+      ${currentStage(run).approaches.map((approach, index) => `<option value="${index}">${esc(approach.options.map(optionLabel).join(" or "))} (DC ${approach.dc})</option>`).join("")}
+      <option value="else">Something else</option></select><button type="button" data-sc="assign" data-actor="${p.id}">Assign</button></label></div>` : "";
+    return `<div class="sc-person ${acted.has(p.id) ? "acted" : ""}" ${gm ? `data-sc-person="${p.id}"` : ""}><span class="cs-face">${face}</span><span class="sc-who"><b>${esc(p.name)}</b><small>${used ? `Used: ${esc(used)}` : "Nothing used yet"}</small></span><span class="sc-state">${state}${skip}${remove}</span>${lines ? `<div class="sc-lines">${lines}</div>` : ""}${assign}</div>`;
   }
 
   /** A card dropped on a character: an approach set up for them, or the Something else form opened on their row. */
@@ -531,9 +535,8 @@ export class ChallengeRun {
     const blocked = !canAdvance(run);
     const state = !run.party.length ? "Nobody is taking part." : `${everyoneActed(run) ? "Everyone has acted this stage." : `${waiting} still to act${blocked ? ": everyone must act first" : ""}.`}${set ? ` ${set} roll${set === 1 ? "" : "s"} set up, not rolled.` : ""}`;
     const rollAll = set ? `<button type="button" data-sc="roll-all" class="sc-rollall" ${this.rollingAll ? "disabled" : ""} title="Roll every set-up roll now, each with the character's best skill on it, no dialogs"><i class="fa-solid fa-dice"></i> ${this.rollingAll ? "Rolling…" : `Roll all ${set}`}</button>` : "";
-    return `<div class="sc-gmbar"><span class="sc-marknote" data-sc-keep><input name="marknote" maxlength="300" placeholder="Note for your next + Success or + Failure (optional)"></span>
-      <span class="sc-muted grow">${state}</span>${rollAll}
-      <button type="button" data-sc="end-early">End early</button>
+    return `<div class="sc-gmbar"><span class="sc-muted grow">${state}</span>${rollAll}
+      <details><summary>More actions</summary><button type="button" data-sc="end-early">End early</button></details>
       <button type="button" data-sc="next" class="primary" ${blocked ? "disabled" : ""}>${last ? "Finish" : "Next stage"}</button></div>`;
   }
 
@@ -596,6 +599,12 @@ export class ChallengeRun {
     }
     if (!game.user.isGM) return;
     switch (b.dataset.sc) {
+      case "assign": {
+        if (!this.gmView || run.result) return;
+        const card = b.closest(".sc-person")?.querySelector("[data-sc-approach]")?.value;
+        if (card != null) return this.#dropCard(card, a);
+        return;
+      }
       case "view-as": this.asPlayer = !this.asPlayer; this.#resetLocal(); return this.render();
       case "unset": return this.change((r) => unassignRoll(r, b.dataset.pending));
       case "roll-all": return this.#rollAll();
